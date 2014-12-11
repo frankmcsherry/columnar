@@ -4,12 +4,15 @@ This is a pretty simple start to columnar encoding and decoding in Rust. For the
 
 ## Columnar What? ##
 
-Columnarization is a transformation of vectors of structured types to a collection of vectors of base types and lengths. Roughly speaking, it will take a `Vec<(T1, T2)>` and transform it to a `(Vec<T1>, Vec<T2>)` each component of which can be more easily serialized and deserialized. If `T1` and `T2` are not both base types then there is more work to do.
+Columnarization is a transformation of vectors of structured types to a collection of vectors of base types and lengths. Roughly speaking, there are three types of rules we use, depending on what types we are presented with:
 
-If a nested type is a pair, or some other structure, you can just apply the rule again and we'll just get more vectors out. When we re-assemble them we'll need to pay attention to what goes where, but it isn't very complicated.
+`Vec<uint>` : For vectors of base types, we just stop. We can't do any more, and this will encode/decode fast enough.
 
+`Vec<(T1, T2)` : We transform vectors of pairs to pairs of vectors `(Vec<T1>, Vec<T2>)` and recursively process both of the vectors.
 
-If a nested type is a `Vec`, we transform `Vec<Vec<T>>` into `(Vec<uint>, Vec<T>)`, indicating the lengths of the arrays and the concatenated data, separately. We may need to continue recursively on the second vector if it is not yet a base type.
+`Vec<Vec<T>>` : Vectors of vectors are transformed to a pair `(Vec<uint>, Vec<T>)` indicating the lengths and concatenated payloads. We then recursively process both of the vectors.
+
+These rules (and variants of them for other base types, structures, and collections, respectively) allow fast encoding and decoding of a rich set of datatypes.
 
 ## Trying it out ##
 
