@@ -1,0 +1,9 @@
+[package]
+
+name = "columnar"
+version = "0.0.1"
+authors = ["Frank McSherry <fmcsherry@me.com>"]
+
+[dependencies]
+
+time = "0.1.1"
