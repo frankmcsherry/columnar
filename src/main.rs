@@ -30,7 +30,7 @@ fn bench_encode_decode_verify<T:Clone+ColumnarEncode<T>+ColumnarDecode<T, K>+Eq+
 
             for buffer in buffers1.iter() { bytes += buffer.len(); }
 
-            // revers buffers
+            // reverse buffers
             while let Some(buffer) = buffers1.pop() { buffers2.push(buffer); }
 
             for (_index, _element) in ColumnarDecode::decode(&mut buffers2, number, &record).enumerate()
