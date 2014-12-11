@@ -11,11 +11,13 @@ fn main()
     bench_encode_decode_verify(1024, (0u, (3u, 4u)));
 }
 
-fn bench_encode_decode_verify<T:Clone+ColumnarEncode<T>+ColumnarDecode<T, K>+Eq+PartialEq, K:Iterator<T>>(number: uint, record: T)
+fn bench_encode_decode_verify<T, K>(number: uint, record: T)
+where T:Clone+ColumnarEncode<T>+ColumnarDecode<T, K>+Eq+PartialEq,
+      K:Iterator<T>,
 {
     let source = Vec::from_elem(number, record.clone());
 
-    for _ in range(0u, 10)
+    for _ in range(0u, 3)
     {
         let     start = time::precise_time_ns();
         let mut bytes = 0u;

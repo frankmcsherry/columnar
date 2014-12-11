@@ -46,12 +46,13 @@ unsafe fn to_bytes_vec<T>(mut vector: Vec<T>) -> Vec<u8>
     Vec::from_raw_parts(rawptr, length, length)
 }
 
+// Columnar encode and decode implementations for uint
 impl ColumnarEncode<uint> for uint
 {
     #[inline(always)]
     fn encode<'a, K: Iterator<&'a uint>>(writers: &mut Vec<Vec<u8>>, count: uint, iterator: || -> K)
     {
-        encode_batched_test(writers, count, &mut iterator());
+        encode_batched_test(writers, count, iterator());
     }
 }
 
@@ -67,7 +68,11 @@ impl ColumnarDecode<uint, MoveItems<uint>> for uint
     }
 }
 
-impl<T1: ColumnarEncode<T1>, T2: ColumnarEncode<T2>> ColumnarEncode<(T1,T2)> for (T1, T2)
+
+// Columnar encode and decode implementations for pairs
+impl<T1, T2> ColumnarEncode<(T1,T2)> for (T1, T2)
+where T1: ColumnarEncode<T1>,
+      T2: ColumnarEncode<T2>,
 {
     #[inline(always)]
     fn encode<'a, K: Iterator<&'a (T1, T2)>>(writers: &mut Vec<Vec<u8>>, count: uint, iterator: || -> K)
@@ -76,7 +81,11 @@ impl<T1: ColumnarEncode<T1>, T2: ColumnarEncode<T2>> ColumnarEncode<(T1,T2)> for
         ColumnarEncode::encode(writers, count, || iterator().map(|&(_, ref b)| b));
     }
 }
-impl<K1: Iterator<T1>, K2: Iterator<T2>, T1: ColumnarDecode<T1, K1>, T2: ColumnarDecode<T2, K2>> ColumnarDecode<(T1, T2), Zip<K1, K2>> for (T1, T2)
+impl<T1, T2, K1, K2> ColumnarDecode<(T1, T2), Zip<K1, K2>> for (T1, T2)
+where T1: ColumnarDecode<T1, K1>,
+      T2: ColumnarDecode<T2, K2>,
+      K1: Iterator<T1>,
+      K2: Iterator<T2>,
 {
     #[inline(always)]
     fn decode(buffers: &mut Vec<Vec<u8>>, count: uint, _hint: &(T1, T2)) -> Zip<K1, K2>
@@ -89,6 +98,7 @@ impl<K1: Iterator<T1>, K2: Iterator<T2>, T1: ColumnarDecode<T1, K1>, T2: Columna
 }
 
 
+// Columnar encode and decode implementations for vectors
 impl<T: ColumnarEncode<T>> ColumnarEncode<Vec<T>> for Vec<T>
 {
     #[inline(always)]
@@ -126,7 +136,7 @@ impl<T:ColumnarDecode<T, K>, K: Iterator<T>> ColumnarDecode<Vec<T>, VectorIterat
 
 pub struct VectorIterator<T, K: Iterator<T>>
 {
-    iter: K,
+    iter:   K,
     counts: Vec<uint>,
     finger: uint,
 }
@@ -157,10 +167,10 @@ impl<T:'static, K: Iterator<T>> Iterator<Vec<T>> for VectorIterator<T, K>
 
 
 #[inline]
-fn encode_batched_test<'a, T:Copy+'static, K: Iterator<&'a T>>(writers: &mut Vec<Vec<u8>>, count: uint, iterator: &mut K)
+fn encode_batched_test<'a, T:Copy+'static, K: Iterator<&'a T>>(writers: &mut Vec<Vec<u8>>, count: uint, mut iterator: K)
 {
     let mut vector = Vec::with_capacity(count);
-    for i in (*iterator)
+    for i in iterator
     {
         vector.push(*i);
     }
