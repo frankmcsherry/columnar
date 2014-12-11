@@ -8,7 +8,7 @@ Columnarization is a transformation of vectors of structured types to a collecti
 
 `Vec<uint>` : For vectors of base types, we just stop. We can't do any more, and this will encode/decode fast enough.
 
-`Vec<(T1, T2)` : We transform vectors of pairs to pairs of vectors `(Vec<T1>, Vec<T2>)` and recursively process both of the vectors.
+`Vec<(T1, T2)>` : We transform vectors of pairs to pairs of vectors `(Vec<T1>, Vec<T2>)` and recursively process both of the vectors.
 
 `Vec<Vec<T>>` : Vectors of vectors are transformed to a pair `(Vec<uint>, Vec<T>)` indicating the lengths and concatenated payloads. We then recursively process both of the vectors.
 
