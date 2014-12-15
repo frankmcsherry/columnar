@@ -48,16 +48,16 @@ pub trait ColumnarVec<T>
 }
 ```
 
-As records go in to the `ColumnarVec` they are pushed into arrays as discussed above.
+Each of the three cases above have their own implementations, and that is really all their is to the code.
 
 ### uint and base types ###
 
-The implementation for `T = uint` is simply a `Vec<uint>` whose calls to `push` and `pop` fall through. When we need to `encode` and `decode`, we unsafely cast between `Vec<uint>` and a `Vec<u8>` either stashing the result in the list, or popping from the list and installing as the `Vec<uint>`. Any appropriately types (ones where it is safe to use Rust's `from_raw_parts` to assemble a new `Vec` from existing parts) can be implemented this way. I don't actually know what these types are, or if there are any guarantees.
+The `ColumnarVec<uint>` implementation is simply a `Vec<uint>` whose calls to `push` and `pop` fall through. When we need to `encode` and `decode`, we unsafely cast between `Vec<uint>` and a `Vec<u8>` either stashing the result in the list, or popping from the list and installing as the `Vec<uint>`. Any appropriately types (ones where it is safe to use Rust's `from_raw_parts` to assemble a new `Vec` from existing parts) can be implemented this way. I don't actually know what these types are, or if there are any guarantees.
 
 ### Pairs and tuples ###
 
 Importantly, because the record passed in to `push` is now owned by the `ColumnarVec` we can destructure it and push its elements into
-separate typed arrays. For example, the implementation for `T = (T1, T2)` is in terms of a pair of `R1: ColumnarVec<T1>` and `R2: ColumnarVec<T2>`:
+separate typed arrays. For example, the `ColumnarVec<(T1, T2)>` is a pair of `R1: ColumnarVec<T1>` and `R2: ColumnarVec<T2>`:
 
 ```rust
 impl<T1, R1, T2, R2> ColumnarVec<(T1, T2)> for (R1, R2)
@@ -121,7 +121,8 @@ where R1: ColumnarVec<uint>,
     }
 
     // encode and decode just call encode and decode on R1 and R2 fields
+    // ...
 }
 ```
 
-Not only do we flatten down all of the `Vec<T>` vectors to one `Vec<T>`, we also stash the now-empty `Vec<T>`s for later re-use.
+Not only do we flatten down all of the `Vec<T>` vectors to one `Vec<T>`, we also stash the now-empty `Vec<T>`s for later re-use. This means in steady state of encoding and decoding (for example, sending to and receiving from your peers) we don't need to interact very much with the allocator, generally a good state to be in.
