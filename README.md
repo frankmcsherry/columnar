@@ -52,7 +52,7 @@ Each of the three cases above have their own implementations, and that is really
 
 ### uint and base types ###
 
-The `ColumnarVec<uint>` implementation is simply a `Vec<uint>` whose calls to `push` and `pop` fall through. When we need to `encode` and `decode`, we unsafely cast between `Vec<uint>` and a `Vec<u8>` either stashing the result in the list, or popping from the list and installing as the `Vec<uint>`. Any appropriately types (ones where it is safe to use Rust's `from_raw_parts` to assemble a new `Vec` from existing parts) can be implemented this way. I don't actually know what these types are, or if there are any guarantees.
+The `ColumnarVec<uint>` implementation is simply a `Vec<uint>` whose calls to `push` and `pop` fall through. When we need to `encode` and `decode`, we unsafely cast between `Vec<uint>` and a `Vec<u8>` either stashing the result in the list, or popping from the list and installing as the `Vec<uint>`. Any appropriate types (ones where it is safe to use Rust's `from_raw_parts` to assemble a new `Vec` from existing parts) can be implemented this way. I don't actually know what these types are, or if there are any guarantees.
 
 ### Pairs and tuples ###
 
