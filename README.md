@@ -93,7 +93,7 @@ where R1: ColumnarVec<T1>,
 
 ### Vectors and collections ###
 
-One subtle but important point is that `push` takes ownership of the record that comes in. This not only allows us to rip apart the record, but also to retain any memory it has allocated, which can be super helpful to avoid chatting with the allocator when we need to produce output vectors in `pop`. Consider our implementation of `push` and `pop` for `ColumnarVec<Vec<T>>`, which could have just been a pair of `R1: ColumnarVec<uint>` and `R2: ColumnarVec<T>`, but which we augment with a `Vec<Vec<T>>` to stash empty-but-allocated arrays:
+One subtle but important point is that `push` takes ownership of the record that comes in. This not only allows us to rip apart the record, but also to retain any memory it has allocated, which can be super helpful to avoid chatting with the allocator when we need to produce output vectors in `pop`. Consider `push` and `pop` in our implementation of `ColumnarVec<Vec<T>>`, which could have just been a pair of `R1: ColumnarVec<uint>` and `R2: ColumnarVec<T>`, but which we augment with a `Vec<Vec<T>>` to stash empty-but-allocated arrays:
 
 ```rust
 impl<T, R1, R2> ColumnarVec<Vec<T>> for (R1, R2, Vec<Vec<T>>)
