@@ -48,7 +48,7 @@ pub trait ColumnarVec<T>
 }
 ```
 
-Each of the three cases above have their own implementations, and that is really all there is to the code.
+Each of the three cases above have their own implementations, and that is really all there is to the code. Let's take a look at each of them now.
 
 ### uint and base types ###
 
@@ -93,10 +93,10 @@ where R1: ColumnarVec<T1>,
 
 ### Vectors and collections ###
 
-One important but slightly subtle point is that `push` takes ownership of the record that comes in. This not only allows us to rip apart the record, but also to retain any memory it has allocated, which can be super helpful to avoid chatting with the allocator on decoding. Consider our implementation of `push` and `pop` for `ColumnarVec<Vec<T>>`, which could just be a pair of `R1: ColumnarVec<uint>` and `R2: ColumnarVec<T>`, but which we augment with a `Vec<Vec<T>>` to stash empty-but-allocated arrays:
+One subtle but important point is that `push` takes ownership of the record that comes in. This not only allows us to rip apart the record, but also to retain any memory it has allocated, which can be super helpful to avoid chatting with the allocator when decoding. Consider our implementation of `push` and `pop` for `ColumnarVec<Vec<T>>`, which could have just been a pair of `R1: ColumnarVec<uint>` and `R2: ColumnarVec<T>`, but which we augment with a `Vec<Vec<T>>` to stash empty-but-allocated arrays:
 
 ```rust
-impl<T, R1, R2> ColumnarVec<Vec<T>> for (Vec<Vec<T>>, R1, R2)
+impl<T, R1, R2> ColumnarVec<Vec<T>> for (R1, R2, Vec<Vec<T>>)
 where R1: ColumnarVec<uint>,
       R2: ColumnarVec<T>,
 {
@@ -126,3 +126,7 @@ where R1: ColumnarVec<uint>,
 ```
 
 Not only do we flatten down all of the `Vec<T>` vectors to one `Vec<T>`, we also stash the now-empty `Vec<T>`s for later re-use. This means in steady state of encoding and decoding (for example, sending to and receiving from your peers) we don't need to interact very much with the allocator, generally a good state to be in.
+
+## What's next? ##
+
+I'm going to start using it. I'll almost certainly need to add support for a few more types (e.g. `Option<T>`, which has landed), and with enough interest in procedural macros (Rust's codegen) I may try automating implementations for user-defined structs and enums. If you have any thoughts, let me know!
