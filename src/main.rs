@@ -2,45 +2,51 @@ extern crate time;
 extern crate test;
 extern crate core;
 
-use columnar::{ColumnarEncode, ColumnarDecode};
+use columnar::ColumnarVec;
 mod columnar;
 
 fn main()
 {
-    bench_encode_decode_verify(1024, ((0u, (3u, 4u)), (vec![vec![0u, 1u], vec![1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2]])));
-    bench_encode_decode_verify(1024, (0u, (3u, 4u)));
+    println!("Encoding/decoding throughput for {{ uint, (uint, (uint, uint)), Vec<Vec<uint>, and Option<uint> }}.");
+    println!("Caveat: compiler optimizations from whole program analysis; actual performance should be worse.");
+
+    test_columnarization(1024, |i| i);
+    test_columnarization(1024, |i| (i, (i+1, i-1)));
+    test_columnarization(128, |_| vec![vec![0u, 1u], vec![1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2]]);
+    test_columnarization(1024, |i| if i % 2 == 0 { Some(i) } else { None });
 }
 
-fn bench_encode_decode_verify<T, K>(number: uint, record: T)
-where T:Clone+ColumnarEncode<T>+ColumnarDecode<T, K>+Eq+PartialEq,
-      K:Iterator<T>,
+// bounces some elements back and forth between columnar stacks, encoding/decoding ...
+fn test_columnarization<T, R: ColumnarVec<T>>(number: uint, element: |uint|:'static -> T)
 {
-    let source = Vec::from_elem(number, record.clone());
+    let start = time::precise_time_ns();
 
-    for _ in range(0u, 3)
+    let mut stack1 = ColumnarVec::<T>::new();
+    let mut stack2 = ColumnarVec::<T>::new();
+    let mut buffers = Vec::new();
+
+    for index in range(0, number) { stack1.push(element(index)); }
+    stack1.encode(&mut buffers);
+
+    let mut bytes = 0u;     // number of bytes per iteration
+    let mut total = 0u;     // total bytes processed
+
+    for buffer in buffers.iter() { bytes += buffer.len(); }
+
+    while time::precise_time_ns() - start < 1000000000
     {
-        let     start = time::precise_time_ns();
-        let mut bytes = 0u;
+        // decode, move, encode
+        stack1.decode(&mut buffers);
+        while let Some(record) = stack1.pop() { stack2.push(record); }
+        stack2.encode(&mut buffers);
 
-        let mut buffers1 = Vec::new();
-        let mut buffers2 = Vec::new();
+        // decode, move, encode
+        stack2.decode(&mut buffers);
+        while let Some(record) = stack2.pop() { stack1.push(record); }
+        stack1.encode(&mut buffers);
 
-        while time::precise_time_ns() - start < 1000000000
-        {
-            // encode data into buffers
-            ColumnarEncode::encode(&mut buffers1, number, || source.iter());
-
-            for buffer in buffers1.iter() { bytes += buffer.len(); }
-
-            // reverse buffers
-            while let Some(buffer) = buffers1.pop() { buffers2.push(buffer); }
-
-            for (_index, _element) in ColumnarDecode::decode(&mut buffers2, number, &record).enumerate()
-            {
-                if source[_index].ne(&_element) { println!("encode/decode error!"); }
-            }
-        }
-
-        println!("Encoding/decoding/validating at {}GB/s", bytes as f64 / (time::precise_time_ns() - start) as f64)
+        total += 2 * bytes;
     }
+
+    println!("Encoding/decoding at {}GB/s", total as f64 / (time::precise_time_ns() - start) as f64)
 }

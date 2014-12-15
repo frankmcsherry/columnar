@@ -1,6 +1,6 @@
 [root]
 name = "columnar"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "time 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
