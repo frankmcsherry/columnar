@@ -33,8 +33,6 @@ One way to view columnarization, close to the implemented code, is as a transfor
 
 These transformations can be relatively efficient because each of the element moves is of typed data with known size, into a vector of identically typed elements. Once transformed, the data are easily serialized because the vectors of base types can be easily re-cast as vectors of bytes.
 
-Columnarization has the additional advantage, not (yet) exploited here, that it is very efficient to subset the attributes. For example, if one wants to determine the  
-
 ## Implementation details ##
 
 The columnarization is based around a fairly simple trait, `ColumnarVec<T>` implementing the methods `push` and `pop` from Rust's `Vec<T>`, but also the ability to `encode` the contents to a sequence of raw binary arrays, and `decode` a sequence of binary arrays to reload them into the `ColumnarVec`.
