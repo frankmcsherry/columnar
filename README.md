@@ -29,7 +29,7 @@ One way to view columnarization, close to the implemented code, is as a transfor
 
 `Vec<(T1, T2)>` : We transform to `(Vec<T1>, Vec<T2>)` and recursively process both of the vectors.
 
-`Vec<Vec<T>>` : We transform to `(Vec<uint>, Vec<T>)`, containing the vector lengths and concatenated payloads, and recursively process both of the vectors.
+`Vec<Vec<T>>` : We transform to `(Vec<uint>, Vec<T>)`, containing the vector lengths and concatenated payloads, and recursively process the second vector.
 
 These transformations can be relatively efficient because each of the element moves is of typed data with known size, into a vector of identically typed elements. Once transformed, the data are easily serialized because the vectors of base types can be easily re-cast as vectors of bytes.
 
