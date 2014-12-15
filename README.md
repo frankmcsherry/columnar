@@ -48,7 +48,7 @@ pub trait ColumnarVec<T>
 }
 ```
 
-Each of the three cases above have their own implementations, and that is really all their is to the code.
+Each of the three cases above have their own implementations, and that is really all there is to the code.
 
 ### uint and base types ###
 
