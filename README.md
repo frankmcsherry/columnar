@@ -1,11 +1,11 @@
 # Columnar Encoding/Decoding #
 
-This is a pretty simple start to columnar encoding and decoding in Rust. For the moment it just works on uints, pairs, vectors, and combinations thereof. Some extensions are pretty obvious (to other base types, tuples of other arities), and you can implement the trait for your own structs and enumerations with just a bit of copy/paste, but I'll need to get smarter to handle these automatically.
+This is a pretty simple start to columnar encoding and decoding in Rust. For the moment it just works on integers (unsigned, signed, and of varying widths), pairs, vectors, options, and combinations thereof. Some extensions are pretty obvious (to other base types, tuples of other arities), and you can implement the trait for your own structs and enumerations with just a bit of copy/paste, but I'll need to get smarter to handle these automatically.
 
 
 ## Trying it out ##
 
-Once you've got the repository, Rust and Cargo, just type `cargo run --release` and it should start showing you throughput for encoding and decoding the results. Popping open `main.rs` should let you see how to encode and decode different sorts of objects.
+Once you've got the repository, Rust and Cargo, you should be able to type `cargo build`. This shouldn't do very much. Typing `cargo test` will spin up the testing subsystem and build `examples/example.rs`, which does some measurement. Unfortunately, at the moment cargo only builds tests without optimizations, so this thoughtful example, which you can run using `./target/examples/example` will show some pretty dodgy numbers. Instead, you can trust me when I say:
 
 For example, for the type `(uint, (uint, uint))` we see the pretty sweet results:
 ```
@@ -129,4 +129,8 @@ Not only do we flatten down all of the `Vec<T>` vectors to one `Vec<T>`, we also
 
 ## What's next? ##
 
-I'm going to start using it. I'll almost certainly need to add support for a few more types (e.g. `Option<T>`, which has landed), and with enough interest in procedural macros (Rust's codegen) I may try automating implementations for user-defined structs and enums. If you have any thoughts, let me know!
+I'm going to start using it. I'll almost certainly need to add support for a few more types (e.g. `Option<T>`, which has landed), and with enough interest in procedural macros (Rust's codegen) I may try automating implementations for user-defined structs and enums.
+
+I should go ahead and add support for the always popular `String` type, and probably make a default implementation of `Encodable` and `Decodable` for anything implementing the `ColumnarVec` trait.
+
+If you have any other thoughts, let me know!
