@@ -1,9 +1,21 @@
 [package]
 
 name = "columnar"
-version = "0.0.2"
+version = "0.0.3"
 authors = ["Frank McSherry <fmcsherry@me.com>"]
 
+description = "High-throughput serialization and deserialization for some Rust types"
+
+# These URLs point to more information about the repository
+documentation = "http://github.com/frankmcsherry/columnar"
+homepage = "http://github.com/frankmcsherry/columnar"
+repository = "https://github.com/frankmcsherry/columnar.git"
+
+keywords = ["columnar", "serialization"]
+
+license = "MIT"
+
+# library doesn't depend on time, but [dev-dependencies] doesn't currently seem to cut it for examples/example.rs
 [dependencies]
 
-time = "0.1.1"
+time="0.1.3"

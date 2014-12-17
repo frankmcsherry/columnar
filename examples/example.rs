@@ -1,9 +1,10 @@
 extern crate time;
-extern crate test;
 extern crate core;
+extern crate columnar;
 
-use columnar::ColumnarVec;
-mod columnar;
+use std::default::Default;
+
+use columnar::{Columnar, ColumnarVec};
 
 fn main()
 {
@@ -17,16 +18,18 @@ fn main()
 }
 
 // bounces some elements back and forth between columnar stacks, encoding/decoding ...
-fn test_columnarization<T, R: ColumnarVec<T>>(number: uint, element: |uint|:'static -> T)
+fn test_columnarization<T: Columnar<R>, R: ColumnarVec<T>>(number: uint, element: |uint|:'static -> T)
 {
     let start = time::precise_time_ns();
 
-    let mut stack1 = ColumnarVec::<T>::new();
-    let mut stack2 = ColumnarVec::<T>::new();
+    let mut stack1: R = Default::default();
+    let mut stack2: R = Default::default();
+
     let mut buffers = Vec::new();
 
     for index in range(0, number) { stack1.push(element(index)); }
     stack1.encode(&mut buffers);
+
 
     let mut bytes = 0u;     // number of bytes per iteration
     let mut total = 0u;     // total bytes processed
