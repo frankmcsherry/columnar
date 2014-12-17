@@ -5,7 +5,7 @@ This is a pretty simple start to columnar encoding and decoding in Rust. For the
 
 ## Trying it out ##
 
-Once you've got the repository, Rust and Cargo, you should be able to type `cargo build`. This shouldn't do very much. Typing `cargo test` will spin up the testing subsystem and build `examples/example.rs`, which does some measurement. Unfortunately, at the moment cargo only builds tests without optimizations, so this thoughtful example, which you can run using `./target/examples/example` will show some pretty dodgy numbers. Instead, you can trust me when I say:
+Once you've got the repository, Rust and Cargo, you should be able to type `cargo build`. This shouldn't do very much. Typing `cargo test` will spin up the testing subsystem and build `examples/example.rs`, which does some measurement for a few different types.
 
 For example, for the type `(uint, (uint, uint))` we see the pretty sweet results:
 ```
