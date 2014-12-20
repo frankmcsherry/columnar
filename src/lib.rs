@@ -1,6 +1,12 @@
+extern crate test;
+
 use std::mem;
 use std::mem::{transmute, size_of, replace};
 use std::default::Default;
+use std::string::String;
+use std::io::{IoResult, MemReader, MemWriter};
+
+use test::Bencher;
 
 // this trait defines a "prefered implementation" of ColumnarVec for a type T.
 // because multiple types may implement, for example, ColumnarVec<(uint, uint)>.
@@ -13,6 +19,43 @@ pub trait ColumnarVec<T> : Default
 
     fn encode(&mut self, &mut Vec<Vec<u8>>);
     fn decode(&mut self, &mut Vec<Vec<u8>>);
+
+    // default implementation of writing to a Writer via encode
+    // note: writes out data but does *not* clear the ColumnarVec
+    fn write<W: Writer>(&mut self, writer: &mut W) -> IoResult<()>
+    {
+        let mut bytes = Vec::new();
+        self.encode(&mut bytes);
+
+        for vec in bytes.iter()
+        {
+            try!(writer.write_le_uint(vec.len()));
+            try!(writer.write(vec.as_slice()));
+        }
+
+        // re-install bytes
+        self.decode(&mut bytes);
+        return Ok(());
+    }
+
+    // default implementation of reading from a Reader via decode
+    // note: will overwrite any existing data.
+    fn read<R: Reader>(&mut self, reader: &mut R) -> IoResult<()>
+    {
+        // read bytes to load into
+        let mut bytes = Vec::new();
+        self.encode(&mut bytes);
+
+        for vec in bytes.iter_mut()
+        {
+            vec.clear();
+            let veclen = try!(reader.read_le_uint());
+            try!(reader.push(veclen, vec));
+        }
+
+        self.decode(&mut bytes);
+        return Ok(());
+    }
 }
 
 // implementations defining default implementors of ColumnarVec.
@@ -27,6 +70,8 @@ impl Columnar<Vec<u8>> for u8 { }
 
 impl Columnar<Vec<uint>> for uint { }
 impl Columnar<Vec<int>> for int { }
+
+impl Columnar<(Vec<uint>, Vec<u8>, Vec<Vec<u8>>)> for String { }
 
 impl<T1: Columnar<R1>, R1: ColumnarVec<T1>, T2: Columnar<R2>, R2: ColumnarVec<T2>> Columnar<(R1, R2)> for (T1, T2) { }
 
@@ -56,9 +101,51 @@ impl<T:Copy> ColumnarVec<T> for Vec<T>
     }
 }
 
+
+impl ColumnarVec<String> for (Vec<uint>, Vec<u8>, Vec<Vec<u8>>)
+{
+    #[inline(always)]
+    fn push(&mut self, string: String)
+    {
+        let mut vector = string.into_bytes();
+
+        self.0.push(vector.len());
+        while let Some(record) = vector.pop() { self.1.push(record); }
+        self.2.push(vector);
+    }
+
+    #[inline(always)]
+    fn pop(&mut self) -> Option<String>
+    {
+
+        if let Some(count) = self.0.pop()
+        {
+            let mut vector = self.2.pop().unwrap_or(Vec::new());
+            // if vector.capacity() == 0 { println!("empty string!"); }
+            for _ in range(0, count) { vector.push(self.1.pop().unwrap()); }
+            Some(unsafe { String::from_utf8_unchecked(vector) })
+        }
+        else { None }
+    }
+
+    fn encode(&mut self, buffers: &mut Vec<Vec<u8>>)
+    {
+        self.0.encode(buffers);
+        self.1.encode(buffers);
+    }
+
+    fn decode(&mut self, buffers: &mut Vec<Vec<u8>>)
+    {
+        self.1.decode(buffers);
+        self.0.decode(buffers);
+    }
+}
+
+
+
 impl<T1, R1, T2, R2> ColumnarVec<(T1, T2)> for (R1, R2)
 where R1: ColumnarVec<T1>,
-R2: ColumnarVec<T2>,
+      R2: ColumnarVec<T2>,
 {
     #[inline(always)]
     fn push(&mut self, (x, y): (T1, T2))
@@ -137,6 +224,7 @@ impl<T, R1: ColumnarVec<uint>, R2: ColumnarVec<T>> ColumnarVec<Vec<T>> for (R1, 
         if let Some(count) = self.0.pop()
         {
             let mut vector = self.2.pop().unwrap_or(Vec::new());
+            // if vector.capacity() == 0 { println!("zero capacity"); }
             for _ in range(0, count) { vector.push(self.1.pop().unwrap()); }
             Some(vector)
         }
@@ -181,43 +269,65 @@ unsafe fn to_bytes_vec<T>(mut vector: Vec<T>) -> Vec<u8>
 
 
 // tests!
-#[test]
-fn test_uint()
+#[bench] fn uint(bencher: &mut Bencher) { _bench_enc_dec(bencher, Vec::from_fn(1024, |i| i)); }
+#[bench] fn mem_uint(bencher: &mut Bencher) { _bench_mem_wr(bencher, Vec::from_fn(1024, |i| i)); }
+
+#[bench] fn uint_uint_uint(bencher: &mut Bencher) { _bench_enc_dec(bencher, Vec::from_fn(1024, |i| (i, (i+1, i-1)))); }
+#[bench] fn mem_uint_uint_uint(bencher: &mut Bencher) { _bench_mem_wr(bencher, Vec::from_fn(1024, |i| (i, (i+1, i-1)))); }
+
+
+#[bench]
+fn vec_vec_uint(bencher: &mut Bencher)
 {
-    _test_columnarization(1024, |i| i);
+    _bench_enc_dec(bencher, Vec::from_fn(128, |_| vec![vec![0u, 1u], vec![1, 2, 1, 1, 2]]));
+}
+#[bench]
+fn mem_vec_vec_uint(bencher: &mut Bencher)
+{
+    _bench_mem_wr(bencher, Vec::from_fn(128, |_| vec![vec![0u, 1u], vec![1, 2, 1, 1, 2]]));
 }
 
-#[test]
-fn test_uint_uint_uint()
+#[bench]
+fn option_uint(bencher: &mut Bencher)
 {
-    _test_columnarization(1024, |i| (i, (i+1, i-1)));
+    _bench_enc_dec(bencher, Vec::from_fn(1024, |i| if i % 2 == 0 { Some(i) } else { None }));
 }
 
-#[test]
-fn test_vec_vec_uint()
+#[bench]
+fn mem_option_uint(bencher: &mut Bencher)
 {
-    _test_columnarization(128, |_| vec![vec![0u, 1u], vec![1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2]]);
+    _bench_mem_wr(bencher, Vec::from_fn(1024, |i| if i % 2 == 0 { Some(i) } else { None }));
 }
 
-#[test]
-fn test_option_uint()
+#[bench]
+fn uint_vec_string_uint(bencher: &mut Bencher)
 {
-    _test_columnarization(1024, |i| if i % 2 == 0 { Some(i) } else { None });
+    _bench_enc_dec(bencher, Vec::from_fn(128, |i| (i, Vec::from_fn(5, |j| (format!("number: {}", i + j), i + 10)))));
+}
+
+#[bench]
+fn mem_uint_vec_string_uint(bencher: &mut Bencher)
+{
+    _bench_mem_wr(bencher, Vec::from_fn(128, |i| (i, Vec::from_fn(5, |j| (format!("number: {}", i + j), i + 10)))));
 }
 
 
 // bounces some elements back and forth between columnar stacks, encoding/decoding ...
-fn _test_columnarization<T: Columnar<R>+Eq+PartialEq, R: ColumnarVec<T>>(number: uint, element: |uint|:'static -> T)
+fn _bench_enc_dec<T: Columnar<R>+Eq+PartialEq+Clone, R: ColumnarVec<T>>(bencher: &mut Bencher, mut elements: Vec<T>)
 {
     let mut stack1: R = Default::default();
     let mut stack2: R = Default::default();
 
     let mut buffers = Vec::new();
 
-    for index in range(0, number) { stack1.push(element(index)); }
+    for index in range(0, elements.len()) { stack1.push(elements[index].clone()); }
     stack1.encode(&mut buffers);
 
-    for _ in range(0u, 10)
+    let mut bytes = 0;
+    for buffer in buffers.iter() { bytes += 2 * buffer.len() as u64; }
+    bencher.bytes = bytes;
+
+    bencher.iter(||
     {
         // decode, move, encode
         stack1.decode(&mut buffers);
@@ -228,15 +338,14 @@ fn _test_columnarization<T: Columnar<R>+Eq+PartialEq, R: ColumnarVec<T>>(number:
         stack2.decode(&mut buffers);
         while let Some(record) = stack2.pop() { stack1.push(record); }
         stack1.encode(&mut buffers);
-    }
+    });
 
     stack1.decode(&mut buffers);
-    for index in range(0, number)
+    while let Some(element) = elements.pop()
     {
         if let Some(record) = stack1.pop()
         {
-            // elements popped in reverse order from insert
-            if record.ne(&element(number - index - 1))
+            if record.ne(&element)
             {
                 panic!("un-equal elements found");
             }
@@ -246,4 +355,41 @@ fn _test_columnarization<T: Columnar<R>+Eq+PartialEq, R: ColumnarVec<T>>(number:
             panic!("Too few elements pop()d.");
         }
     }
+}
+
+fn _bench_mem_wr<T, R>(bencher: &mut Bencher, mut elements: Vec<T>)
+where T: Columnar<R>,
+      R: ColumnarVec<T>,
+{
+    let mut stack: R = Default::default();
+    let mut bytes = 0;
+
+    while let Some(record) = elements.pop() { stack.push(record); }
+    let mut buffers = Vec::new();
+    stack.encode(&mut buffers);
+    for buffer in buffers.iter() { bytes += buffer.len() as u64; }
+    stack.decode(&mut buffers);
+    while let Some(record) = stack.pop() { elements.push(record); }
+
+    bencher.bytes = bytes;
+
+    // memory for re-use by the MemWriter/MemReader.
+    let mut buffer = Vec::with_capacity(bytes as uint);
+
+    bencher.iter(||
+    {
+        buffer.clear();
+        let mut writer = MemWriter::from_vec(replace(&mut buffer, Vec::new()));
+
+        while let Some(record) = elements.pop() { stack.push(record); }
+        stack.write(&mut writer).ok().expect("write error");
+
+        let mut reader = MemReader::new(writer.into_inner());
+
+        stack.read(&mut reader).ok().expect("read error");
+        while let Some(record) = stack.pop() { elements.push(record); }
+
+        let mut local = reader.into_inner();
+        buffer = replace(&mut local, Vec::new());
+    });
 }

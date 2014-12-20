@@ -1,7 +1,7 @@
 [package]
 
 name = "columnar"
-version = "0.0.3"
+version = "0.0.5"
 authors = ["Frank McSherry <fmcsherry@me.com>"]
 
 description = "High-throughput serialization and deserialization for some Rust types"
@@ -15,13 +15,8 @@ keywords = ["columnar", "serialization"]
 
 license = "MIT"
 
-# library doesn't depend on time, but [dev-dependencies] doesn't currently seem to cut it for examples/example.rs
-[dependencies]
-
-time="0.1.3"
-
-[profile.test]
-opt-level = 3
-debug = true
-rpath = false
-lto = false
+[lib]
+name="columnar"
+path="src/lib.rs"
+test=true
+plugin=false
