@@ -122,4 +122,20 @@ Not only do we flatten down all of the `Vec<T>` vectors to one `Vec<T>`, we also
 
 ### Columnar trait
 
-Finally, there is a `Columnar` trait which is implemented for types with a specific type of `ColumnarStack` supporting their type. This is because there are some types `T`, for example `(u64, u64)`, with multiple implementations of `ColumnarStack<T>`. In the case of `ColumnarStack<(u64, u64)>`, it is implemented both by `(Vec<u64>, Vec<u64>)` and `Vec<(u64, u64)>`, using the pair destructuring or the observation that `(u64, u64): Copy`. Because there are multiple implementations, we need the type `(u64, u64)` to indicate which `ColumnarStack` to use, and this information lives in the `Columnar` trait.
+Finally, there is a `Columnar` trait which is implemented for types with a specific type of `ColumnarStack` supporting their type.
+
+```rust
+pub trait Columnar: Debug + PhantomFn<Self> + 'static {
+    type Stack: ColumnarStack<Self> + 'static ;
+}
+```
+
+This trait exists because some types `T` may have multiple implementators of `ColumnarStack<T>`. For example, `(Vec<u64>, Vec<u64>)` and `Vec<(u64, u64)>` both implement `ColumnarStack<(u64, u64)>`. Consequently, we define one implementation of `Columnar` that covers `(u64, u64)`:
+
+```rust
+impl<T1: Columnar, T2: Columnar> Columnar for (T1, T2) {
+    type Stack = (T1::Stack, T2::Stack);
+}
+```
+
+This implementation says that any pair of `Columnar` types is also `Columnar`, and with the specific `ColumnarStack` implementation backed by the pair of corresponding `ColumnarStack` types. This means that we do not use `Vec<(u64, u64)>`, which we could have done, although one could wrap `(u64, u64)` in a new type and provide a new `Columnar` implementation.

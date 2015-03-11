@@ -85,8 +85,6 @@ impl<T:Copy> ColumnarStack<T> for Vec<T> {
 
     fn encode<W: Write>(&mut self, writer: &mut W) -> Result<()> {
         try!(writer.write_typed_vec(self));
-        // try!(writer.write_u64::<LittleEndian>(self.len() as u64));
-        // try!(writer.write_all(& (unsafe { to_bytes_vec(self) })[..]));
         self.clear();
         Ok(())
     }
@@ -95,15 +93,6 @@ impl<T:Copy> ColumnarStack<T> for Vec<T> {
         try!(reader.read_typed_vec(self));
         Ok(())
     }
-
-    // fn encode(&mut self, buffers: &mut Vec<Vec<u8>>) {
-    //     buffers.push(unsafe { to_bytes_vec(replace(self, Vec::new())) });
-    // }
-    //
-    // fn decode(&mut self, buffers: &mut Vec<Vec<u8>>) {
-    //     if self.len() > 0 { panic!("calling decode from a non-empty ColumnarStack"); }
-    //     *self = unsafe { to_typed_vec(buffers.pop().unwrap()) };
-    // }
 }
 
 impl ColumnarStack<String> for (Vec<u64>, Vec<u8>, Vec<Vec<u8>>) {
