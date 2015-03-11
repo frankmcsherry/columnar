@@ -148,8 +148,8 @@ impl<T1, T2, R1: ColumnarStack<T1>, R2: ColumnarStack<T2>> ColumnarStack<(T1, T2
         // self.0.pop().map(|x| (x, self.1.pop().unwrap()))
         match (self.0.pop(), self.1.pop()) {
             (Some(x), Some(y)) => Some((x, y)),
-            (None, None) => None,
-            _ => { println!("error in pair de-columnarization"); None },
+            (None, None)       => None,
+            _                  => { println!("error in pair de-columnarization"); None },
         }
     }
 
@@ -190,7 +190,6 @@ impl<T1, T2, T3, R1: ColumnarStack<T1>, R2: ColumnarStack<T2>, R3: ColumnarStack
         try!(self.2.decode(reader));
         Ok(())
     }
-
 }
 
 impl<T1, T2, T3, T4,
@@ -255,16 +254,6 @@ impl<T, S: ColumnarStack<T>> ColumnarStack<Option<T>> for (Vec<u8>, S) {
         try!(self.1.decode(reader));
         Ok(())
     }
-
-    // fn encode(&mut self, buffers: &mut Vec<Vec<u8>>) {
-    //     buffers.push(replace(&mut self.0, Vec::new()));
-    //     self.1.encode(buffers);
-    // }
-    //
-    // fn decode(&mut self, buffers: &mut Vec<Vec<u8>>) {
-    //     self.1.decode(buffers);
-    //     self.0 = buffers.pop().unwrap();
-    // }
 }
 
 impl<T, R1: ColumnarStack<u64>, R2: ColumnarStack<T>> ColumnarStack<Vec<T>> for (R1, R2, Vec<Vec<T>>) {
@@ -294,16 +283,6 @@ impl<T, R1: ColumnarStack<u64>, R2: ColumnarStack<T>> ColumnarStack<Vec<T>> for 
         try!(self.1.decode(reader));
         Ok(())
     }
-    //
-    // fn encode(&mut self, buffers: &mut Vec<Vec<u8>>) {
-    //     self.0.encode(buffers);
-    //     self.1.encode(buffers);
-    // }
-    //
-    // fn decode(&mut self, buffers: &mut Vec<Vec<u8>>) {
-    //     self.1.decode(buffers);
-    //     self.0.decode(buffers);
-    // }
 }
 
 trait ColumnarWriteExt {
@@ -317,7 +296,6 @@ impl<W: Write> ColumnarWriteExt for W {
         Ok(())
     }
 }
-
 
 trait ColumnarReadExt {
     fn read_typed_vec<T: Copy>(&mut self, vector: &mut Vec<T>) -> Result<()>;
