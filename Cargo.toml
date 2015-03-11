@@ -1,19 +1,19 @@
 [package]
 
 name = "columnar"
-version = "0.0.8"
+version = "0.0.13"
 authors = ["Frank McSherry <fmcsherry@me.com>"]
-
 description = "High-throughput serialization and deserialization for some Rust types"
 
 # These URLs point to more information about the repository
 documentation = "http://github.com/frankmcsherry/columnar"
 homepage = "http://github.com/frankmcsherry/columnar"
 repository = "https://github.com/frankmcsherry/columnar.git"
-
 keywords = ["columnar", "serialization"]
-
 license = "MIT"
+
+[dependencies]
+byteorder="*"
 
 [lib]
 name="columnar"
