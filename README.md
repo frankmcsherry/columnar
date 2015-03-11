@@ -20,7 +20,7 @@ test vec_vec_u64        ... bench:     17803 ns/iter (+/- 6069) = 1153 MB/s
 test result: ok. 0 passed; 0 failed; 0 ignored; 5 measured
 ```
 
-These numbers are throughputs for a full round trip from typed Rust vectors (`Vec<T>`) to binary (`Vec<u8>`) and back again, for a variety of types. The throughputs depend on the type of data (some require more per-record logic than others), and the amount of data moved around.
+These numbers are throughputs for a full round trip from typed Rust vectors (`Vec<T>`) to binary Rust vectors (`Vec<u8>`) and back again, for a variety of types. The throughputs depend on the type of data (some require more per-record logic than others), and the amount of data moved around.
 
 ## Columnar what? ##
 
@@ -28,11 +28,11 @@ Columnarization is a transformation of vectors of structured types to a collecti
 
 One way to view columnarization, close to the implemented code, is as a transformation on `Vec<T>`, where the transformation depends on the structure of the type `T`. The transformations continue recursively, until we have only vectors of base types. There are three types of rules we use:
 
-`Vec<uint>` : We leave vectors of base types as they are.
+`Vec<u64>` : We leave vectors of base types as they are.
 
 `Vec<(T1, T2)>` : We transform to `(Vec<T1>, Vec<T2>)` and recursively process both of the vectors.
 
-`Vec<Vec<T>>` : We transform to `(Vec<uint>, Vec<T>)`, containing the vector lengths and concatenated payloads, and recursively process the second vector.
+`Vec<Vec<T>>` : We transform to `(Vec<u64>, Vec<T>)`, containing the vector lengths and concatenated payloads, and recursively process the second vector.
 
 These transformations can be relatively efficient because each of the element moves is of typed data with known size, into a vector of identically typed elements. Once transformed, the data are easily serialized because the vectors of base types can be easily re-cast as vectors of bytes.
 
