@@ -1,33 +1,21 @@
-#![feature(test)]
-#![feature(core)]
-#![feature(io)]
-
-extern crate test;
-extern crate core;
 extern crate byteorder;
+
+use std::mem;
+use std::mem::size_of;
+use std::default::Default;
+use std::string::String;
+use std::io::{Read, Write, Result};
 
 use byteorder::{ReadBytesExt, WriteBytesExt, LittleEndian};
 
-use std::mem;
-use std::mem::{transmute, size_of};
-use std::default::Default;
-use std::string::String;
-use std::marker::PhantomFn;
-use core::fmt::Debug;
-use std::io::{Read, Write, Result};
-
-use core::raw::Slice as RawSlice;
-
-use test::Bencher;
-
 // this trait defines a "prefered implementation" of ColumnarStack for a type T,
 // because multiple types may implement, for example, ColumnarStack<(u64, u64)>.
-pub trait Columnar: Debug + PhantomFn<Self> + 'static {
-    type Stack: ColumnarStack<Self> + 'static ;
+pub trait Columnar : 'static {
+    type Stack: ColumnarStack<Self>;
 }
 
 // this trait defines a push/pop interface backed by easily serialized columnar storage.
-pub trait ColumnarStack<T> : Default {
+pub trait ColumnarStack<T> : Default+'static {
     fn push(&mut self, T);
     fn pop(&mut self) -> Option<T>;
 
@@ -50,12 +38,18 @@ impl Columnar for isize { type Stack = Vec<isize>; }
 
 impl Columnar for String { type Stack = (Vec<u64>, Vec<u8>, Vec<Vec<u8>>); }
 
-impl<T1: Columnar, T2: Columnar> Columnar for (T1, T2) { type Stack = (T1::Stack, T2::Stack); }
-impl<T1: Columnar, T2: Columnar, T3: Columnar> Columnar for (T1, T2, T3) { type Stack = (T1::Stack, T2::Stack, T3::Stack); }
-impl<T1: Columnar, T2: Columnar, T3: Columnar, T4: Columnar> Columnar for (T1, T2, T3, T4) { type Stack = (T1::Stack, T2::Stack, T3::Stack, T4::Stack); }
+impl<T1: Columnar, T2: Columnar> Columnar for (T1, T2) {
+    type Stack = (T1::Stack, T2::Stack);
+}
+impl<T1: Columnar, T2: Columnar, T3: Columnar> Columnar for (T1, T2, T3) {
+    type Stack = (T1::Stack, T2::Stack, T3::Stack);
+}
+impl<T1: Columnar, T2: Columnar, T3: Columnar, T4: Columnar> Columnar for (T1, T2, T3, T4) {
+    type Stack = (T1::Stack, T2::Stack, T3::Stack, T4::Stack);
+}
 
 impl<T: Columnar> Columnar for Option<T> { type Stack = (Vec<u8>, T::Stack); }
-impl<T: Columnar> Columnar for Vec<T> { type Stack = (Vec<u64>, T::Stack, Vec<Vec<T>>); }
+impl<T: Columnar+'static> Columnar for Vec<T> { type Stack = (Vec<u64>, T::Stack, Vec<Vec<T>>); }
 
 impl Columnar for () { type Stack = u64; }
 
@@ -79,7 +73,7 @@ impl ColumnarStack<()> for u64 {
 }
 
 // implementations of specific ColumnarQueues.
-impl<T:Copy> ColumnarStack<T> for Vec<T> {
+impl<T:Copy+'static> ColumnarStack<T> for Vec<T> {
     #[inline(always)] fn push(&mut self, data: T) { self.push(data); }
     #[inline(always)] fn pop(&mut self) -> Option<T> { self.pop() }
 
@@ -226,11 +220,10 @@ impl<T, S: ColumnarStack<T>> ColumnarStack<Option<T>> for (Vec<u8>, S) {
 
     #[inline(always)]
     fn pop(&mut self) -> Option<Option<T>> {
-        if let Some(count) = self.0.pop() {
-            if count > 0 { Some(Some(self.1.pop().unwrap())) }
-            else         { Some(None) }
-        }
-        else { None }
+        self.0.pop().map(|count| {
+            if count > 0 { Some(self.1.pop().unwrap()) }
+            else         { None }
+        })
     }
 
     fn encode<W: Write>(&mut self, writer: &mut W) -> Result<()> {
@@ -245,7 +238,7 @@ impl<T, S: ColumnarStack<T>> ColumnarStack<Option<T>> for (Vec<u8>, S) {
     }
 }
 
-impl<T, R1: ColumnarStack<u64>, R2: ColumnarStack<T>> ColumnarStack<Vec<T>> for (R1, R2, Vec<Vec<T>>) {
+impl<T:'static, R1: ColumnarStack<u64>, R2: ColumnarStack<T>> ColumnarStack<Vec<T>> for (R1, R2, Vec<Vec<T>>) {
     #[inline(always)]
     fn push(&mut self, mut vector: Vec<T>) {
         self.0.push(vector.len() as u64);
@@ -309,63 +302,6 @@ impl<R: Read> ColumnarReadExt for R {
     }
 }
 
-unsafe fn typed_as_byte_slice<'a, T>(slice: &'a mut [T]) -> &'a mut [u8] {
-    mem::transmute(RawSlice {
-        data: slice.as_mut_ptr() as *const u8,
-        len: slice.len() * mem::size_of::<T>(),
-    })
-}
-
-#[bench] fn u64(bencher: &mut Bencher) { _bench_enc_dec(bencher, (0..1024u64).collect()); }
-#[bench] fn u64_x3(bencher: &mut Bencher) { _bench_enc_dec(bencher, (0..1024u64).map(|i| (i, (i+1, i-1))).collect()); }
-#[bench] fn vec_vec_u64(bencher: &mut Bencher) {
-    _bench_enc_dec(bencher, (0..128).map(|_| vec![vec![0u64, 1u64], vec![1, 2, 1, 1, 2]]).collect());
-}
-#[bench] fn option_u64(bencher: &mut Bencher) {
-    _bench_enc_dec(bencher, (0..1024u64).map(|i| if i % 2 == 0 { Some(i as u64) } else { None }).collect());
-}
-#[bench] fn u64_vec_string_u64(bencher: &mut Bencher) {
-    let data: Vec<(u64,Vec<_>)> = (0..128u64).map(|i| (i, (0..5u64).map(|j| (format!("number: {}", i + j), i as u64 + 10)).collect()))
-                                             .collect();
-    _bench_enc_dec(bencher, data);
-}
-
-
-// bounces some elements back and forth between columnar stacks, encoding/decoding ...
-fn _bench_enc_dec<T: Columnar+Eq+PartialEq+Clone>(bencher: &mut Bencher, mut elements: Vec<T>) {
-    let mut stack1: T::Stack = Default::default();
-    let mut stack2: T::Stack = Default::default();
-
-    let mut buffers = Vec::new();
-
-    for index in (0..elements.len()) { stack1.push(elements[index].clone()); }
-    stack1.encode(&mut buffers).unwrap();
-
-    bencher.bytes = (buffers.len() as u64) * 2;
-
-    bencher.iter(|| {
-        // decode, move, encode
-        stack1.decode(&mut &buffers[..]).unwrap();
-        while let Some(record) = stack1.pop() { stack2.push(record); }
-        buffers.clear();
-        stack2.encode(&mut buffers).unwrap();
-
-        // decode, move, encode
-        stack2.decode(&mut &buffers[..]).unwrap();
-        while let Some(record) = stack2.pop() { stack1.push(record); }
-        buffers.clear();
-        stack1.encode(&mut buffers).unwrap();
-    });
-
-    stack1.decode(&mut &buffers[..]).unwrap();
-    while let Some(element) = elements.pop() {
-        if let Some(record) = stack1.pop() {
-            if record.ne(&element) {
-                panic!("un-equal elements found");
-            }
-        }
-        else {
-            panic!("Too few elements pop()d.");
-        }
-    }
+unsafe fn typed_as_byte_slice<T>(slice: &mut [T]) -> &mut [u8] {
+    std::slice::from_raw_parts_mut(slice.as_mut_ptr() as *mut u8, slice.len() * mem::size_of::<T>())
 }
