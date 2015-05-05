@@ -7,7 +7,7 @@ use columnar::*;
 use test::Bencher;
 
 use std::default::Default;
-use std::io::{Read, Write};
+use std::io::Read;
 
 #[bench] fn u64(bencher: &mut Bencher) { _bench_enc_dec(bencher, (0..1024u64).collect()); }
 #[bench] fn u64_x3(bencher: &mut Bencher) { _bench_enc_dec(bencher, (0..1024u64).map(|i| (i, (i+1, i-1))).collect()); }
@@ -21,17 +21,6 @@ use std::io::{Read, Write};
     let data: Vec<(u64,Vec<_>)> = (0..128u64).map(|i| (i, (0..5u64).map(|j| (format!("number: {}", i + j), i as u64 + 10)).collect()))
                                              .collect();
     _bench_enc_dec(bencher, data);
-}
-
-#[bench] fn write_bench(bencher: &mut Bencher) {
-    let data = &[0u8; 4096];
-    let mut buffer = Vec::with_capacity(4096);
-
-    bencher.bytes = data.len() as u64;
-    bencher.iter(move || {
-        buffer.clear();
-        buffer.write_all(data).unwrap();
-    });
 }
 
 // bounces some elements back and forth between columnar stacks, encoding/decoding ...

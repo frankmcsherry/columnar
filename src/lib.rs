@@ -36,6 +36,9 @@ impl Columnar for u8  { type Stack = Vec<u8>;  }
 impl Columnar for usize { type Stack = Vec<usize>; }
 impl Columnar for isize { type Stack = Vec<isize>; }
 
+impl Columnar for f32 { type Stack = Vec<f32>; }
+impl Columnar for f64 { type Stack = Vec<f64>; }
+
 impl Columnar for String { type Stack = (Vec<u64>, Vec<u8>, Vec<Vec<u8>>); }
 
 impl<T1: Columnar, T2: Columnar> Columnar for (T1, T2) {
