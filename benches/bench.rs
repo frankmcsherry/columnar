@@ -7,7 +7,6 @@ use columnar::*;
 use test::Bencher;
 
 use std::default::Default;
-use std::io::Read;
 
 #[bench] fn u64(bencher: &mut Bencher) { _bench_enc_dec(bencher, (0..1024u64).collect()); }
 #[bench] fn u64_x3(bencher: &mut Bencher) { _bench_enc_dec(bencher, (0..1024u64).map(|i| (i, (i+1, i-1))).collect()); }
@@ -61,7 +60,7 @@ fn _bench_enc_dec<T: Columnar+Eq+PartialEq+Clone>(bencher: &mut Bencher, mut ele
             panic!("Too few elements pop()d.");
         }
     }
-    if let Some(_) = stack1.pop() {
+    if stack1.pop().is_some() {
         panic!("Too many elements pop()d.");
     }
 }
