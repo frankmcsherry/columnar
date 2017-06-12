@@ -1,7 +1,6 @@
 extern crate byteorder;
 
 use std::mem;
-use std::mem::size_of;
 use std::default::Default;
 use std::string::String;
 use std::io::{Read, Write, Result};
@@ -10,12 +9,12 @@ use byteorder::{ReadBytesExt, WriteBytesExt, LittleEndian};
 
 // this trait defines a "prefered implementation" of ColumnarStack for a type T,
 // because multiple types may implement, for example, ColumnarStack<(u64, u64)>.
-pub trait Columnar : 'static {
+pub trait Columnar : Sized + 'static {
     type Stack: ColumnarStack<Self>;
 }
 
 // this trait defines a push/pop interface backed by easily serialized columnar storage.
-pub trait ColumnarStack<T> : Default+'static {
+pub trait ColumnarStack<T> : Default {
     fn push(&mut self, T);
     fn pop(&mut self) -> Option<T>;
 
@@ -104,8 +103,8 @@ impl ColumnarStack<String> for (Vec<u64>, Vec<u8>, Vec<Vec<u8>>) {
     #[inline(always)]
     fn pop(&mut self) -> Option<String> {
         self.0.pop().map(|count| {
-            let mut vector = self.2.pop().unwrap_or(Vec::new());
-            for _ in (0..count) { vector.push(self.1.pop().unwrap()); }
+            let mut vector = self.2.pop().unwrap_or_default();
+            for _ in 0..count { vector.push(self.1.pop().unwrap()); }
             unsafe { String::from_utf8_unchecked(vector) }
         })
     }
@@ -252,8 +251,8 @@ impl<T:'static, R1: ColumnarStack<u64>, R2: ColumnarStack<T>> ColumnarStack<Vec<
     #[inline(always)]
     fn pop(&mut self) -> Option<Vec<T>> {
         self.0.pop().map(|count| {
-            let mut vector = self.2.pop().unwrap_or(Vec::new());
-            for _ in (0..count) { vector.push(self.1.pop().unwrap()); }
+            let mut vector = self.2.pop().unwrap_or_default();
+            for _ in 0..count { vector.push(self.1.pop().unwrap()); }
             vector
         })
     }
