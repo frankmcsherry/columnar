@@ -13,7 +13,7 @@ keywords = ["columnar", "serialization"]
 license = "MIT"
 
 [dependencies]
-byteorder="*"
+byteorder="^1.0"
 
 [lib]
 name="columnar"
