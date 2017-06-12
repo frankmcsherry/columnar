@@ -75,7 +75,7 @@ impl ColumnarStack<()> for u64 {
 }
 
 // implementations of specific ColumnarQueues.
-impl<T:Copy+'static> ColumnarStack<T> for Vec<T> {
+impl<T> ColumnarStack<T> for Vec<T> {
     #[inline(always)] fn push(&mut self, data: T) { self.push(data); }
     #[inline(always)] fn pop(&mut self) -> Option<T> { self.pop() }
 
@@ -270,11 +270,11 @@ impl<T:'static, R1: ColumnarStack<u64>, R2: ColumnarStack<T>> ColumnarStack<Vec<
 }
 
 trait ColumnarWriteExt {
-    fn write_typed_vec<T: Copy>(&mut self, vector: &mut Vec<T>) -> Result<()>;
+    fn write_typed_vec<T>(&mut self, vector: &mut Vec<T>) -> Result<()>;
 }
 
 impl<W: Write> ColumnarWriteExt for W {
-    fn write_typed_vec<T: Copy>(&mut self, vector: &mut Vec<T>) -> Result<()> {
+    fn write_typed_vec<T>(&mut self, vector: &mut Vec<T>) -> Result<()> {
         try!(self.write_u64::<LittleEndian>(vector.len() as u64));
         try!(self.write_all(unsafe { typed_as_byte_slice(&mut vector[..]) }));
         Ok(())
@@ -282,11 +282,11 @@ impl<W: Write> ColumnarWriteExt for W {
 }
 
 trait ColumnarReadExt {
-    fn read_typed_vec<T: Copy>(&mut self, vector: &mut Vec<T>) -> Result<()>;
+    fn read_typed_vec<T>(&mut self, vector: &mut Vec<T>) -> Result<()>;
 }
 
 impl<R: Read> ColumnarReadExt for R {
-    fn read_typed_vec<T: Copy>(&mut self, vector: &mut Vec<T>) -> Result<()> {
+    fn read_typed_vec<T>(&mut self, vector: &mut Vec<T>) -> Result<()> {
         vector.clear();
 
         let len = try!(self.read_u64::<LittleEndian>()) as usize;
