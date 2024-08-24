@@ -1,22 +1,12 @@
 [package]
-
 name = "columnar"
-version = "0.0.17"
+version = "0.1.0"
 authors = ["Frank McSherry <fmcsherry@me.com>"]
-description = "High-throughput serialization and deserialization for some Rust types"
+description = "Conversion from arrays of complex structs to simple structs of arrays"
+edition = "2021"
 
 # These URLs point to more information about the repository
 documentation = "http://github.com/frankmcsherry/columnar"
 homepage = "http://github.com/frankmcsherry/columnar"
 repository = "https://github.com/frankmcsherry/columnar.git"
-keywords = ["columnar", "serialization"]
 license = "MIT"
-
-[dependencies]
-byteorder="^1.0"
-
-[lib]
-name="columnar"
-path="src/lib.rs"
-test=true
-plugin=false

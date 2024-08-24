@@ -3,64 +3,91 @@
 extern crate columnar;
 extern crate test;
 
-use columnar::*;
+use columnar::{Columnar, Columnable};
 use test::Bencher;
 
-use std::default::Default;
+#[bench] fn empty_copy(bencher: &mut Bencher) { _bench_copy(bencher, vec![(); 1024]); }
+#[bench] fn u64_copy(bencher: &mut Bencher) { _bench_copy(bencher, vec![0u64; 1024]); }
+#[bench] fn u32x2_copy(bencher: &mut Bencher) { _bench_copy(bencher, vec![(0u32,0u32); 1024]); }
+#[bench] fn u8_u64_copy(bencher: &mut Bencher) { _bench_copy(bencher, vec![(0u8, 0u64); 512]); }
+#[bench] fn string10_copy(bencher: &mut Bencher) { _bench_copy(bencher, vec![format!("grawwwwrr!"); 1024]); }
+#[bench] fn string20_copy(bencher: &mut Bencher) { _bench_copy(bencher, vec![format!("grawwwwrr!!!!!!!!!!!"); 512]); }
+#[bench] fn vec_u_s_copy(bencher: &mut Bencher) { _bench_copy(bencher, vec![vec![(0u64, format!("grawwwwrr!")); 32]; 32]); }
+#[bench] fn vec_u_vn_s_copy(bencher: &mut Bencher) { _bench_copy(bencher, vec![vec![(0u64, vec![(); 1 << 40], format!("grawwwwrr!")); 32]; 32]); }
 
-#[bench] fn u64(bencher: &mut Bencher) { _bench_enc_dec(bencher, (0..1024u64).collect()); }
-#[bench] fn u64_x3(bencher: &mut Bencher) { _bench_enc_dec(bencher, (0..1024u64).map(|i| (i, (i+1, i-1))).collect()); }
-#[bench] fn vec_vec_u64(bencher: &mut Bencher) {
-    _bench_enc_dec(bencher, vec![vec![vec![0u64, 1u64], vec![1, 2, 1, 1, 2]]; 128]);
-}
-#[bench] fn option_u64(bencher: &mut Bencher) {
-    _bench_enc_dec(bencher, (0..1024u64).map(|i| if i % 2 == 0 { Some(i as u64) } else { None }).collect());
-}
-#[bench] fn u64_vec_string_u64(bencher: &mut Bencher) {
-    let data: Vec<(u64,Vec<_>)> = (0..128u64).map(|i| (i, (0..5u64).map(|j| (format!("number: {}", i + j), i as u64 + 10)).collect()))
-                                             .collect();
-    _bench_enc_dec(bencher, data);
-}
+#[bench] fn empty_clone(bencher: &mut Bencher) { _bench_clone(bencher, vec![(); 1024]); }
+#[bench] fn u64_clone(bencher: &mut Bencher) { _bench_clone(bencher, vec![0u64; 1024]); }
+#[bench] fn u32x2_clone(bencher: &mut Bencher) { _bench_clone(bencher, vec![(0u32,0u32); 1024]); }
+#[bench] fn u8_u64_clone(bencher: &mut Bencher) { _bench_clone(bencher, vec![(0u8, 0u64); 512]); }
+#[bench] fn string10_clone(bencher: &mut Bencher) { _bench_clone(bencher, vec![format!("grawwwwrr!"); 1024]); }
+#[bench] fn string20_clone(bencher: &mut Bencher) { _bench_clone(bencher, vec![format!("grawwwwrr!!!!!!!!!!!"); 512]); }
+#[bench] fn vec_u_s_clone(bencher: &mut Bencher) { _bench_clone(bencher, vec![vec![(0u64, format!("grawwwwrr!")); 32]; 32]); }
+#[bench] fn vec_u_vn_s_clone(bencher: &mut Bencher) { _bench_clone(bencher, vec![vec![(0u64, vec![(); 1 << 40], format!("grawwwwrr!")); 32]; 32]); }
 
-// bounces some elements back and forth between columnar stacks, encoding/decoding ...
-fn _bench_enc_dec<T: Columnar+Eq+PartialEq+Clone>(bencher: &mut Bencher, mut elements: Vec<T>) {
-    let mut stack1: T::Stack = Default::default();
-    let mut stack2: T::Stack = Default::default();
+// #[bench] fn empty_realloc(bencher: &mut Bencher) { _bench_realloc(bencher, vec![(); 1024]); }
+// #[bench] fn u64_realloc(bencher: &mut Bencher) { _bench_realloc(bencher, vec![0u64; 1024]); }
+// #[bench] fn u32x2_realloc(bencher: &mut Bencher) { _bench_realloc(bencher, vec![(0u32,0u32); 1024]); }
+// #[bench] fn u8_u64_realloc(bencher: &mut Bencher) { _bench_realloc(bencher, vec![(0u8, 0u64); 512]); }
+// #[bench] fn string10_realloc(bencher: &mut Bencher) { _bench_realloc(bencher, vec![format!("grawwwwrr!"); 1024]); }
+// #[bench] fn string20_realloc(bencher: &mut Bencher) { _bench_realloc(bencher, vec![format!("grawwwwrr!!!!!!!!!!!"); 512]); }
+// #[bench] fn vec_u_s_realloc(bencher: &mut Bencher) { _bench_realloc(bencher, vec![vec![(0u64, format!("grawwwwrr!")); 32]; 32]); }
+// #[bench] fn vec_u_vn_s_realloc(bencher: &mut Bencher) { _bench_realloc(bencher, vec![vec![(0u64, vec![(); 1 << 40], format!("grawwwwrr!")); 32]; 32]); }
 
-    let mut buffers = Vec::with_capacity(1 << 20);
+// #[bench] fn empty_prealloc(bencher: &mut Bencher) { _bench_prealloc(bencher, vec![(); 1024]); }
+// #[bench] fn u64_prealloc(bencher: &mut Bencher) { _bench_prealloc(bencher, vec![0u64; 1024]); }
+// #[bench] fn u32x2_prealloc(bencher: &mut Bencher) { _bench_prealloc(bencher, vec![(0u32,0u32); 1024]); }
+// #[bench] fn u8_u64_prealloc(bencher: &mut Bencher) { _bench_prealloc(bencher, vec![(0u8, 0u64); 512]); }
+// #[bench] fn string10_prealloc(bencher: &mut Bencher) { _bench_prealloc(bencher, vec![format!("grawwwwrr!"); 1024]); }
+// #[bench] fn string20_prealloc(bencher: &mut Bencher) { _bench_prealloc(bencher, vec![format!("grawwwwrr!!!!!!!!!!!"); 512]); }
+// #[bench] fn vec_u_s_prealloc(bencher: &mut Bencher) { _bench_prealloc(bencher, vec![vec![(0u64, format!("grawwwwrr!")); 32]; 32]); }
+// #[bench] fn vec_u_vn_s_prealloc(bencher: &mut Bencher) { _bench_prealloc(bencher, vec![vec![(0u64, vec![(); 1 << 40], format!("grawwwwrr!")); 32]; 32]); }
 
-    for element in &elements { stack1.push(element.clone()); }
-    stack1.encode(&mut buffers).unwrap();
+fn _bench_copy<T: Columnable+Eq>(bencher: &mut Bencher, record: T) {
 
-    bencher.bytes = (buffers.len() as u64) * 2;
+    // prepare encoded data for bencher.bytes
+    let mut arena: T::Columns = Default::default();
 
     bencher.iter(|| {
-        // decode, move, encode
-        stack1.decode(&mut &buffers[..]).unwrap();
-        while let Some(record) = stack1.pop() { stack2.push(record); }
-        buffers.clear();
-        stack2.encode(&mut buffers).unwrap();
-
-        // decode, move, encode
-        stack2.decode(&mut &buffers[..]).unwrap();
-        while let Some(record) = stack2.pop() { stack1.push(record); }
-        buffers.clear();
-        stack1.encode(&mut buffers).unwrap();
+        arena.clear();
+        for _ in 0 .. 1024 {
+            arena.copy(&record);
+        }
     });
+}
 
-    stack1.decode(&mut &buffers[..]).unwrap();
+fn _bench_clone<T: Columnable+Eq+Clone>(bencher: &mut Bencher, record: T) {
 
-    while let Some(element) = elements.pop() {
-        if let Some(record) = stack1.pop() {
-            if record.ne(&element) {
-                panic!("un-equal elements found.");
-            }
+    // prepare encoded data for bencher.bytes
+    let mut arena = Vec::new();
+
+    bencher.iter(|| {
+        arena.clear();
+        for _ in 0 .. 1024 {
+            arena.push(record.clone());
         }
-        else {
-            panic!("Too few elements pop()d.");
+    });
+}
+
+fn _bench_realloc<T: Columnable+Eq>(bencher: &mut Bencher, record: T) {
+
+    bencher.iter(|| {
+        // prepare encoded data for bencher.bytes
+        let mut arena: T::Columns = Default::default();
+
+        for _ in 0 .. 1024 {
+            arena.copy(&record);
         }
-    }
-    if stack1.pop().is_some() {
-        panic!("Too many elements pop()d.");
-    }
+    });
+}
+
+fn _bench_prealloc<T: Columnable+Eq>(bencher: &mut Bencher, record: T) {
+
+    bencher.iter(|| {
+        // prepare encoded data for bencher.bytes
+        let mut arena: T::Columns = Default::default();
+
+        for _ in 0 .. 1024 {
+            arena.copy(&record);
+        }
+    });
 }
