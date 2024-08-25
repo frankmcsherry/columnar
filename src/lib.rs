@@ -59,31 +59,40 @@ pub trait Columnable {
     }
 }
 
-/// Types that will simply be represented by `Vec<T>`.
+// All types that can be cloned can use `Vec`.
+// Types that cannot be cloned should be able to use `Vec` once we decouple
+// the `copy` and `push` behavior from the trait; they could be pushed, but
+// not copied.
+//
+// Importantly, this implementation *allows* types to use `Vec`, but it does
+// not cause them to implement `Columnable` which is where they would express
+// an opinion about their preference for storage.
+impl<T: Clone> Columnar<T> for Vec<T> {
+    #[inline(always)] fn copy(&mut self, item: &T) { self.push(item.clone()); }
+    #[inline(always)] fn copy_slice(&mut self, slice: &[T]) { self.extend_from_slice(slice); }
+    #[inline(always)] fn pop(&mut self) -> Option<T> { self.pop() }
+    #[inline(always)] fn len(&self) -> usize { self.len() }
+    type Index<'a> = &'a T where T: 'a;
+    #[inline(always)] fn index(&self, index: usize) -> Self::Index<'_> { &self[index] }
+    #[inline(always)] fn clear(&mut self) { self.clear(); }
+    fn heap_size(&self) -> (usize, usize) {
+        (
+            std::mem::size_of::<T>() * self.len(),
+            std::mem::size_of::<T>() * self.capacity(),
+        )
+    }
+}
+
+/// Types that prefer to be represented by `Vec<T>`.
 mod primitive {
 
     use super::{Columnar, Columnable};
 
-    /// An implementation for types that want to use `Vec<T>`.
+    /// An implementation of opinions for types that want to use `Vec<T>`.
     macro_rules! implement_columnable {
         ($($index_type:ty),*) => { $(
             impl Columnable for $index_type {
                 type Columns = Vec<$index_type>;
-            }
-            impl Columnar<$index_type> for Vec<$index_type> {
-                #[inline(always)] fn copy(&mut self, item: &$index_type) { self.push(*item); }
-                #[inline(always)] fn copy_slice(&mut self, slice: &[$index_type]) { self.extend_from_slice(slice); }
-                #[inline(always)] fn pop(&mut self) -> Option<$index_type> { self.pop() }
-                #[inline(always)] fn len(&self) -> usize { self.len() }
-                type Index<'a> = &'a $index_type;
-                #[inline(always)] fn index(&self, index: usize) -> Self::Index<'_> { &self[index] }
-                #[inline(always)] fn clear(&mut self) { self.clear(); }
-                fn heap_size(&self) -> (usize, usize) {
-                    (
-                        std::mem::size_of::<$index_type>() * self.len(),
-                        std::mem::size_of::<$index_type>() * self.capacity(),
-                    )
-                }
             }
         )* }
     }
@@ -411,6 +420,76 @@ mod result {
             let li = std::mem::size_of::<Result<usize, usize>>() * self.indexes.len();
             let ci = std::mem::size_of::<Result<usize, usize>>() * self.indexes.capacity();
             (l0 + l1 + li, c0 + c1 + ci)
+        }
+    }
+}
+
+mod option {
+
+    use super::{Columnar, Columnable};
+
+    pub struct ColumnOption<TC> {
+        /// This could be substantially more efficient as e.g. a `Vec<(u64, u64)>`,
+        /// with one entry for each 64 items pushed, describing the cumulative sum
+        /// of `Some` variants (say) and a bitfield of the associated variants.
+        indexes: Vec<Option<usize>>,
+        t_store: TC,
+    }
+
+    impl<TC: Default> Default for ColumnOption<TC> {
+        fn default() -> Self {
+            Self {
+                indexes: Vec::default(),
+                t_store: TC::default(),
+            }
+        }
+    }
+
+    impl<T: Columnable> Columnable for Option<T> {
+        type Columns = ColumnOption<T::Columns>;
+    }
+    impl<T, TC: Columnar<T>> Columnar<Option<T>> for ColumnOption<TC> {
+        #[inline(always)]
+        fn copy(&mut self, item: &Option<T>) {
+            match item {
+                Some(item) => {
+                    self.indexes.push(Some(self.t_store.len()));
+                    self.t_store.copy(item);
+                }
+                None => {
+                    self.indexes.push(None);
+                }
+            }
+        }
+        fn pop(&mut self) -> Option<Option<T>> {
+            self.indexes
+                .pop()
+                .map(|i| match i {
+                    Some(_) => Some(self.t_store.pop().unwrap()),
+                    None => None,
+                })
+        }
+
+        #[inline(always)] fn len(&self) -> usize { self.indexes.len() }
+
+        type Index<'a> = Option<TC::Index<'a>> where TC: 'a;
+        fn index(&self, index: usize) -> Self::Index<'_> {
+            match self.indexes[index] {
+                Some(i) => Some(self.t_store.index(i)),
+                None => None,
+            }
+        }
+
+        fn clear(&mut self) {
+            self.indexes.clear();
+            self.t_store.clear();
+        }
+
+        fn heap_size(&self) -> (usize, usize) {
+            let (l0, c0) = self.t_store.heap_size();
+            let li = std::mem::size_of::<Result<usize, usize>>() * self.indexes.len();
+            let ci = std::mem::size_of::<Result<usize, usize>>() * self.indexes.capacity();
+            (l0 + li, c0 + ci)
         }
     }
 }
