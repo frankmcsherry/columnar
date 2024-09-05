@@ -9,7 +9,7 @@
 /// A stand in for `Vec<T>` with a different layout
 pub trait Columnar<T: ?Sized> : Len + Index {
     /// Pushes an owned item onto `self`.
-    fn push(&mut self, item: T) where T: Sized { self.copy(&item) }
+    #[inline(always)] fn push(&mut self, item: T) where T: Sized { self.copy(&item) }
     /// Copy a reference to an item into `self`.
     fn copy(&mut self, item: &T);
     /// Copy a slice of items into `self`.
@@ -22,13 +22,20 @@ pub trait Columnar<T: ?Sized> : Len + Index {
         }
     }
     /// Removes and returns the most recently pushed item.
-    fn pop(&mut self) -> Option<T> where T: Sized;
+    fn pop(&mut self) -> Option<T> where T: Sized { unimplemented!() }
 
     /// Removes all records of elements, but retains allocations.
     fn clear(&mut self);
     /// Active (len) and allocated (cap) heap sizes in bytes.
     /// This should not include the size of `self` itself.
     fn heap_size(&self) -> (usize, usize);
+
+    fn iter(&self) -> IndexIter<'_, Self> {
+        IndexIter {
+            index: 0,
+            slice: &self
+        }
+    }
 }
 
 /// A type that can be represented in columnar form.
@@ -66,9 +73,16 @@ pub trait Index {
     type Index<'a> where Self: 'a;
     fn index(&self, index: usize) -> Self::Index<'_>;
     /// A reference to the last element, should one exist.
-    fn last(&self) -> Option<Self::Index<'_>> where Self: Len {
+    #[inline(always)] fn last(&self) -> Option<Self::Index<'_>> where Self: Len {
         if self.is_empty() { None }
         else { Some(self.index(self.len()-1)) }
+    }
+}
+
+impl<'t, T: Index> Index for &'t T {
+    type Index<'a> = T::Index<'t> where Self: 'a;
+    #[inline(always)] fn index(&self, index: usize) -> Self::Index<'_> {
+        T::index(*self, index)
     }
 }
 
@@ -78,7 +92,7 @@ pub trait IndexMut : Index {
     type IndexMut<'a> where Self: 'a;
     fn index_mut(& mut self, index: usize) -> Self::IndexMut<'_>;
     /// A reference to the last element, should one exist.
-    fn last_mut(&mut self) -> Option<Self::IndexMut<'_>> where Self: Len {
+    #[inline(always)] fn last_mut(&mut self) -> Option<Self::IndexMut<'_>> where Self: Len {
         if self.is_empty() { None }
         else { Some(self.index_mut(self.len()-1)) }
     }
@@ -109,17 +123,18 @@ impl<S> Slice<S> {
         assert!(lower <= upper);
         Self { lower, upper, slice: self.slice }
     }
-    pub fn len(&self) -> usize { self.upper - self.lower }
-    pub fn is_empty(&self) -> bool { self.len() == 0 }
-
     pub fn new(lower: usize, upper: usize, slice: S) -> Self {
         Self { lower, upper, slice }
     }
 }
 
+impl<S> Len for Slice<S> {
+    fn len(&self) -> usize { self.upper - self.lower }
+}
+
 impl<S: Index> Index for Slice<S> {
     type Index<'a> = S::Index<'a> where S: 'a;
-    fn index(&self, index: usize) -> Self::Index<'_> {
+    #[inline(always)] fn index(&self, index: usize) -> Self::Index<'_> {
         assert!(index < self.upper - self.lower);
         self.slice.index(self.lower + index)
     }
@@ -127,9 +142,49 @@ impl<S: Index> Index for Slice<S> {
 
 impl<S: IndexMut> IndexMut for Slice<S> {
     type IndexMut<'a> = S::IndexMut<'a> where S: 'a;
-    fn index_mut(&mut self, index: usize) -> Self::IndexMut<'_> {
+    #[inline(always)] fn index_mut(&mut self, index: usize) -> Self::IndexMut<'_> {
         assert!(index < self.upper - self.lower);
         self.slice.index_mut(self.lower + index)
+    }
+}
+
+
+impl<S: Index> Slice<S> {
+    pub fn iter(&self) -> IndexIter<'_, Self> {
+        IndexIter {
+            index: 0,
+            slice: self
+        }
+    }
+}
+
+impl<'a, S: Index> IntoIterator for &'a Slice<S> {
+    type Item = S::Index<'a>;
+    type IntoIter = IndexIter<'a, Slice<S>>;
+    #[inline(always)] fn into_iter(self) -> Self::IntoIter {
+        IndexIter {
+            index: 0,
+            slice: self
+        }
+    }
+}
+
+pub struct IndexIter<'a, S: ?Sized> {
+    index: usize,
+    slice: &'a S,
+}
+
+impl<'a, S: Index + Len> Iterator for IndexIter<'a, S> {
+    type Item = S::Index<'a>;
+
+    #[inline(always)] fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.slice.len() {
+            let result = self.slice.index(self.index);
+            self.index += 1;
+            Some(result)
+        } else {
+            None
+        }
     }
 }
 
@@ -313,7 +368,8 @@ mod string {
     }
 }
 
-mod vec {
+pub use vector::ColumnVec;
+mod vector {
 
     use super::{Columnar, Columnable, Len, Index, IndexMut, Slice};
 
@@ -322,7 +378,7 @@ mod vec {
     }
 
     /// A stand-in for `Vec<Vec<T>>` for complex `T`.
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     pub struct ColumnVec<TC> {
         bounds: Vec<usize>,
         values: TC,
@@ -344,6 +400,7 @@ mod vec {
     impl<TC> Index for ColumnVec<TC> {
         type Index<'a> = Slice<&'a TC> where TC: 'a;
 
+        #[inline(always)]
         fn index(&self, index: usize) -> Self::Index<'_> {
             Slice {
                 lower: self.bounds[index],
@@ -355,6 +412,7 @@ mod vec {
     impl<TC> IndexMut for ColumnVec<TC> {
         type IndexMut<'a> = Slice<&'a mut TC> where TC: 'a;
 
+        #[inline(always)]
         fn index_mut(&mut self, index: usize) -> Self::IndexMut<'_> {
             Slice {
                 lower: self.bounds[index],
