@@ -3,10 +3,11 @@
 extern crate columnar;
 extern crate test;
 
-use columnar::{Columnar, Columnable};
+use columnar::{Clear, Columnable, Push, Len};
 use test::Bencher;
 
 #[bench] fn empty_copy(bencher: &mut Bencher) { _bench_copy(bencher, vec![(); 1024]); }
+#[bench] fn option_copy(bencher: &mut Bencher) { _bench_copy(bencher, vec![Option::<String>::None; 1024]); }
 #[bench] fn u64_copy(bencher: &mut Bencher) { _bench_copy(bencher, vec![0u64; 1024]); }
 #[bench] fn u32x2_copy(bencher: &mut Bencher) { _bench_copy(bencher, vec![(0u32,0u32); 1024]); }
 #[bench] fn u8_u64_copy(bencher: &mut Bencher) { _bench_copy(bencher, vec![(0u8, 0u64); 512]); }
@@ -16,6 +17,7 @@ use test::Bencher;
 #[bench] fn vec_u_vn_s_copy(bencher: &mut Bencher) { _bench_copy(bencher, vec![vec![(0u64, vec![(); 1 << 40], format!("grawwwwrr!")); 32]; 32]); }
 
 #[bench] fn empty_clone(bencher: &mut Bencher) { _bench_clone(bencher, vec![(); 1024]); }
+#[bench] fn option_clone(bencher: &mut Bencher) { _bench_clone(bencher, vec![Option::<String>::None; 1024]); }
 #[bench] fn u64_clone(bencher: &mut Bencher) { _bench_clone(bencher, vec![0u64; 1024]); }
 #[bench] fn u32x2_clone(bencher: &mut Bencher) { _bench_clone(bencher, vec![(0u32,0u32); 1024]); }
 #[bench] fn u8_u64_clone(bencher: &mut Bencher) { _bench_clone(bencher, vec![(0u8, 0u64); 512]); }
@@ -42,7 +44,7 @@ use test::Bencher;
 // #[bench] fn vec_u_s_prealloc(bencher: &mut Bencher) { _bench_prealloc(bencher, vec![vec![(0u64, format!("grawwwwrr!")); 32]; 32]); }
 // #[bench] fn vec_u_vn_s_prealloc(bencher: &mut Bencher) { _bench_prealloc(bencher, vec![vec![(0u64, vec![(); 1 << 40], format!("grawwwwrr!")); 32]; 32]); }
 
-fn _bench_copy<T: Columnable+Eq>(bencher: &mut Bencher, record: T) {
+fn _bench_copy<T: Columnable+Eq>(bencher: &mut Bencher, record: T) where T::Columns : for<'a> Push<&'a T> {
 
     // prepare encoded data for bencher.bytes
     let mut arena: T::Columns = Default::default();
@@ -50,7 +52,7 @@ fn _bench_copy<T: Columnable+Eq>(bencher: &mut Bencher, record: T) {
     bencher.iter(|| {
         arena.clear();
         for _ in 0 .. 1024 {
-            arena.copy(&record);
+            arena.push(&record);
         }
     });
 }
@@ -68,26 +70,26 @@ fn _bench_clone<T: Columnable+Eq+Clone>(bencher: &mut Bencher, record: T) {
     });
 }
 
-fn _bench_realloc<T: Columnable+Eq>(bencher: &mut Bencher, record: T) {
+// fn _bench_realloc<T: Columnable+Eq>(bencher: &mut Bencher, record: T) {
 
-    bencher.iter(|| {
-        // prepare encoded data for bencher.bytes
-        let mut arena: T::Columns = Default::default();
+//     bencher.iter(|| {
+//         // prepare encoded data for bencher.bytes
+//         let mut arena: T::Columns = Default::default();
 
-        for _ in 0 .. 1024 {
-            arena.copy(&record);
-        }
-    });
-}
+//         for _ in 0 .. 1024 {
+//             arena.copy(&record);
+//         }
+//     });
+// }
 
-fn _bench_prealloc<T: Columnable+Eq>(bencher: &mut Bencher, record: T) {
+// fn _bench_prealloc<T: Columnable+Eq>(bencher: &mut Bencher, record: T) {
 
-    bencher.iter(|| {
-        // prepare encoded data for bencher.bytes
-        let mut arena: T::Columns = Default::default();
+//     bencher.iter(|| {
+//         // prepare encoded data for bencher.bytes
+//         let mut arena: T::Columns = Default::default();
 
-        for _ in 0 .. 1024 {
-            arena.copy(&record);
-        }
-    });
-}
+//         for _ in 0 .. 1024 {
+//             arena.copy(&record);
+//         }
+//     });
+// }
