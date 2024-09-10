@@ -6,10 +6,13 @@
 //! a real `T` lying around to return as a reference. Instead, we will
 //! use Generic Associated Types (GATs) to provide alternate references.
 
+mod bytes;
+
 /// A type that can be represented in columnar form.
 pub trait Columnable : Sized {
     /// The type that stores the columnar representation.
     type Columns: Push<Self> + Index + Clear + Default;
+
     /// Converts a sequence of the type into columnar form.
     fn as_columns<I>(selves: I) -> Self::Columns where I: Iterator<Item = Self>, Self: Sized {
         let mut columns: Self::Columns = Default::default();
@@ -340,6 +343,7 @@ pub mod primitive {
 pub use string::ColumnString;
 pub mod string {
 
+    use std::ops::{Deref, DerefMut};
     use super::{Clear, Columnable, Len, Index, IndexMut, Push, HeapSize};
 
     impl Columnable for String {
@@ -348,17 +352,19 @@ pub mod string {
 
     /// A stand-in for `Vec<String>`.
     #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct ColumnString {
-        pub bounds: Vec<usize>,
-        pub values: Vec<u8>,
+    pub struct ColumnString<BC = Vec<usize>, VC = Vec<u8>> {
+        /// Bounds container; provides indexed access to offsets.
+        pub bounds: BC,
+        /// Values container; provides slice access to bytes.
+        pub values: VC,
     }
 
-    impl Len for ColumnString {
+    impl<BC: Len, VC> Len for ColumnString<BC, VC> {
         #[inline(always)] fn len(&self) -> usize { self.bounds.len() }
     }
-    impl Index for ColumnString {
+    impl<BC: Len+Deref<Target=[usize]>, VC: Deref<Target=[u8]>> Index for ColumnString<BC, VC> {
         // type Ref<'a> = &'a [u8];
-        type Ref<'a> = &'a str;
+        type Ref<'a> = &'a str where BC: 'a, VC: 'a;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref<'_> {
             let lower = if index == 0 { 0 } else { self.bounds[index - 1] };
             let upper = self.bounds[index];
@@ -366,8 +372,8 @@ pub mod string {
         }
     }
     // Arguably safe, because we don't assume UTF-8, but also off-brand.
-    impl IndexMut for ColumnString {
-        type IndexMut<'a> = &'a mut [u8];
+    impl<BC: Len+Deref<Target=[usize]>, VC: DerefMut<Target=[u8]>> IndexMut for ColumnString<BC, VC> {
+        type IndexMut<'a> = &'a mut [u8] where BC: 'a, VC: 'a;
         #[inline(always)] fn get_mut(&mut self, index: usize) -> Self::IndexMut<'_> {
             let lower = if index == 0 { 0 } else { self.bounds[index] };
             let upper = self.bounds[index];
@@ -413,6 +419,7 @@ pub mod string {
 pub use vector::ColumnVec;
 pub mod vector {
 
+    use std::ops::Deref;
     use super::{Clear, Columnable, Len, Index, IndexMut, Push, HeapSize, Slice};
 
     impl<T: Columnable> Columnable for Vec<T> {
@@ -420,9 +427,9 @@ pub mod vector {
     }
 
     /// A stand-in for `Vec<Vec<T>>` for complex `T`.
-    #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct ColumnVec<TC> {
-        pub bounds: Vec<usize>,
+    #[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct ColumnVec<TC, BC = Vec<usize>> {
+        pub bounds: BC,
         pub values: TC,
     }
 
@@ -433,21 +440,12 @@ pub mod vector {
         }
     }
     
-    impl<TC: Default> Default for ColumnVec<TC> {
-        fn default() -> Self {
-            Self {
-                bounds: Vec::default(),
-                values: TC::default(),
-            }
-        }
-    }
-
-    impl<TC> Len for ColumnVec<TC> {
+    impl<TC, BC: Len> Len for ColumnVec<TC, BC> {
         #[inline(always)] fn len(&self) -> usize { self.bounds.len() }
     }
 
-    impl<TC> Index for ColumnVec<TC> {
-        type Ref<'a> = Slice<&'a TC> where TC: 'a;
+    impl<TC, BC: Len+Deref<Target=[usize]>> Index for ColumnVec<TC, BC> {
+        type Ref<'a> = Slice<&'a TC> where TC: 'a, BC: 'a;
 
         #[inline(always)]
         fn get(&self, index: usize) -> Self::Ref<'_> {
@@ -456,8 +454,8 @@ pub mod vector {
             Slice::new(lower, upper, &self.values)
         }
     }
-    impl<TC> IndexMut for ColumnVec<TC> {
-        type IndexMut<'a> = Slice<&'a mut TC> where TC: 'a;
+    impl<TC, BC: Len+Deref<Target=[usize]>> IndexMut for ColumnVec<TC, BC> {
+        type IndexMut<'a> = Slice<&'a mut TC> where TC: 'a, BC: 'a;
 
         #[inline(always)]
         fn get_mut(&mut self, index: usize) -> Self::IndexMut<'_> {
@@ -618,64 +616,71 @@ pub use sums::{BitsRank, result::ColumnResult, option::ColumnOption};
 /// as containers for each of the variant types can hold the actual data.
 pub mod sums {
 
+    use std::ops::Deref;
+
     /// A store for maintaining `Vec<bool>` with fast rank access.
     /// This is not "succinct" in the technical sense, but it has
     /// similar goals.
     #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct BitsRank {
+    pub struct BitsRank<CC = Vec<u64>, VC = Vec<u64>> {
         /// Counts of the number of cumulative set (true) bits,
         /// *after* each block of 64 bits.
-        counts: Vec<u64>,
+        pub counts: CC,
         /// The bits themselves.
-        bits: Vec<u64>,
+        pub values: VC,
         /// The number of set bits in `bits.last()`.
-        last_bits: usize,
+        pub last_bits: u8,
     }
 
-    impl BitsRank {
-        #[inline] fn push(&mut self, bit: bool) {
-            if self.last_bits == 64 {
-                let last_count = self.counts.last().copied().unwrap_or(0);
-                self.counts.push(last_count + (self.bits.last().unwrap().count_ones() as u64));
-                self.last_bits = 0;
-            }
-            if self.last_bits == 0 {
-                self.bits.push(0);
-            }
-            *self.bits.last_mut().unwrap() |= (bit as u64) << self.last_bits;
-            self.last_bits += 1;
-        }
+    impl<CC: Deref<Target = [u64]>, VC: Deref<Target = [u64]>> BitsRank<CC, VC> {
         #[inline] pub fn get(&self, index: usize) -> bool {
             let block = index / 64;
             let bit = index % 64;
-            (self.bits[block] >> bit) & 1 == 1
+            (self.values[block] >> bit) & 1 == 1
         }
         /// The number of set bits *strictly* preceding `index`.
         pub fn rank(&self, index: usize) -> usize {
             let block = index / 64;
             let bit = index % 64;
             let inter_count = if block == 0 { 0 } else { self.counts.get(block-1).copied().unwrap_or(0) } as usize;
-            let intra_count = (self.bits[block] & ((1 << bit) - 1)).count_ones() as usize;
+            let intra_count = (self.values[block] & ((1 << bit) - 1)).count_ones() as usize;
             inter_count + intra_count
         }
         fn len(&self) -> usize {
-            self.counts.len() * 64 + self.last_bits
+            self.counts.len() * 64 + (self.last_bits as usize)
+        }
+    }
+
+    impl BitsRank {
+        #[inline] fn push(&mut self, bit: bool) {
+            if self.last_bits == 64 {
+                let last_count = self.counts.last().copied().unwrap_or(0);
+                self.counts.push(last_count + (self.values.last().unwrap().count_ones() as u64));
+                self.last_bits = 0;
+            }
+            if self.last_bits == 0 {
+                self.values.push(0);
+            }
+            *self.values.last_mut().unwrap() |= (bit as u64) << self.last_bits;
+            self.last_bits += 1;
         }
         fn clear(&mut self) {
             self.counts.clear();
-            self.bits.clear();
+            self.values.clear();
             self.last_bits = 0;
         }
         fn heap_size(&self) -> (usize, usize) {
             let cl = std::mem::size_of::<u64>() * self.counts.len();
-            let bl = std::mem::size_of::<u64>() * self.bits.len();
+            let bl = std::mem::size_of::<u64>() * self.values.len();
             let cc = std::mem::size_of::<u64>() * self.counts.capacity();
-            let bc = std::mem::size_of::<u64>() * self.bits.capacity();
+            let bc = std::mem::size_of::<u64>() * self.values.capacity();
             (cl + bl, cc + bc)
         }
     }
 
     pub mod result {
+
+        use std::ops::Deref;
 
         use super::super::{Clear, Columnable, Len, Index, IndexMut, Push, HeapSize};
         use super::BitsRank;
@@ -685,20 +690,20 @@ pub mod sums {
         }
 
         #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-        pub struct ColumnResult<SC, TC> {
+        pub struct ColumnResult<SC, TC, CC=Vec<u64>, VC=Vec<u64>> {
             /// Uses two bits for each item, one to indicate the variant and one (amortized)
             /// to enable efficient rank determination.
-            pub indexes: BitsRank,
+            pub indexes: BitsRank<CC, VC>,
             pub s_store: SC,
             pub t_store: TC,
         }
 
-        impl<SC, TC> Len for ColumnResult<SC, TC> {
+        impl<SC, TC, CC: Deref<Target = [u64]>, VC: Deref<Target = [u64]>> Len for ColumnResult<SC, TC, CC, VC> {
             #[inline(always)] fn len(&self) -> usize { self.indexes.len() }
         }
 
-        impl<SC: Index, TC: Index> Index for ColumnResult<SC, TC> {
-            type Ref<'a> = Result<SC::Ref<'a>, TC::Ref<'a>> where SC: 'a, TC: 'a;
+        impl<SC: Index, TC: Index, CC: Deref<Target = [u64]>, VC: Deref<Target = [u64]>> Index for ColumnResult<SC, TC, CC, VC> {
+            type Ref<'a> = Result<SC::Ref<'a>, TC::Ref<'a>> where SC: 'a, TC: 'a, CC: 'a, VC: 'a;
             fn get(&self, index: usize) -> Self::Ref<'_> {
                 if self.indexes.get(index) {
                     Ok(self.s_store.get(self.indexes.rank(index)))
@@ -708,8 +713,8 @@ pub mod sums {
             }
         }
         // NB: You are not allowed to change the variant, but can change its contents.
-        impl<SC: IndexMut, TC: IndexMut> IndexMut for ColumnResult<SC, TC> {
-            type IndexMut<'a> = Result<SC::IndexMut<'a>, TC::IndexMut<'a>> where SC: 'a, TC: 'a;
+        impl<SC: IndexMut, TC: IndexMut, CC: Deref<Target = [u64]>, VC: Deref<Target = [u64]>> IndexMut for ColumnResult<SC, TC, CC, VC> {
+            type IndexMut<'a> = Result<SC::IndexMut<'a>, TC::IndexMut<'a>> where SC: 'a, TC: 'a, CC: 'a, VC: 'a;
             fn get_mut(&mut self, index: usize) -> Self::IndexMut<'_> {
                 if self.indexes.get(index) {
                     Ok(self.s_store.get_mut(self.indexes.rank(index)))
@@ -815,6 +820,8 @@ pub mod sums {
 
     pub mod option {
 
+        use std::ops::Deref;
+
         use super::super::{Clear, Columnable, Len, Index, IndexMut, Push, HeapSize};
         use super::BitsRank;
 
@@ -823,19 +830,19 @@ pub mod sums {
         }
 
         #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-        pub struct ColumnOption<TC> {
+        pub struct ColumnOption<TC, CC=Vec<u64>, VC=Vec<u64>> {
             /// Uses two bits for each item, one to indicate the variant and one (amortized)
             /// to enable efficient rank determination.
-            pub indexes: BitsRank,
+            pub indexes: BitsRank<CC, VC>,
             pub t_store: TC,
         }
 
-        impl<T> Len for ColumnOption<T> {
+        impl<T, CC: Deref<Target = [u64]>, VC: Deref<Target = [u64]>> Len for ColumnOption<T, CC, VC> {
             #[inline(always)] fn len(&self) -> usize { self.indexes.len() }
         }
 
-        impl<T: Index> Index for ColumnOption<T> {
-            type Ref<'a> = Option<T::Ref<'a>> where T: 'a;
+        impl<T: Index, CC: Deref<Target = [u64]>, VC: Deref<Target = [u64]>> Index for ColumnOption<T, CC, VC> {
+            type Ref<'a> = Option<T::Ref<'a>> where T: 'a, CC: 'a, VC: 'a;
             fn get(&self, index: usize) -> Self::Ref<'_> {
                 if self.indexes.get(index) {
                     Some(self.t_store.get(self.indexes.rank(index)))
@@ -844,8 +851,8 @@ pub mod sums {
                 }
             }
         }
-        impl<T: IndexMut> IndexMut for ColumnOption<T> {
-            type IndexMut<'a> = Option<T::IndexMut<'a>> where T: 'a;
+        impl<T: IndexMut, CC: Deref<Target = [u64]>, VC: Deref<Target = [u64]>> IndexMut for ColumnOption<T, CC, VC> {
+            type IndexMut<'a> = Option<T::IndexMut<'a>> where T: 'a, CC: 'a, VC: 'a;
             fn get_mut(&mut self, index: usize) -> Self::IndexMut<'_> {
                 if self.indexes.get(index) {
                     Some(self.t_store.get_mut(self.indexes.rank(index)))
@@ -931,15 +938,15 @@ pub mod sums {
 }
 
 pub use lookback::{ColumnRepeats, ColumnLookback};
-/// A container that can store either values, or offsets to prior values.
+/// Containers that can store either values, or offsets to prior values.
 ///
 /// This has the potential to be more efficient than a list of `T` when many values repeat in
-/// close proximity. Values must be equateable, and the degree of lookback can be configured.
+/// close proximity. Values must be equatable, and the degree of lookback can be configured.
 pub mod lookback {
 
     use crate::{ColumnOption, ColumnResult, Push, Index, Len, HeapSize};
 
-    /// A container that encodes repeated values with a `None` variant, at the cost of a few extra bits for every record.
+    /// A container that encodes repeated values with a `None` variant, at the cost of extra bits for every record.
     #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct ColumnRepeats<TC, const N: u8 = 255> {
         /// Some(x) encodes a value, and None indicates the prior `x` value.
