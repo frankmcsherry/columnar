@@ -287,7 +287,7 @@ impl<T> Clear for Vec<T> {
 /// Types that prefer to be represented by `Vec<T>`.
 pub mod primitive {
 
-    use super::{Clear, Columnable, Len, Index, IndexMut, Push, HeapSize};
+    use super::Columnable;
 
     /// An implementation of opinions for types that want to use `Vec<T>`.
     macro_rules! implement_columnable {
@@ -298,45 +298,173 @@ pub mod primitive {
         )* }
     }
 
-    implement_columnable!(bool, char);
+    implement_columnable!(char);
     implement_columnable!(u8, u16, u32, u64, u128, usize);
     implement_columnable!(i8, i16, i32, i64, i128, isize);
     implement_columnable!(f32, f64);
-    implement_columnable!(std::time::Duration);
 
-    #[derive(Default)]
-    pub struct Empties { count: usize, empty: () }
+    pub use empty::Empties;
+    /// A columnar store for `()`.
+    mod empty {
 
-    impl Len for Empties {
-        fn len(&self) -> usize { self.count }
-    }
-    impl Index for Empties {
-        type Ref<'a> = &'a ();
-        // TODO: panic if out of bounds?
-        #[inline(always)] fn get(&self, _index: usize) -> Self::Ref<'_> { &() }
-    }
-    impl IndexMut for Empties {
-        type IndexMut<'a> = &'a mut ();
-        // TODO: panic if out of bounds?
-        #[inline(always)] fn get_mut(&mut self, _index: usize) -> Self::IndexMut<'_> { &mut self.empty }
-    }
-    impl Push<()> for Empties {
-        // TODO: check for overflow?
-        fn push(&mut self, _item: ()) { self.count += 1; }
-    }
-    impl Push<&()> for Empties {
-        // TODO: check for overflow?
-        fn push(&mut self, _item: &()) { self.count += 1; }
+        use crate::{Clear, Columnable, Len, Index, IndexMut, Push, HeapSize};
+
+        #[derive(Default)]
+        pub struct Empties { count: usize, empty: () }
+
+        impl Len for Empties {
+            fn len(&self) -> usize { self.count }
+        }
+        impl Index for Empties {
+            type Ref<'a> = &'a ();
+            // TODO: panic if out of bounds?
+            #[inline(always)] fn get(&self, _index: usize) -> Self::Ref<'_> { &() }
+        }
+        impl IndexMut for Empties {
+            type IndexMut<'a> = &'a mut ();
+            // TODO: panic if out of bounds?
+            #[inline(always)] fn get_mut(&mut self, _index: usize) -> Self::IndexMut<'_> { &mut self.empty }
+        }
+        impl Push<()> for Empties {
+            // TODO: check for overflow?
+            fn push(&mut self, _item: ()) { self.count += 1; }
+        }
+        impl Push<&()> for Empties {
+            // TODO: check for overflow?
+            fn push(&mut self, _item: &()) { self.count += 1; }
+        }
+
+        impl Columnable for () {
+            type Columns = Empties;
+        }
+        impl HeapSize for Empties {
+            fn heap_size(&self) -> (usize, usize) { (0, 0) }
+        }
+        impl Clear for Empties {
+            fn clear(&mut self) { self.count = 0; }
+        }
     }
 
-    impl Columnable for () {
-        type Columns = Empties;
+    pub use boolean::ColumnBool;
+    /// A columnar store for `bool`.
+    mod boolean {
+
+        use crate::{Clear, Len, Index, Push, HeapSize};
+
+        impl crate::Columnable for bool {
+            type Columns = ColumnBool;
+        }
+
+        /// A store for maintaining `Vec<bool>`.
+        #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+        pub struct ColumnBool<VC = Vec<u64>> {
+            /// The bundles of bits that form complete `u64` values.
+            pub values: VC,
+            /// The work-in-progress bits that are not yet complete.
+            pub last_word: u64,
+            /// The number of set bits in `bits.last()`.
+            pub last_bits: u8,
+        }
+
+
+        impl<VC: Len> Len for ColumnBool<VC> {
+            #[inline(always)] fn len(&self) -> usize { self.values.len() * 64 + (self.last_bits as usize) }
+        }
+
+        // Our `Index` implementation needs `VC` to implement `std::ops::Index`,
+        // because I couldn't figure out how to exress the constraint that the
+        // `Index::Ref<'_>` type is always `u64` or `&u64` or something similar.
+        impl<VC: Len+std::ops::Index<usize, Output=u64>> Index for ColumnBool<VC> {
+            type Ref<'a> = bool where VC: 'a;
+            #[inline(always)] fn get(&self, index: usize) -> Self::Ref<'_> {
+                let block = index / 64;
+                let word = if block == self.values.len() {
+                    self.last_word
+                } else {
+                    self.values[block]
+                };
+                let bit = index % 64;
+                (word >> bit) & 1 == 1
+            }
+        }
+
+        impl<VC: Push<u64>> Push<bool> for ColumnBool<VC> {
+            fn push(&mut self, bit: bool) {
+                self.last_word |= (bit as u64) << self.last_bits;
+                self.last_bits += 1;
+                // If we have a fully formed word, commit it to `self.values`.
+                if self.last_bits == 64 {
+                    self.values.push(self.last_word);
+                    self.last_word = 0;
+                    self.last_bits = 0;
+                }
+            }
+        }
+
+        impl<VC: Clear> Clear for ColumnBool<VC> {
+            fn clear(&mut self) {
+                self.values.clear();
+                self.last_word = 0;
+                self.last_bits = 0;
+            }
+        }
+
+        impl<VC: HeapSize> HeapSize for ColumnBool<VC> {
+            fn heap_size(&self) -> (usize, usize) {
+                self.values.heap_size()
+            }
+        }
     }
-    impl HeapSize for Empties {
-        fn heap_size(&self) -> (usize, usize) { (0, 0) }
-    }
-    impl Clear for Empties {
-        fn clear(&mut self) { self.count = 0; }
+
+    pub use duration::ColumnDuration;
+    /// A columnar store for `std::time::Duration`.
+    mod duration {
+
+        use crate::{Len, Index, Push, Clear, HeapSize};
+
+        impl crate::Columnable for std::time::Duration {
+            type Columns = ColumnDuration;
+        }
+
+        // `std::time::Duration` is equivalent to `(u64, u32)`, corresponding to seconds and nanoseconds.
+        #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+        pub struct ColumnDuration<SC = Vec<u64>, NC = Vec<u32>> {
+            seconds: SC,
+            nanoseconds: NC,
+        }
+
+        impl<SC: Len, NC> Len for ColumnDuration<SC, NC> {
+            #[inline(always)] fn len(&self) -> usize { self.seconds.len() }
+        }
+
+        impl<SC: Index, NC: Index> Index for ColumnDuration<SC, NC> {
+            type Ref<'a> = (SC::Ref<'a>, NC::Ref<'a>) where SC: 'a, NC: 'a;
+            #[inline(always)] fn get(&self, index: usize) -> Self::Ref<'_> {
+                (self.seconds.get(index), self.nanoseconds.get(index))
+            }
+        }
+
+        impl<SC: Push<u64>, NC: Push<u32>> Push<std::time::Duration> for ColumnDuration<SC, NC> {
+            fn push(&mut self, item: std::time::Duration) {
+                self.seconds.push(item.as_secs());
+                self.nanoseconds.push(item.subsec_nanos());
+            }
+        }
+
+        impl<SC: Clear, NC: Clear> Clear for ColumnDuration<SC, NC> {
+            fn clear(&mut self) {
+                self.seconds.clear();
+                self.nanoseconds.clear();
+            }
+        }
+
+        impl<SC: HeapSize, NC: HeapSize> HeapSize for ColumnDuration<SC, NC> {
+            fn heap_size(&self) -> (usize, usize) {
+                let (l0, c0) = self.seconds.heap_size();
+                let (l1, c1) = self.nanoseconds.heap_size();
+                (l0 + l1, c0 + c1)
+            }
+        }
     }
 }
 
@@ -616,7 +744,8 @@ pub use sums::{BitsRank, result::ColumnResult, option::ColumnOption};
 /// as containers for each of the variant types can hold the actual data.
 pub mod sums {
 
-    use std::ops::Deref;
+    use crate::primitive::ColumnBool;
+    use crate::{Len, Index, Push, Clear, HeapSize};
 
     /// A store for maintaining `Vec<bool>` with fast rank access.
     /// This is not "succinct" in the technical sense, but it has
@@ -627,54 +756,46 @@ pub mod sums {
         /// *after* each block of 64 bits.
         pub counts: CC,
         /// The bits themselves.
-        pub values: VC,
-        /// The number of set bits in `bits.last()`.
-        pub last_bits: u8,
+        pub values: ColumnBool<VC>,
     }
 
-    impl<CC: Deref<Target = [u64]>, VC: Deref<Target = [u64]>> BitsRank<CC, VC> {
+    impl<CC, VC: Len+std::ops::Index<usize, Output=u64>> BitsRank<CC, VC> {
         #[inline] pub fn get(&self, index: usize) -> bool {
-            let block = index / 64;
-            let bit = index % 64;
-            (self.values[block] >> bit) & 1 == 1
+            self.values.get(index)
         }
+    }
+    impl<CC: std::ops::Index<usize, Output=u64>, VC: std::ops::Index<usize, Output=u64>> BitsRank<CC, VC> {
         /// The number of set bits *strictly* preceding `index`.
         pub fn rank(&self, index: usize) -> usize {
             let block = index / 64;
             let bit = index % 64;
-            let inter_count = if block == 0 { 0 } else { self.counts.get(block-1).copied().unwrap_or(0) } as usize;
-            let intra_count = (self.values[block] & ((1 << bit) - 1)).count_ones() as usize;
+            let inter_count = if block == 0 { 0 } else { self.counts[block - 1] } as usize;
+            let intra_count = (self.values.values[block] & ((1 << bit) - 1)).count_ones() as usize;
             inter_count + intra_count
         }
+    }
+    impl<CC, VC: Len> BitsRank<CC, VC> {
         fn len(&self) -> usize {
-            self.counts.len() * 64 + (self.last_bits as usize)
+            self.values.len()
         }
     }
 
     impl BitsRank {
         #[inline] fn push(&mut self, bit: bool) {
-            if self.last_bits == 64 {
+            self.values.push(bit);
+            while self.counts.len() < self.values.len() / 64 {
                 let last_count = self.counts.last().copied().unwrap_or(0);
-                self.counts.push(last_count + (self.values.last().unwrap().count_ones() as u64));
-                self.last_bits = 0;
+                self.counts.push(last_count + (self.values.values.last().unwrap().count_ones() as u64));
             }
-            if self.last_bits == 0 {
-                self.values.push(0);
-            }
-            *self.values.last_mut().unwrap() |= (bit as u64) << self.last_bits;
-            self.last_bits += 1;
         }
         fn clear(&mut self) {
             self.counts.clear();
             self.values.clear();
-            self.last_bits = 0;
         }
         fn heap_size(&self) -> (usize, usize) {
-            let cl = std::mem::size_of::<u64>() * self.counts.len();
-            let bl = std::mem::size_of::<u64>() * self.values.len();
-            let cc = std::mem::size_of::<u64>() * self.counts.capacity();
-            let bc = std::mem::size_of::<u64>() * self.values.capacity();
-            (cl + bl, cc + bc)
+            let (l0, c0) = self.counts.heap_size();
+            let (l1, c1) = self.values.heap_size();
+            (l0 + l1, c0 + c1)
         }
     }
 
@@ -698,11 +819,11 @@ pub mod sums {
             pub t_store: TC,
         }
 
-        impl<SC, TC, CC: Deref<Target = [u64]>, VC: Deref<Target = [u64]>> Len for ColumnResult<SC, TC, CC, VC> {
+        impl<SC, TC, CC, VC: Len> Len for ColumnResult<SC, TC, CC, VC> {
             #[inline(always)] fn len(&self) -> usize { self.indexes.len() }
         }
 
-        impl<SC: Index, TC: Index, CC: Deref<Target = [u64]>, VC: Deref<Target = [u64]>> Index for ColumnResult<SC, TC, CC, VC> {
+        impl<SC: Index, TC: Index, CC: Deref<Target = [u64]>+std::ops::Index<usize, Output=u64>, VC: Len+Deref<Target = [u64]>+std::ops::Index<usize, Output=u64>> Index for ColumnResult<SC, TC, CC, VC> {
             type Ref<'a> = Result<SC::Ref<'a>, TC::Ref<'a>> where SC: 'a, TC: 'a, CC: 'a, VC: 'a;
             fn get(&self, index: usize) -> Self::Ref<'_> {
                 if self.indexes.get(index) {
@@ -713,7 +834,7 @@ pub mod sums {
             }
         }
         // NB: You are not allowed to change the variant, but can change its contents.
-        impl<SC: IndexMut, TC: IndexMut, CC: Deref<Target = [u64]>, VC: Deref<Target = [u64]>> IndexMut for ColumnResult<SC, TC, CC, VC> {
+        impl<SC: IndexMut, TC: IndexMut, CC: Deref<Target = [u64]>+std::ops::Index<usize, Output=u64>, VC: Len+Deref<Target = [u64]>+std::ops::Index<usize, Output=u64>> IndexMut for ColumnResult<SC, TC, CC, VC> {
             type IndexMut<'a> = Result<SC::IndexMut<'a>, TC::IndexMut<'a>> where SC: 'a, TC: 'a, CC: 'a, VC: 'a;
             fn get_mut(&mut self, index: usize) -> Self::IndexMut<'_> {
                 if self.indexes.get(index) {
@@ -820,9 +941,7 @@ pub mod sums {
 
     pub mod option {
 
-        use std::ops::Deref;
-
-        use super::super::{Clear, Columnable, Len, Index, IndexMut, Push, HeapSize};
+        use crate::{Clear, Columnable, Len, Index, IndexMut, Push, HeapSize};
         use super::BitsRank;
 
         impl<T: Columnable> Columnable for Option<T> {
@@ -837,12 +956,12 @@ pub mod sums {
             pub t_store: TC,
         }
 
-        impl<T, CC: Deref<Target = [u64]>, VC: Deref<Target = [u64]>> Len for ColumnOption<T, CC, VC> {
+        impl<T, CC, VC: Len> Len for ColumnOption<T, CC, VC> {
             #[inline(always)] fn len(&self) -> usize { self.indexes.len() }
         }
 
-        impl<T: Index, CC: Deref<Target = [u64]>, VC: Deref<Target = [u64]>> Index for ColumnOption<T, CC, VC> {
-            type Ref<'a> = Option<T::Ref<'a>> where T: 'a, CC: 'a, VC: 'a;
+        impl<TC: Index, CC: std::ops::Index<usize, Output=u64>, VC: Len+std::ops::Index<usize, Output=u64>> Index for ColumnOption<TC, CC, VC> {
+            type Ref<'a> = Option<TC::Ref<'a>> where TC: 'a, CC: 'a, VC: 'a;
             fn get(&self, index: usize) -> Self::Ref<'_> {
                 if self.indexes.get(index) {
                     Some(self.t_store.get(self.indexes.rank(index)))
@@ -851,8 +970,8 @@ pub mod sums {
                 }
             }
         }
-        impl<T: IndexMut, CC: Deref<Target = [u64]>, VC: Deref<Target = [u64]>> IndexMut for ColumnOption<T, CC, VC> {
-            type IndexMut<'a> = Option<T::IndexMut<'a>> where T: 'a, CC: 'a, VC: 'a;
+        impl<TC: IndexMut, CC: std::ops::Index<usize, Output=u64>, VC: Len+std::ops::Index<usize, Output=u64>> IndexMut for ColumnOption<TC, CC, VC> {
+            type IndexMut<'a> = Option<TC::IndexMut<'a>> where TC: 'a, CC: 'a, VC: 'a;
             fn get_mut(&mut self, index: usize) -> Self::IndexMut<'_> {
                 if self.indexes.get(index) {
                     Some(self.t_store.get_mut(self.indexes.rank(index)))

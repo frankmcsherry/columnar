@@ -99,10 +99,27 @@ tuple_impl!(A B C D E F G H);
 tuple_impl!(A B C D E F G H I);
 tuple_impl!(A B C D E F G H I J);
 
+impl<VC: AsBytes> AsBytes for crate::primitive::ColumnBool<VC> {
+    fn as_bytes(&self) -> impl Iterator<Item=(usize, &[u8])> {
+        self.values.as_bytes()
+        .chain(std::iter::once((std::mem::align_of::<u64>(), bytemuck::cast_slice(std::slice::from_ref(&self.last_word)))))
+        .chain(std::iter::once((1, bytemuck::cast_slice(std::slice::from_ref(&self.last_bits)))))
+    }
+}
+
+impl<'a, VC: FromBytes<'a>> FromBytes<'a> for crate::primitive::ColumnBool<VC> {
+    fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+        let values = FromBytes::from_bytes(bytes);
+        let last_word = bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0];
+        let last_bits = bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0];
+        Self { values, last_word, last_bits }
+    }
+}
+
 
 impl<CC: AsBytes, VC: AsBytes> AsBytes for BitsRank<CC, VC> {
     fn as_bytes(&self) -> impl Iterator<Item=(usize, &[u8])> {
-        self.counts.as_bytes().chain(self.values.as_bytes()).chain(std::iter::once((1, std::slice::from_ref(&self.last_bits))))
+        self.counts.as_bytes().chain(self.values.as_bytes())
     }
 }
 impl<'a, CC: FromBytes<'a>, VC: FromBytes<'a>> FromBytes<'a> for BitsRank<CC, VC> {
@@ -110,7 +127,6 @@ impl<'a, CC: FromBytes<'a>, VC: FromBytes<'a>> FromBytes<'a> for BitsRank<CC, VC
         Self {
             counts: FromBytes::from_bytes(bytes),
             values: FromBytes::from_bytes(bytes),
-            last_bits: bytes.next().unwrap()[0],
         }
     }
 }
