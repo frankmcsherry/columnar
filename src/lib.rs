@@ -6,7 +6,7 @@
 //! a real `T` lying around to return as a reference. Instead, we will
 //! use Generic Associated Types (GATs) to provide alternate references.
 
-mod bytes;
+pub mod bytes;
 
 /// A type that can be represented in columnar form.
 pub trait Columnable : Sized {
@@ -67,7 +67,7 @@ pub mod common {
             else { Some(self.get(self.len()-1)) }
         }
         /// An iterator over references to indexed elements.
-        #[inline(always)] fn iter(&self) -> IndexIter<'_, Self> {
+        #[inline(always)] fn iter(&self) -> IndexIter<&Self> {
             IndexIter {
                 index: 0,
                 slice: self
@@ -118,7 +118,14 @@ pub mod common {
     pub trait HeapSize {
         /// Active (len) and allocated (cap) heap sizes in bytes.
         /// This should not include the size of `self` itself.
-        fn heap_size(&self) -> (usize, usize);
+        fn heap_size(&self) -> (usize, usize) { (0, 0) }
+    }
+
+    impl HeapSize for serde_json::Number { }
+    impl HeapSize for String {
+        fn heap_size(&self) -> (usize, usize) {
+            (self.len(), self.capacity())
+        }
     }
 
     /// A struct representing a slice of a range of values.
@@ -173,7 +180,7 @@ pub mod common {
 
 
     impl<S: Index> Slice<S> {
-        pub fn iter(&self) -> IndexIter<'_, Self> {
+        pub fn iter(&self) -> IndexIter<&Self> {
             IndexIter {
                 index: 0,
                 slice: self
@@ -183,7 +190,7 @@ pub mod common {
 
     impl<'a, S: Index> IntoIterator for &'a Slice<S> {
         type Item = S::Ref<'a>;
-        type IntoIter = IndexIter<'a, Slice<S>>;
+        type IntoIter = IndexIter<&'a Slice<S>>;
         #[inline(always)] fn into_iter(self) -> Self::IntoIter {
             IndexIter {
                 index: 0,
@@ -192,18 +199,37 @@ pub mod common {
         }
     }
 
-    pub struct IndexIter<'a, S: ?Sized> {
-        index: usize,
-        slice: &'a S,
+    impl<S: Index, T> PartialEq<[T]> for Slice<S> where for<'a> S::Ref<'a>: PartialEq<&'a T>{
+        fn eq(&self, other: &[T]) -> bool {
+            if self.len() != other.len() { return false; }
+            for (a, b) in self.iter().zip(other.iter()) {
+                if a != b { return false; }
+            }
+            true
+        }
+    }
+    impl<S: Index, T> PartialEq<Vec<T>> for Slice<S> where for<'a> S::Ref<'a>: PartialEq<&'a T> {
+        fn eq(&self, other: &Vec<T>) -> bool {
+            if self.len() != other.len() { return false; }
+            for (a, b) in self.iter().zip(other.iter()) {
+                if a != b { return false; }
+            }
+            true
+        }
     }
 
-    impl<'a, S: ?Sized> IndexIter<'a, S> {
-        pub fn new(index: usize, slice: &'a S) -> Self {
+    pub struct IndexIter<S: ?Sized> {
+        index: usize,
+        slice: S,
+    }
+
+    impl<S> IndexIter<S> {
+        pub fn new(index: usize, slice: S) -> Self {
             Self { index, slice }
         }
     }
 
-    impl<'a, S: Index + Len> Iterator for IndexIter<'a, S> {
+    impl<'a, S: Index + Len> Iterator for IndexIter<&'a S> {
         type Item = S::Ref<'a>;
 
         #[inline(always)] fn next(&mut self) -> Option<Self::Item> {
@@ -223,21 +249,21 @@ pub mod common {
 // Simple types cannot be further reduced, and some complex types (e.g. `Rc<T>`)
 // may have no other options but to use `Vec<T>`.
 //
-// Importantly, this implementation *allows* types to be stored in a  `Vec`, but 
+// Importantly, this implementation *allows* types to be stored in a  `Vec`, but
 // it does not implement `Columnable` for them nor express a preference for storage.
 
 // This implementation does not chase down the heap contributions of the owned items.
 // It *should*, to give a fair assessment vis-a-vis other representations, but it is
 // annoying for vectors of types we neither control nor anticipate with `HeapSize`.
-impl<T> HeapSize for Vec<T> {
+impl<T: HeapSize> HeapSize for Vec<T> {
     fn heap_size(&self) -> (usize, usize) {
-        let l = std::mem::size_of::<T>() * self.len();
-        let c = std::mem::size_of::<T>() * self.capacity();
-        // for item in self.iter() {
-        //     let (il, ic) = item.heap_size();
-        //     l += il;
-        //     c += ic;
-        // }
+        let mut l = std::mem::size_of::<T>() * self.len();
+        let mut c = std::mem::size_of::<T>() * self.capacity();
+        for item in self.iter() {
+            let (il, ic) = item.heap_size();
+            l += il;
+            c += ic;
+        }
         (l, c)
     }
 }
@@ -287,14 +313,13 @@ impl<T> Clear for Vec<T> {
 /// Types that prefer to be represented by `Vec<T>`.
 pub mod primitive {
 
-    use super::Columnable;
-
     /// An implementation of opinions for types that want to use `Vec<T>`.
     macro_rules! implement_columnable {
         ($($index_type:ty),*) => { $(
-            impl Columnable for $index_type {
+            impl crate::Columnable for $index_type {
                 type Columns = Vec<$index_type>;
             }
+            impl crate::HeapSize for $index_type { }
         )* }
     }
 
@@ -310,13 +335,13 @@ pub mod primitive {
         use crate::{Clear, Columnable, Len, Index, IndexMut, Push, HeapSize};
 
         #[derive(Default)]
-        pub struct Empties { count: usize, empty: () }
+        pub struct Empties { pub count: usize, pub empty: () }
 
         impl Len for Empties {
             fn len(&self) -> usize { self.count }
         }
         impl Index for Empties {
-            type Ref<'a> = &'a ();
+            type Ref<'a> = &'static ();
             // TODO: panic if out of bounds?
             #[inline(always)] fn get(&self, _index: usize) -> Self::Ref<'_> { &() }
         }
@@ -345,19 +370,19 @@ pub mod primitive {
         }
     }
 
-    pub use boolean::ColumnBool;
+    pub use boolean::Bools;
     /// A columnar store for `bool`.
     mod boolean {
 
         use crate::{Clear, Len, Index, Push, HeapSize};
 
         impl crate::Columnable for bool {
-            type Columns = ColumnBool;
+            type Columns = Bools;
         }
 
         /// A store for maintaining `Vec<bool>`.
         #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-        pub struct ColumnBool<VC = Vec<u64>> {
+        pub struct Bools<VC = Vec<u64>> {
             /// The bundles of bits that form complete `u64` values.
             pub values: VC,
             /// The work-in-progress bits that are not yet complete.
@@ -367,14 +392,14 @@ pub mod primitive {
         }
 
 
-        impl<VC: Len> Len for ColumnBool<VC> {
+        impl<VC: Len> Len for Bools<VC> {
             #[inline(always)] fn len(&self) -> usize { self.values.len() * 64 + (self.last_bits as usize) }
         }
 
         // Our `Index` implementation needs `VC` to implement `std::ops::Index`,
         // because I couldn't figure out how to exress the constraint that the
         // `Index::Ref<'_>` type is always `u64` or `&u64` or something similar.
-        impl<VC: Len+std::ops::Index<usize, Output=u64>> Index for ColumnBool<VC> {
+        impl<VC: Len+std::ops::Index<usize, Output=u64>> Index for Bools<VC> {
             type Ref<'a> = bool where VC: 'a;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref<'_> {
                 let block = index / 64;
@@ -388,7 +413,7 @@ pub mod primitive {
             }
         }
 
-        impl<VC: Push<u64>> Push<bool> for ColumnBool<VC> {
+        impl<VC: Push<u64>> Push<bool> for Bools<VC> {
             fn push(&mut self, bit: bool) {
                 self.last_word |= (bit as u64) << self.last_bits;
                 self.last_bits += 1;
@@ -401,7 +426,7 @@ pub mod primitive {
             }
         }
 
-        impl<VC: Clear> Clear for ColumnBool<VC> {
+        impl<VC: Clear> Clear for Bools<VC> {
             fn clear(&mut self) {
                 self.values.clear();
                 self.last_word = 0;
@@ -409,56 +434,56 @@ pub mod primitive {
             }
         }
 
-        impl<VC: HeapSize> HeapSize for ColumnBool<VC> {
+        impl<VC: HeapSize> HeapSize for Bools<VC> {
             fn heap_size(&self) -> (usize, usize) {
                 self.values.heap_size()
             }
         }
     }
 
-    pub use duration::ColumnDuration;
+    pub use duration::Durations;
     /// A columnar store for `std::time::Duration`.
     mod duration {
 
         use crate::{Len, Index, Push, Clear, HeapSize};
 
         impl crate::Columnable for std::time::Duration {
-            type Columns = ColumnDuration;
+            type Columns = Durations;
         }
 
         // `std::time::Duration` is equivalent to `(u64, u32)`, corresponding to seconds and nanoseconds.
         #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-        pub struct ColumnDuration<SC = Vec<u64>, NC = Vec<u32>> {
-            seconds: SC,
-            nanoseconds: NC,
+        pub struct Durations<SC = Vec<u64>, NC = Vec<u32>> {
+            pub seconds: SC,
+            pub nanoseconds: NC,
         }
 
-        impl<SC: Len, NC> Len for ColumnDuration<SC, NC> {
+        impl<SC: Len, NC> Len for Durations<SC, NC> {
             #[inline(always)] fn len(&self) -> usize { self.seconds.len() }
         }
 
-        impl<SC: Index, NC: Index> Index for ColumnDuration<SC, NC> {
+        impl<SC: Index, NC: Index> Index for Durations<SC, NC> {
             type Ref<'a> = (SC::Ref<'a>, NC::Ref<'a>) where SC: 'a, NC: 'a;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref<'_> {
                 (self.seconds.get(index), self.nanoseconds.get(index))
             }
         }
 
-        impl<SC: Push<u64>, NC: Push<u32>> Push<std::time::Duration> for ColumnDuration<SC, NC> {
+        impl<SC: Push<u64>, NC: Push<u32>> Push<std::time::Duration> for Durations<SC, NC> {
             fn push(&mut self, item: std::time::Duration) {
                 self.seconds.push(item.as_secs());
                 self.nanoseconds.push(item.subsec_nanos());
             }
         }
 
-        impl<SC: Clear, NC: Clear> Clear for ColumnDuration<SC, NC> {
+        impl<SC: Clear, NC: Clear> Clear for Durations<SC, NC> {
             fn clear(&mut self) {
                 self.seconds.clear();
                 self.nanoseconds.clear();
             }
         }
 
-        impl<SC: HeapSize, NC: HeapSize> HeapSize for ColumnDuration<SC, NC> {
+        impl<SC: HeapSize, NC: HeapSize> HeapSize for Durations<SC, NC> {
             fn heap_size(&self) -> (usize, usize) {
                 let (l0, c0) = self.seconds.heap_size();
                 let (l1, c1) = self.nanoseconds.heap_size();
@@ -468,29 +493,32 @@ pub mod primitive {
     }
 }
 
-pub use string::ColumnString;
+pub use string::Strings;
 pub mod string {
 
     use std::ops::{Deref, DerefMut};
     use super::{Clear, Columnable, Len, Index, IndexMut, Push, HeapSize};
 
     impl Columnable for String {
-        type Columns = ColumnString;
+        type Columns = Strings;
+    }
+    impl Columnable for &str {
+        type Columns = Strings;
     }
 
     /// A stand-in for `Vec<String>`.
     #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct ColumnString<BC = Vec<usize>, VC = Vec<u8>> {
+    pub struct Strings<BC = Vec<usize>, VC = Vec<u8>> {
         /// Bounds container; provides indexed access to offsets.
         pub bounds: BC,
         /// Values container; provides slice access to bytes.
         pub values: VC,
     }
 
-    impl<BC: Len, VC> Len for ColumnString<BC, VC> {
+    impl<BC: Len, VC> Len for Strings<BC, VC> {
         #[inline(always)] fn len(&self) -> usize { self.bounds.len() }
     }
-    impl<BC: Len+Deref<Target=[usize]>, VC: Deref<Target=[u8]>> Index for ColumnString<BC, VC> {
+    impl<BC: Len+Deref<Target=[usize]>, VC: Deref<Target=[u8]>> Index for Strings<BC, VC> {
         // type Ref<'a> = &'a [u8];
         type Ref<'a> = &'a str where BC: 'a, VC: 'a;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref<'_> {
@@ -500,7 +528,7 @@ pub mod string {
         }
     }
     // Arguably safe, because we don't assume UTF-8, but also off-brand.
-    impl<BC: Len+Deref<Target=[usize]>, VC: DerefMut<Target=[u8]>> IndexMut for ColumnString<BC, VC> {
+    impl<BC: Len+Deref<Target=[usize]>, VC: DerefMut<Target=[u8]>> IndexMut for Strings<BC, VC> {
         type IndexMut<'a> = &'a mut [u8] where BC: 'a, VC: 'a;
         #[inline(always)] fn get_mut(&mut self, index: usize) -> Self::IndexMut<'_> {
             let lower = if index == 0 { 0 } else { self.bounds[index] };
@@ -509,31 +537,31 @@ pub mod string {
         }
     }
 
-    impl Push<String> for ColumnString {
+    impl<BC: Push<usize>> Push<String> for Strings<BC> {
         #[inline(always)] fn push(&mut self, item: String) {
             self.values.extend_from_slice(item.as_bytes());
             self.bounds.push(self.values.len());
         }
     }
-    impl Push<&String> for ColumnString {
+    impl<BC: Push<usize>> Push<&String> for Strings<BC> {
         #[inline(always)] fn push(&mut self, item: &String) {
             self.values.extend_from_slice(item.as_bytes());
             self.bounds.push(self.values.len());
         }
     }
-    impl Push<&str> for ColumnString {
+    impl Push<&str> for Strings {
         fn push(&mut self, item: &str) {
             self.values.extend_from_slice(item.as_bytes());
             self.bounds.push(self.values.len());
         }
     }
-    impl Clear for ColumnString {
+    impl Clear for Strings {
         fn clear(&mut self) {
             self.bounds.clear();
             self.values.clear();
         }
     }
-    impl HeapSize for ColumnString {
+    impl HeapSize for Strings {
         fn heap_size(&self) -> (usize, usize) {
             let bl = std::mem::size_of::<usize>() * self.bounds.len();
             let bc = std::mem::size_of::<usize>() * self.bounds.capacity();
@@ -544,35 +572,38 @@ pub mod string {
     }
 }
 
-pub use vector::ColumnVec;
+pub use vector::Vecs;
 pub mod vector {
 
     use std::ops::Deref;
     use super::{Clear, Columnable, Len, Index, IndexMut, Push, HeapSize, Slice};
 
     impl<T: Columnable> Columnable for Vec<T> {
-        type Columns = ColumnVec<T::Columns>;
+        type Columns = Vecs<T::Columns>;
+    }
+    impl<'a, T: Columnable> Columnable for &'a [T] where T::Columns : Push<&'a T> {
+        type Columns = Vecs<T::Columns>;
     }
 
     /// A stand-in for `Vec<Vec<T>>` for complex `T`.
     #[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct ColumnVec<TC, BC = Vec<usize>> {
+    pub struct Vecs<TC, BC = Vec<usize>> {
         pub bounds: BC,
         pub values: TC,
     }
 
-    impl<TC: Len> ColumnVec<TC> {
+    impl<TC: Len> Vecs<TC> {
         pub fn push_iter<I>(&mut self, iter: I) where I: IntoIterator, TC: Push<I::Item> {
             self.values.extend(iter);
             self.bounds.push(self.values.len());
         }
     }
-    
-    impl<TC, BC: Len> Len for ColumnVec<TC, BC> {
+
+    impl<TC, BC: Len> Len for Vecs<TC, BC> {
         #[inline(always)] fn len(&self) -> usize { self.bounds.len() }
     }
 
-    impl<TC, BC: Len+Deref<Target=[usize]>> Index for ColumnVec<TC, BC> {
+    impl<TC, BC: Len+Deref<Target=[usize]>> Index for Vecs<TC, BC> {
         type Ref<'a> = Slice<&'a TC> where TC: 'a, BC: 'a;
 
         #[inline(always)]
@@ -582,7 +613,7 @@ pub mod vector {
             Slice::new(lower, upper, &self.values)
         }
     }
-    impl<TC, BC: Len+Deref<Target=[usize]>> IndexMut for ColumnVec<TC, BC> {
+    impl<TC, BC: Len+Deref<Target=[usize]>> IndexMut for Vecs<TC, BC> {
         type IndexMut<'a> = Slice<&'a mut TC> where TC: 'a, BC: 'a;
 
         #[inline(always)]
@@ -593,31 +624,31 @@ pub mod vector {
         }
     }
 
-    impl<T, TC: Push<T> + Len> Push<Vec<T>> for ColumnVec<TC> {
+    impl<T, TC: Push<T> + Len> Push<Vec<T>> for Vecs<TC> {
         fn push(&mut self, item: Vec<T>) {
             self.values.extend(item);
             self.bounds.push(self.values.len());
         }
     }
-    impl<'a, T, TC: Push<&'a T> + Len> Push<&'a Vec<T>> for ColumnVec<TC> {
+    impl<'a, T, TC: Push<&'a T> + Len> Push<&'a Vec<T>> for Vecs<TC> {
         fn push(&mut self, item: &'a Vec<T>) {
             self.push(&item[..]);
         }
     }
-    impl<'a, T, TC: Push<&'a T> + Len> Push<&'a [T]> for ColumnVec<TC> {
+    impl<'a, T, TC: Push<&'a T> + Len> Push<&'a [T]> for Vecs<TC> {
         fn push(&mut self, item: &'a [T]) {
             self.values.extend(item.iter());
             self.bounds.push(self.values.len());
         }
     }
-    impl<TC: Clear> Clear for ColumnVec<TC> {
+    impl<TC: Clear> Clear for Vecs<TC> {
         fn clear(&mut self) {
             self.bounds.clear();
             self.values.clear();
         }
     }
 
-    impl<TC: HeapSize> HeapSize for ColumnVec<TC> {
+    impl<TC: HeapSize> HeapSize for Vecs<TC> {
         fn heap_size(&self) -> (usize, usize) {
             let (inner_l, inner_c) = self.values.heap_size();
             (
@@ -737,14 +768,14 @@ pub mod tuple {
     }
 }
 
-pub use sums::{BitsRank, result::ColumnResult, option::ColumnOption};
+pub use sums::{BitsRank, result::Results, option::Options};
 /// Containers for enumerations ("sum types") that store variants separately.
 ///
 /// The main work of these types is storing a discriminant and index efficiently,
 /// as containers for each of the variant types can hold the actual data.
 pub mod sums {
 
-    use crate::primitive::ColumnBool;
+    use crate::primitive::Bools;
     use crate::{Len, Index, Push, Clear, HeapSize};
 
     /// A store for maintaining `Vec<bool>` with fast rank access.
@@ -756,7 +787,7 @@ pub mod sums {
         /// *after* each block of 64 bits.
         pub counts: CC,
         /// The bits themselves.
-        pub values: ColumnBool<VC>,
+        pub values: Bools<VC>,
     }
 
     impl<CC, VC: Len+std::ops::Index<usize, Output=u64>> BitsRank<CC, VC> {
@@ -764,13 +795,14 @@ pub mod sums {
             self.values.get(index)
         }
     }
-    impl<CC: std::ops::Index<usize, Output=u64>, VC: std::ops::Index<usize, Output=u64>> BitsRank<CC, VC> {
+    impl<CC: std::ops::Index<usize, Output=u64>, VC: Len+std::ops::Index<usize, Output=u64>> BitsRank<CC, VC> {
         /// The number of set bits *strictly* preceding `index`.
         pub fn rank(&self, index: usize) -> usize {
             let block = index / 64;
             let bit = index % 64;
             let inter_count = if block == 0 { 0 } else { self.counts[block - 1] } as usize;
-            let intra_count = (self.values.values[block] & ((1 << bit) - 1)).count_ones() as usize;
+            let intra_word = if block == self.values.values.len() { self.values.last_word } else { self.values.values[block] };
+            let intra_count = (intra_word & ((1 << bit) - 1)).count_ones() as usize;
             inter_count + intra_count
         }
     }
@@ -781,18 +813,18 @@ pub mod sums {
     }
 
     impl BitsRank {
-        #[inline] fn push(&mut self, bit: bool) {
+        #[inline] pub fn push(&mut self, bit: bool) {
             self.values.push(bit);
             while self.counts.len() < self.values.len() / 64 {
                 let last_count = self.counts.last().copied().unwrap_or(0);
                 self.counts.push(last_count + (self.values.values.last().unwrap().count_ones() as u64));
             }
         }
-        fn clear(&mut self) {
+        pub fn clear(&mut self) {
             self.counts.clear();
             self.values.clear();
         }
-        fn heap_size(&self) -> (usize, usize) {
+        pub fn heap_size(&self) -> (usize, usize) {
             let (l0, c0) = self.counts.heap_size();
             let (l1, c1) = self.values.heap_size();
             (l0 + l1, c0 + c1)
@@ -807,85 +839,85 @@ pub mod sums {
         use super::BitsRank;
 
         impl<S: Columnable, T: Columnable> Columnable for Result<S, T> {
-            type Columns = ColumnResult<S::Columns, T::Columns>;
+            type Columns = Results<S::Columns, T::Columns>;
         }
 
         #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-        pub struct ColumnResult<SC, TC, CC=Vec<u64>, VC=Vec<u64>> {
+        pub struct Results<SC, TC, CC=Vec<u64>, VC=Vec<u64>> {
             /// Uses two bits for each item, one to indicate the variant and one (amortized)
             /// to enable efficient rank determination.
             pub indexes: BitsRank<CC, VC>,
-            pub s_store: SC,
-            pub t_store: TC,
+            pub oks: SC,
+            pub errs: TC,
         }
 
-        impl<SC, TC, CC, VC: Len> Len for ColumnResult<SC, TC, CC, VC> {
+        impl<SC, TC, CC, VC: Len> Len for Results<SC, TC, CC, VC> {
             #[inline(always)] fn len(&self) -> usize { self.indexes.len() }
         }
 
-        impl<SC: Index, TC: Index, CC: Deref<Target = [u64]>+std::ops::Index<usize, Output=u64>, VC: Len+Deref<Target = [u64]>+std::ops::Index<usize, Output=u64>> Index for ColumnResult<SC, TC, CC, VC> {
+        impl<SC: Index, TC: Index, CC: Deref<Target = [u64]>+std::ops::Index<usize, Output=u64>, VC: Len+Deref<Target = [u64]>+std::ops::Index<usize, Output=u64>> Index for Results<SC, TC, CC, VC> {
             type Ref<'a> = Result<SC::Ref<'a>, TC::Ref<'a>> where SC: 'a, TC: 'a, CC: 'a, VC: 'a;
             fn get(&self, index: usize) -> Self::Ref<'_> {
                 if self.indexes.get(index) {
-                    Ok(self.s_store.get(self.indexes.rank(index)))
+                    Ok(self.oks.get(self.indexes.rank(index)))
                 } else {
-                    Err(self.t_store.get(index - self.indexes.rank(index)))
+                    Err(self.errs.get(index - self.indexes.rank(index)))
                 }
             }
         }
         // NB: You are not allowed to change the variant, but can change its contents.
-        impl<SC: IndexMut, TC: IndexMut, CC: Deref<Target = [u64]>+std::ops::Index<usize, Output=u64>, VC: Len+Deref<Target = [u64]>+std::ops::Index<usize, Output=u64>> IndexMut for ColumnResult<SC, TC, CC, VC> {
+        impl<SC: IndexMut, TC: IndexMut, CC: Deref<Target = [u64]>+std::ops::Index<usize, Output=u64>, VC: Len+Deref<Target = [u64]>+std::ops::Index<usize, Output=u64>> IndexMut for Results<SC, TC, CC, VC> {
             type IndexMut<'a> = Result<SC::IndexMut<'a>, TC::IndexMut<'a>> where SC: 'a, TC: 'a, CC: 'a, VC: 'a;
             fn get_mut(&mut self, index: usize) -> Self::IndexMut<'_> {
                 if self.indexes.get(index) {
-                    Ok(self.s_store.get_mut(self.indexes.rank(index)))
+                    Ok(self.oks.get_mut(self.indexes.rank(index)))
                 } else {
-                    Err(self.t_store.get_mut(index - self.indexes.rank(index)))
+                    Err(self.errs.get_mut(index - self.indexes.rank(index)))
                 }
             }
         }
 
-        impl<S, SC: Push<S> + Len, T, TC: Push<T> + Len> Push<Result<S, T>> for ColumnResult<SC, TC> {
+        impl<S, SC: Push<S> + Len, T, TC: Push<T> + Len> Push<Result<S, T>> for Results<SC, TC> {
             fn push(&mut self, item: Result<S, T>) {
                 match item {
                     Ok(item) => {
                         self.indexes.push(true);
-                        self.s_store.push(item);
+                        self.oks.push(item);
                     }
                     Err(item) => {
                         self.indexes.push(false);
-                        self.t_store.push(item);
+                        self.errs.push(item);
                     }
                 }
             }
         }
-        impl<'a, S, SC: Push<&'a S> + Len, T, TC: Push<&'a T> + Len> Push<&'a Result<S, T>> for ColumnResult<SC, TC> {
+        impl<'a, S, SC: Push<&'a S> + Len, T, TC: Push<&'a T> + Len> Push<&'a Result<S, T>> for Results<SC, TC> {
             fn push(&mut self, item: &'a Result<S, T>) {
                 match item {
                     Ok(item) => {
                         self.indexes.push(true);
-                        self.s_store.push(item);
+                        self.oks.push(item);
                     }
                     Err(item) => {
                         self.indexes.push(false);
-                        self.t_store.push(item);
+                        self.errs.push(item);
                     }
                 }
             }
         }
 
-        impl<SC: Clear, TC: Clear> Clear for ColumnResult<SC, TC> {
+        impl<SC: Clear, TC: Clear> Clear for Results<SC, TC> {
             fn clear(&mut self) {
                 self.indexes.clear();
-                self.s_store.clear();
-                self.t_store.clear();
+                self.oks.clear();
+                self.errs.clear();
             }
         }
 
-        impl<SC: HeapSize, TC: HeapSize> HeapSize for ColumnResult<SC, TC> {
+        impl<SC: HeapSize, TC: HeapSize> HeapSize for Results<SC, TC> {
             fn heap_size(&self) -> (usize, usize) {
-                let (l0, c0) = self.s_store.heap_size();
-                let (l1, c1) = self.t_store.heap_size();
+                let (l0, c0) = self.oks.heap_size();
+                let (l1, c1) = self.errs.heap_size();
                 let (li, ci) = self.indexes.heap_size();
                 (l0 + l1 + li, c0 + c1 + ci)
             }
@@ -945,48 +977,48 @@ pub mod sums {
         use super::BitsRank;
 
         impl<T: Columnable> Columnable for Option<T> {
-            type Columns = ColumnOption<T::Columns>;
+            type Columns = Options<T::Columns>;
         }
 
         #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-        pub struct ColumnOption<TC, CC=Vec<u64>, VC=Vec<u64>> {
+        pub struct Options<TC, CC=Vec<u64>, VC=Vec<u64>> {
             /// Uses two bits for each item, one to indicate the variant and one (amortized)
             /// to enable efficient rank determination.
             pub indexes: BitsRank<CC, VC>,
-            pub t_store: TC,
+            pub somes: TC,
         }
 
-        impl<T, CC, VC: Len> Len for ColumnOption<T, CC, VC> {
+        impl<T, CC, VC: Len> Len for Options<T, CC, VC> {
             #[inline(always)] fn len(&self) -> usize { self.indexes.len() }
         }
 
-        impl<TC: Index, CC: std::ops::Index<usize, Output=u64>, VC: Len+std::ops::Index<usize, Output=u64>> Index for ColumnOption<TC, CC, VC> {
+        impl<TC: Index, CC: std::ops::Index<usize, Output=u64>, VC: Len+std::ops::Index<usize, Output=u64>> Index for Options<TC, CC, VC> {
             type Ref<'a> = Option<TC::Ref<'a>> where TC: 'a, CC: 'a, VC: 'a;
             fn get(&self, index: usize) -> Self::Ref<'_> {
                 if self.indexes.get(index) {
-                    Some(self.t_store.get(self.indexes.rank(index)))
+                    Some(self.somes.get(self.indexes.rank(index)))
                 } else {
                     None
                 }
             }
         }
-        impl<TC: IndexMut, CC: std::ops::Index<usize, Output=u64>, VC: Len+std::ops::Index<usize, Output=u64>> IndexMut for ColumnOption<TC, CC, VC> {
+        impl<TC: IndexMut, CC: std::ops::Index<usize, Output=u64>, VC: Len+std::ops::Index<usize, Output=u64>> IndexMut for Options<TC, CC, VC> {
             type IndexMut<'a> = Option<TC::IndexMut<'a>> where TC: 'a, CC: 'a, VC: 'a;
             fn get_mut(&mut self, index: usize) -> Self::IndexMut<'_> {
                 if self.indexes.get(index) {
-                    Some(self.t_store.get_mut(self.indexes.rank(index)))
+                    Some(self.somes.get_mut(self.indexes.rank(index)))
                 } else {
                     None
                 }
             }
         }
 
-        impl<T, TC: Push<T> + Len> Push<Option<T>> for ColumnOption<TC> {
+        impl<T, TC: Push<T> + Len> Push<Option<T>> for Options<TC> {
             fn push(&mut self, item: Option<T>) {
                 match item {
                     Some(item) => {
                         self.indexes.push(true);
-                        self.t_store.push(item);
+                        self.somes.push(item);
                     }
                     None => {
                         self.indexes.push(false);
@@ -994,12 +1026,12 @@ pub mod sums {
                 }
             }
         }
-        impl<'a, T, TC: Push<&'a T> + Len> Push<&'a Option<T>> for ColumnOption<TC> {
+        impl<'a, T, TC: Push<&'a T> + Len> Push<&'a Option<T>> for Options<TC> {
             fn push(&mut self, item: &'a Option<T>) {
                 match item {
                     Some(item) => {
                         self.indexes.push(true);
-                        self.t_store.push(item);
+                        self.somes.push(item);
                     }
                     None => {
                         self.indexes.push(false);
@@ -1008,16 +1040,16 @@ pub mod sums {
             }
         }
 
-        impl<TC: Clear> Clear for ColumnOption<TC> {
+        impl<TC: Clear> Clear for Options<TC> {
             fn clear(&mut self) {
                 self.indexes.clear();
-                self.t_store.clear();
+                self.somes.clear();
             }
         }
 
-        impl<TC: HeapSize> HeapSize for ColumnOption<TC> {
+        impl<TC: HeapSize> HeapSize for Options<TC> {
             fn heap_size(&self) -> (usize, usize) {
-                let (l0, c0) = self.t_store.heap_size();
+                let (l0, c0) = self.somes.heap_size();
                 let (li, ci) = self.indexes.heap_size();
                 (l0 + li, c0 + ci)
             }
@@ -1056,29 +1088,29 @@ pub mod sums {
     }
 }
 
-pub use lookback::{ColumnRepeats, ColumnLookback};
+pub use lookback::{Repeats, Lookbacks};
 /// Containers that can store either values, or offsets to prior values.
 ///
 /// This has the potential to be more efficient than a list of `T` when many values repeat in
 /// close proximity. Values must be equatable, and the degree of lookback can be configured.
 pub mod lookback {
 
-    use crate::{ColumnOption, ColumnResult, Push, Index, Len, HeapSize};
+    use crate::{Options, Results, Push, Index, Len, HeapSize};
 
     /// A container that encodes repeated values with a `None` variant, at the cost of extra bits for every record.
     #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct ColumnRepeats<TC, const N: u8 = 255> {
+    pub struct Repeats<TC, const N: u8 = 255> {
         /// Some(x) encodes a value, and None indicates the prior `x` value.
-        pub inner: ColumnOption<TC>,
+        pub inner: Options<TC>,
     }
 
-    impl<T: PartialEq, TC: Push<T> + Index, const N: u8> Push<T> for ColumnRepeats<TC, N> 
-    where 
+    impl<T: PartialEq, TC: Push<T> + Index, const N: u8> Push<T> for Repeats<TC, N>
+    where
         for<'a> TC::Ref<'a> : PartialEq<T>,
     {
         fn push(&mut self, item: T) {
-            // Look at the last `s_store` value for a potential match.
-            let insert: Option<T> = if self.inner.t_store.last().map(|x| x.eq(&item)) == Some(true) {
+            // Look at the last `somes` value for a potential match.
+            let insert: Option<T> = if self.inner.somes.last().map(|x| x.eq(&item)) == Some(true) {
                 None
             } else {
                 Some(item)
@@ -1087,66 +1119,66 @@ pub mod lookback {
         }
     }
 
-    impl<TC: Len, const N: u8> Len for ColumnRepeats<TC, N> {
+    impl<TC: Len, const N: u8> Len for Repeats<TC, N> {
         #[inline(always)] fn len(&self) -> usize { self.inner.len() }
     }
-    
-    impl<TC: Index, const N: u8> Index for ColumnRepeats<TC, N> {
+
+    impl<TC: Index, const N: u8> Index for Repeats<TC, N> {
         type Ref<'a> = TC::Ref<'a> where TC: 'a;
-        #[inline(always)] fn get(&self, index: usize) -> Self::Ref<'_> { 
+        #[inline(always)] fn get(&self, index: usize) -> Self::Ref<'_> {
             match self.inner.get(index) {
                 Some(item) => item,
-                None => { 
-                    let t_store_pos = self.inner.indexes.rank(index) - 1;
-                    self.inner.t_store.get(t_store_pos)
+                None => {
+                    let pos = self.inner.indexes.rank(index) - 1;
+                    self.inner.somes.get(pos)
                 },
             }
         }
     }
 
-    impl<TC: HeapSize, const N: u8> HeapSize for ColumnRepeats<TC, N> {
+    impl<TC: HeapSize, const N: u8> HeapSize for Repeats<TC, N> {
         fn heap_size(&self) -> (usize, usize) {
             self.inner.heap_size()
         }
     }
 
     #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct ColumnLookback<TC, const N: u8 = 255> {
+    pub struct Lookbacks<TC, const N: u8 = 255> {
         /// Ok(x) encodes a value, and Err(y) indicates a value `y` back.
-        pub inner: ColumnResult<TC, Vec<u8>>,
+        pub inner: Results<TC, Vec<u8>>,
     }
 
-    impl<T: PartialEq, TC: Push<T> + Index, const N: u8> Push<T> for ColumnLookback<TC, N> 
-    where 
+    impl<T: PartialEq, TC: Push<T> + Index, const N: u8> Push<T> for Lookbacks<TC, N>
+    where
         for<'a> TC::Ref<'a> : PartialEq<T>,
     {
         fn push(&mut self, item: T) {
             // Look backwards through (0 .. N) to look for a matching value.
-            let s_store_len = self.inner.s_store.len();
-            let find = (0u8 .. N).take(self.inner.s_store.len()).find(|i| self.inner.s_store.get(s_store_len - (*i as usize) - 1) == item);
+            let oks_len = self.inner.oks.len();
+            let find = (0u8 .. N).take(self.inner.oks.len()).find(|i| self.inner.oks.get(oks_len - (*i as usize) - 1) == item);
             let insert: Result<T, u8> = if let Some(back) = find { Err(back) } else { Ok(item) };
             self.inner.push(insert);
         }
     }
 
-    impl<TC: Len, const N: u8> Len for ColumnLookback<TC, N> {
+    impl<TC: Len, const N: u8> Len for Lookbacks<TC, N> {
         #[inline(always)] fn len(&self) -> usize { self.inner.len() }
     }
-    
-    impl<TC: Index, const N: u8> Index for ColumnLookback<TC, N> {
+
+    impl<TC: Index, const N: u8> Index for Lookbacks<TC, N> {
         type Ref<'a> = TC::Ref<'a> where TC: 'a;
-        #[inline(always)] fn get(&self, index: usize) -> Self::Ref<'_> { 
+        #[inline(always)] fn get(&self, index: usize) -> Self::Ref<'_> {
             match self.inner.get(index) {
                 Ok(item) => item,
-                Err(back) => { 
-                    let s_store_pos = self.inner.indexes.rank(index) - 1;
-                    self.inner.s_store.get(s_store_pos - (*back as usize))
+                Err(back) => {
+                    let pos = self.inner.indexes.rank(index) - 1;
+                    self.inner.oks.get(pos - (*back as usize))
                 },
             }
         }
     }
 
-    impl<TC: HeapSize, const N: u8> HeapSize for ColumnLookback<TC, N> {
+    impl<TC: HeapSize, const N: u8> HeapSize for Lookbacks<TC, N> {
         fn heap_size(&self) -> (usize, usize) {
             self.inner.heap_size()
         }

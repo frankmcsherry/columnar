@@ -1,5 +1,74 @@
 fn main() {
 
+    use columnar::{Columnable, Len, Index};
+    use columnar::bytes::{AsBytes, FromBytes};
+
+    // A sequence of complex, nested, and variously typed records.
+    let records =
+    (0 .. 1024u64).map(|i| {
+        (0 .. i).map(|j| {
+            if (i - j) % 2 == 0 {
+                Ok((j, format!("grawwwwrr!")))
+            } else {
+                Err(Some(vec![(); 1 << 40]))
+            }
+        }).collect::<Vec<_>>()
+    });
+
+    // An appendable replacement for `&[T]`: indexable, shareable.
+    // Layout in memory is a small number of contiguous buffers,
+    // even though `records` contains many small allocations.
+    let columns = Columnable::as_columns(records.clone());
+
+    // Each item in `columns` matches the original in `records`.
+    // Equality testing is awkward, because the GAT reference types don't match.
+    // For example, `Option<&T>` cannot be equated to `Option<T>` without help,
+    // and tuples `(&A, &B, &C)` cannot be equated to `&(A, B, C)` without help.
+    for (a, b) in columns.iter().zip(records) {
+        assert_eq!(a.len(), b.len());
+        for (a, b) in a.iter().zip(b) {
+            match (a, b) {
+                (Ok(a), Ok(b)) => {
+                    assert_eq!(a.0, &b.0);
+                    assert_eq!(a.1, b.1);
+                },
+                (Err(a), Err(b)) => {
+                    match (a, b) {
+                        (Some(a), Some(b)) => { assert_eq!(a.len(), b.len()); },
+                        (None, None) => { },
+                        _ => { panic!("Variant mismatch"); }
+                    }
+                },
+                _ => { panic!("Variant mismatch"); }
+            }
+        }
+    }
+
+    // Report the small number of large buffers backing `columns`.
+    for (align, bytes) in columns.as_bytes() {
+        println!("align: {:?}, bytes.len(): {:?}", align, bytes.len());
+    }
+
+    // Borrow bytes from `columns`, and reconstruct a borrowed `columns`.
+    // In practice, we would use serialized bytes from somewhere else.
+    // Function defined to get type support, relating `T` to `T::Borrowed`.
+    fn round_trip<T: AsBytes>(container: &T) -> T::Borrowed<'_> {
+        // Grab a reference to underlying bytes, as if serialized.
+        let mut bytes_iter = container.as_bytes().map(|(_, bytes)| bytes);
+        FromBytes::from_bytes(&mut bytes_iter)
+    }
+
+    let borrowed = round_trip(&columns);
+
+    // Project down to columns and variants using only field accessors.
+    // This gets all Some(_) variants from the first tuple coordinate.
+    let values: &[u64] = borrowed.values.oks.0;
+    let total = values.iter().sum::<u64>();
+    println!("Present values summed: {:?}", total);
+}
+
+fn _main2() {
+
     use columnar::{Push, HeapSize};
 
     let mut tree = tree::Tree { data: 0, kids: vec![] };
@@ -11,7 +80,7 @@ fn main() {
         tree.data = i;
         tree.kids = kids;
     }
-    
+
     let timer = std::time::Instant::now();
     let sum = tree.sum();
     let time = timer.elapsed();
@@ -61,9 +130,10 @@ fn main() {
     println!("{:?}\tjson_vals cloned", time);
 
     let values = records.clone().into_iter().map(Value::from_json).collect::<Vec<_>>();
+    println!("\t\tjson_vals heapsize: {:?}", values.heap_size());
 
     let timer = std::time::Instant::now();
-    let mut json_cols = ColumnValue::default();
+    let mut json_cols = Values::default();
     json_cols.extend(values.iter());
     let time = timer.elapsed();
     println!("{:?}\tjson_cols formed", time);
@@ -71,8 +141,6 @@ fn main() {
     println!("\t\tjson_cols.roots:    {:?}", json_cols.roots.heap_size());
     println!("\t\tjson_cols.numbers:  {:?}", json_cols.numbers.heap_size());
     println!("\t\tjson_cols.strings:  {:?}", json_cols.strings.heap_size());
-    println!("\t\tjson_cols.strings.bounds:  {:?}", json_cols.strings.bounds.heap_size());
-    println!("\t\tjson_cols.strings.values:  {:?}", json_cols.strings.values.heap_size());
     println!("\t\tjson_cols.arrays:   {:?}", json_cols.arrays.heap_size());
     println!("\t\tjson_cols.objects:  {:?}", json_cols.objects.heap_size());
     println!("\t\tjson_cols.objects.values.0:  {:?}", json_cols.objects.values.0.heap_size());
@@ -111,10 +179,10 @@ fn main() {
     let time = timer.elapsed();
     println!("{:?}\tjson_cols encode ({} bytes; msgpack)", time, encoded1.len());
     let timer = std::time::Instant::now();
-    let decoded1: ColumnValue = rmp_serde::from_slice(&encoded1[..]).unwrap();
+    let decoded1: Values = rmp_serde::from_slice(&encoded1[..]).unwrap();
     let time = timer.elapsed();
     println!("{:?}\tjson_cols decode", time);
-    
+
     let timer = std::time::Instant::now();
     let encoded2: Vec<u8> = bincode::serialize(&json_cols).unwrap();
     let time = timer.elapsed();
@@ -144,7 +212,7 @@ pub mod tree {
     pub struct ColumnTree<T> {
         pub groups: Vec<usize>,     // inserted tree delimiters.
         pub bounds: Vec<usize>,     // node child delimiters.
-        pub values: Vec<T>,         // node values. 
+        pub values: Vec<T>,         // node values.
     }
 
     /// A stand-in for `&Tree<T>`
@@ -155,7 +223,7 @@ pub mod tree {
         nodes: &'a ColumnTree<T>
     }
 
-    impl<'a, T> Clone for ColumnTreeRef<'a, T> { 
+    impl<'a, T> Clone for ColumnTreeRef<'a, T> {
         fn clone(&self) -> Self { *self }
     }
     impl<'a, T> Copy for ColumnTreeRef<'a, T> { }
@@ -181,8 +249,8 @@ pub mod tree {
         fn eq(&self, other: &Tree<T>) -> bool {
             let mut todo = vec![(*self, other)];
             while let Some((this, that)) = todo.pop() {
-                if this.value != &that.data { 
-                    return false; 
+                if this.value != &that.data {
+                    return false;
                 } else if (this.upper - this.lower) != that.kids.len() {
                     return false;
                 } else {
@@ -239,13 +307,13 @@ pub mod tree {
     }
 }
 
-pub use json::{ColumnValue, ColumnValueRef, Value};
+pub use json::{Values, ValuesRef, Value};
 pub mod json {
 
     use serde_json::Value as Json;
 
     use columnar::{Push, Len, Index, HeapSize};
-    use columnar::{ColumnVec, ColumnString, ColumnLookback};
+    use columnar::{Vecs, Strings, Lookbacks};
 
     /// Stand in for JSON, from `serde_json`.
     #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -258,6 +326,19 @@ pub mod json {
         Object(Vec<(String, Value)>),
     }
 
+    impl HeapSize for Value {
+        fn heap_size(&self) -> (usize, usize) {
+            match self {
+                Value::Null => (0, 0),
+                Value::Bool(_) => (0, 0),
+                Value::Number(_) => (0, 0),
+                Value::String(s) => (0, s.len()),
+                Value::Array(a) => a.heap_size(),
+                Value::Object(o) => o.heap_size(),
+            }
+        }
+    }
+
     impl Value {
         pub fn from_json(json: Json) -> Self {
             match json {
@@ -266,10 +347,10 @@ pub mod json {
                 Json::Number(n) => { Value::Number(n) },
                 Json::String(s) => { Value::String(s) },
                 Json::Array(a) => { Value::Array(a.into_iter().map(Value::from_json).collect()) },
-                Json::Object(o) => { 
+                Json::Object(o) => {
                     let mut list: Vec<_> = o.into_iter().map(|(s,j)| (s, Value::from_json(j))).collect();
                     list.sort_by(|x,y| x.0.cmp(&y.0));
-                    Value::Object(list) 
+                    Value::Object(list)
                 },
             }
         }
@@ -296,17 +377,17 @@ pub mod json {
     /// The (transitive) contents of each `Value` are stored throughout,
     /// at locations that may not necessarily be found in `roots`.
     #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct ColumnValue {
+    pub struct Values {
         pub roots: Vec<ValueIdx>,               // Any `ValueIdx` container.
         // pub nulls: Vec<()>,                  // No need to store null values.
         // pub bools: Vec<bool>,                // No need to store bool values.
         pub numbers: Vec<serde_json::Number>,   // Any `Number` container.
-        pub strings: ColumnString,
-        pub arrays: ColumnVec<Vec<ValueIdx>>,
-        pub objects: ColumnVec<(ColumnLookback<ColumnString>, Vec<ValueIdx>)>,
+        pub strings: Lookbacks<Strings>,
+        pub arrays: Vecs<Vec<ValueIdx>>,
+        pub objects: Vecs<(Lookbacks<Strings>, Vec<ValueIdx>)>,
     }
 
-    impl HeapSize for ColumnValue {
+    impl HeapSize for Values {
         fn heap_size(&self) -> (usize, usize) {
             let (l0, c0) = self.roots.heap_size();
             let (l1, c1) = self.numbers.heap_size();
@@ -317,9 +398,9 @@ pub mod json {
         }
     }
 
-    /// Stand-in for `&'a Value`. 
+    /// Stand-in for `&'a Value`.
     #[derive(Debug)]
-    pub enum ColumnValueRef<'a> {
+    pub enum ValuesRef<'a> {
         Null,
         Bool(bool),
         Number(serde_json::Number),
@@ -333,7 +414,7 @@ pub mod json {
     pub struct ArrRef<'a> {
         /// Reference into `store.arrays`.
         pub index: usize,
-        pub store: &'a ColumnValue,
+        pub store: &'a Values,
     }
 
     /// Stand-in for `&'a [(String, Value)]`.
@@ -341,22 +422,22 @@ pub mod json {
     pub struct ObjRef<'a> {
         /// Reference into `store.objects`.
         pub index: usize,
-        pub store: &'a ColumnValue,
+        pub store: &'a Values,
     }
 
-    impl<'a> PartialEq<Value> for ColumnValueRef<'a> {
+    impl<'a> PartialEq<Value> for ValuesRef<'a> {
         fn eq(&self, other: &Value) -> bool {
             match (self, other) {
-                (ColumnValueRef::Null, Value::Null) => { true },
-                (ColumnValueRef::Bool(b0), Value::Bool(b1)) => { b0 == b1 },
-                (ColumnValueRef::Number(n0), Value::Number(n1)) => { n0 == n1 },
-                (ColumnValueRef::String(s0), Value::String(s1)) => { *s0 == s1 },
-                (ColumnValueRef::Array(a0), Value::Array(a1)) => { 
+                (ValuesRef::Null, Value::Null) => { true },
+                (ValuesRef::Bool(b0), Value::Bool(b1)) => { b0 == b1 },
+                (ValuesRef::Number(n0), Value::Number(n1)) => { n0 == n1 },
+                (ValuesRef::String(s0), Value::String(s1)) => { *s0 == s1 },
+                (ValuesRef::Array(a0), Value::Array(a1)) => {
                     let slice: columnar::Slice<&Vec<ValueIdx>> = a0.store.arrays.get(a0.index);
                     if slice.len() != a1.len() { println!("arr len mismatch: {:?} v {:?}", slice.len(), a1.len()); }
                     slice.len() == a1.len() && slice.iter().zip(a1).all(|(a,b)| a0.store.dereference(*a).eq(b))
                 },
-                (ColumnValueRef::Object(o0), Value::Object(o1)) => { 
+                (ValuesRef::Object(o0), Value::Object(o1)) => {
                     let slice = o0.store.objects.get(o0.index);
                     if slice.len() != o1.len() { println!("obj len mismatch: {:?} v {:?}", slice.len(), o1.len()); }
                     slice.len() == o1.len() && slice.iter().zip(o1).all(|((xs, xv),(ys, yv))| xs == ys && o0.store.dereference(*xv).eq(yv))
@@ -366,7 +447,7 @@ pub mod json {
         }
     }
 
-    impl Push<Value> for ColumnValue {
+    impl Push<Value> for Values {
         fn push(&mut self, value: Value) {
             let mut worker = ValueQueues::new_from(self);
             let value_idx = worker.copy(&value);
@@ -377,7 +458,7 @@ pub mod json {
         // Because the iterator produces owned content, we would need to collect the values
         // so that their lifetimes can outlive the `ValueQueues` instance.
     }
-    impl<'a> Push<&'a Value> for ColumnValue {
+    impl<'a> Push<&'a Value> for Values {
         fn push(&mut self, value: &'a Value) {
             let mut worker = ValueQueues::new_from(self);
             let value_idx = worker.copy(value);
@@ -395,31 +476,31 @@ pub mod json {
     }
 
     // NOTE: currently produce an ICE (internal compiler error):
-    // impl columnar::Index for ColumnValue {
-    //     type Ref<'a> = ColumnValueRef<'a>;
+    // impl columnar::Index for Values {
+    //     type Ref<'a> = ValuesRef<'a>;
     //     fn get(&self, index: usize) -> Self::Ref<'_> {
     //         self.dereference(self.roots[index])
     //     }
     // }
 
-    impl ColumnValue {
-        pub fn get(&self, index: usize) -> ColumnValueRef<'_> {
+    impl Values {
+        pub fn get(&self, index: usize) -> ValuesRef<'_> {
             self.dereference(self.roots[index])
         }
-        pub fn dereference(&self, index: ValueIdx) -> ColumnValueRef<'_> {
+        pub fn dereference(&self, index: ValueIdx) -> ValuesRef<'_> {
             match index {
-                ValueIdx::Null => ColumnValueRef::Null,
-                ValueIdx::Bool(i) => ColumnValueRef::Bool(i),
-                ValueIdx::Number(i) => ColumnValueRef::Number(self.numbers.get(i).clone()),
-                ValueIdx::String(i) => ColumnValueRef::String(self.strings.get(i)),
+                ValueIdx::Null => ValuesRef::Null,
+                ValueIdx::Bool(i) => ValuesRef::Bool(i),
+                ValueIdx::Number(i) => ValuesRef::Number(self.numbers.get(i).clone()),
+                ValueIdx::String(i) => ValuesRef::String(self.strings.get(i)),
                 ValueIdx::Array(i) => {
-                    ColumnValueRef::Array(ArrRef {
+                    ValuesRef::Array(ArrRef {
                         index: i,
                         store: self,
                     })
                 },
                 ValueIdx::Object(i) => {
-                    ColumnValueRef::Object(ObjRef {
+                    ValuesRef::Object(ObjRef {
                         index: i,
                         store: self,
                     })
@@ -431,12 +512,12 @@ pub mod json {
     struct ValueQueues<'a> {
         arr_todo: std::collections::VecDeque<&'a [Value]>,
         obj_todo: std::collections::VecDeque<&'a [(String, Value)]>,
-        store: &'a mut ColumnValue,
+        store: &'a mut Values,
     }
 
     impl<'a> ValueQueues<'a> {
-        /// Creates a new `ValueQueues` from a `ColumnValue`.
-        fn new_from(store: &'a mut ColumnValue) -> Self {
+        /// Creates a new `ValueQueues` from a `Values`.
+        fn new_from(store: &'a mut Values) -> Self {
             Self {
                 arr_todo: Default::default(),
                 obj_todo: Default::default(),
@@ -450,11 +531,11 @@ pub mod json {
                 Value::Null => ValueIdx::Null,
                 Value::Bool(b) => ValueIdx::Bool(*b),
                 Value::Number(n) => {
-                    self.store.numbers.push(n.clone());            
+                    self.store.numbers.push(n.clone());
                     ValueIdx::Number(self.store.numbers.len() - 1)
                 },
                 Value::String(s) => {
-                    self.store.strings.push(s);            
+                    self.store.strings.push(s);
                     ValueIdx::String(self.store.strings.len() - 1)
                 },
                 Value::Array(a) => {
@@ -471,14 +552,14 @@ pub mod json {
         fn finish(&mut self) {
             let mut temp = Vec::default();
             while !self.arr_todo.is_empty() || !self.obj_todo.is_empty() {
-                // Odd logic, but: need the queue to retain the element so that `self.copy` produces 
+                // Odd logic, but: need the queue to retain the element so that `self.copy` produces
                 // the correct indexes for any nested arrays.
                 while let Some(values) = self.arr_todo.front().cloned() {
                     Extend::extend(&mut temp, values.iter().map(|v| self.copy(v)));
                     self.arr_todo.pop_front();
                     self.store.arrays.push_iter(temp.drain(..));
                 }
-                // Odd logic, but: need the queue to retain the element so that `self.copy` produces 
+                // Odd logic, but: need the queue to retain the element so that `self.copy` produces
                 // the correct indexes for any nested objects.
                 while let Some(pairs) = self.obj_todo.front().cloned() {
                     Extend::extend(&mut temp, pairs.iter().map(|(_,v)| self.copy(v)));

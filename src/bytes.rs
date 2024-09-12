@@ -1,6 +1,7 @@
 /// Methods to convert containers to and from byte slices.
 
 pub trait AsBytes {
+    type Borrowed<'a>: FromBytes<'a>;
     /// Presents `self` as a sequence of byte slices, with their required alignment.
     fn as_bytes(&self) -> impl Iterator<Item=(usize, &[u8])>;
 }
@@ -15,11 +16,13 @@ pub trait FromBytes<'a> : AsBytes {
 macro_rules! implement_byteslices {
     ($($index_type:ty),*) => { $(
         impl AsBytes for Vec<$index_type> {
+            type Borrowed<'a> = &'a [$index_type];
             fn as_bytes(&self) -> impl Iterator<Item=(usize, &[u8])> {
                 std::iter::once((std::mem::align_of::<$index_type>(), bytemuck::cast_slice(&self[..])))
             }
         }
         impl<'a> AsBytes for &'a [$index_type] {
+            type Borrowed<'b> = &'b [$index_type];
             fn as_bytes(&self) -> impl Iterator<Item=(usize, &[u8])> {
                 std::iter::once((std::mem::align_of::<$index_type>(), bytemuck::cast_slice(&self[..])))
             }
@@ -37,14 +40,15 @@ implement_byteslices!(i8, i16, i32, i64, i128, isize);
 implement_byteslices!(f32, f64);
 implement_byteslices!(());
 
-use crate::{ColumnString, ColumnVec, ColumnResult, ColumnOption, BitsRank};
+use crate::{Strings, Vecs, Results, Options, BitsRank};
 
-impl<BC: AsBytes, VC: AsBytes> AsBytes for ColumnString<BC, VC> {
+impl<BC: AsBytes, VC: AsBytes> AsBytes for Strings<BC, VC> {
+    type Borrowed<'a> = Strings<BC::Borrowed<'a>, VC::Borrowed<'a>>;
     fn as_bytes(&self) -> impl Iterator<Item=(usize, &[u8])> {
         self.bounds.as_bytes().chain(self.values.as_bytes())
     }
 }
-impl<'a, BC: FromBytes<'a>, VC: FromBytes<'a>> FromBytes<'a> for ColumnString<BC, VC> {
+impl<'a, BC: FromBytes<'a>, VC: FromBytes<'a>> FromBytes<'a> for Strings<BC, VC> {
     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
         Self {
             bounds: FromBytes::from_bytes(bytes),
@@ -53,12 +57,13 @@ impl<'a, BC: FromBytes<'a>, VC: FromBytes<'a>> FromBytes<'a> for ColumnString<BC
     }
 }
 
-impl<TC: AsBytes, BC: AsBytes> AsBytes for ColumnVec<TC, BC> {
+impl<TC: AsBytes, BC: AsBytes> AsBytes for Vecs<TC, BC> {
+    type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>>;
     fn as_bytes(&self) -> impl Iterator<Item=(usize, &[u8])> {
         self.bounds.as_bytes().chain(self.values.as_bytes())
     }
 }
-impl<'a, TC: FromBytes<'a>, BC: FromBytes<'a>> FromBytes<'a> for ColumnVec<TC, BC> {
+impl<'a, TC: FromBytes<'a>, BC: FromBytes<'a>> FromBytes<'a> for Vecs<TC, BC> {
     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
         Self {
             bounds: FromBytes::from_bytes(bytes),
@@ -70,6 +75,7 @@ impl<'a, TC: FromBytes<'a>, BC: FromBytes<'a>> FromBytes<'a> for ColumnVec<TC, B
 macro_rules! tuple_impl {
     ( $($name:ident)+) => (
         impl<$($name: AsBytes),*> AsBytes for ($($name,)*) {
+            type Borrowed<'a> = ($($name::Borrowed<'a>,)*);
             #[allow(non_snake_case)]
             fn as_bytes(&self) -> impl Iterator<Item=(usize, &[u8])> {
                 let ($($name,)*) = self;
@@ -99,7 +105,20 @@ tuple_impl!(A B C D E F G H);
 tuple_impl!(A B C D E F G H I);
 tuple_impl!(A B C D E F G H I J);
 
-impl<VC: AsBytes> AsBytes for crate::primitive::ColumnBool<VC> {
+impl AsBytes for crate::primitive::Empties {
+    type Borrowed<'a> = crate::primitive::Empties;
+    fn as_bytes(&self) -> impl Iterator<Item=(usize, &[u8])> {
+        std::iter::once((1, bytemuck::cast_slice(std::slice::from_ref(&self.count))))
+    }
+}
+impl<'a> FromBytes<'a> for crate::primitive::Empties {
+    fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+        Self { count: bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0], empty: () }
+    }
+}
+
+impl<VC: AsBytes> AsBytes for crate::primitive::Bools<VC> {
+    type Borrowed<'a> = crate::primitive::Bools<VC::Borrowed<'a>>;
     fn as_bytes(&self) -> impl Iterator<Item=(usize, &[u8])> {
         self.values.as_bytes()
         .chain(std::iter::once((std::mem::align_of::<u64>(), bytemuck::cast_slice(std::slice::from_ref(&self.last_word)))))
@@ -107,7 +126,7 @@ impl<VC: AsBytes> AsBytes for crate::primitive::ColumnBool<VC> {
     }
 }
 
-impl<'a, VC: FromBytes<'a>> FromBytes<'a> for crate::primitive::ColumnBool<VC> {
+impl<'a, VC: FromBytes<'a>> FromBytes<'a> for crate::primitive::Bools<VC> {
     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
         let values = FromBytes::from_bytes(bytes);
         let last_word = bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0];
@@ -116,8 +135,23 @@ impl<'a, VC: FromBytes<'a>> FromBytes<'a> for crate::primitive::ColumnBool<VC> {
     }
 }
 
+impl<SC: AsBytes, NC: AsBytes> AsBytes for crate::primitive::Durations<SC, NC> {
+    type Borrowed<'a> = crate::primitive::Durations<SC::Borrowed<'a>, NC::Borrowed<'a>>;
+    fn as_bytes(&self) -> impl Iterator<Item=(usize, &[u8])> {
+        self.seconds.as_bytes().chain(self.nanoseconds.as_bytes())
+    }
+}
+impl<'a, SC: FromBytes<'a>, NC: FromBytes<'a>> FromBytes<'a> for crate::primitive::Durations<SC, NC> {
+    fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+        Self {
+            seconds: FromBytes::from_bytes(bytes),
+            nanoseconds: FromBytes::from_bytes(bytes),
+        }
+    }
+}
 
 impl<CC: AsBytes, VC: AsBytes> AsBytes for BitsRank<CC, VC> {
+    type Borrowed<'a> = BitsRank<CC::Borrowed<'a>, VC::Borrowed<'a>>;
     fn as_bytes(&self) -> impl Iterator<Item=(usize, &[u8])> {
         self.counts.as_bytes().chain(self.values.as_bytes())
     }
@@ -131,32 +165,34 @@ impl<'a, CC: FromBytes<'a>, VC: FromBytes<'a>> FromBytes<'a> for BitsRank<CC, VC
     }
 }
 
-impl<SC: AsBytes, TC: AsBytes, CC: AsBytes, VC: AsBytes> AsBytes for ColumnResult<SC, TC, CC, VC> {
+impl<SC: AsBytes, TC: AsBytes, CC: AsBytes, VC: AsBytes> AsBytes for Results<SC, TC, CC, VC> {
+    type Borrowed<'a> = Results<SC::Borrowed<'a>, TC::Borrowed<'a>, CC::Borrowed<'a>, VC::Borrowed<'a>>;
     fn as_bytes(&self) -> impl Iterator<Item=(usize, &[u8])> {
-        self.indexes.as_bytes().chain(self.s_store.as_bytes()).chain(self.t_store.as_bytes())
+        self.indexes.as_bytes().chain(self.oks.as_bytes()).chain(self.errs.as_bytes())
     }
 }
-impl<'a, SC: FromBytes<'a>, TC: FromBytes<'a>, CC: FromBytes<'a>, VC: FromBytes<'a>> FromBytes<'a> for ColumnResult<SC, TC, CC, VC> {
+impl<'a, SC: FromBytes<'a>, TC: FromBytes<'a>, CC: FromBytes<'a>, VC: FromBytes<'a>> FromBytes<'a> for Results<SC, TC, CC, VC> {
     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
         Self {
             indexes: FromBytes::from_bytes(bytes),
-            s_store: FromBytes::from_bytes(bytes),
-            t_store: FromBytes::from_bytes(bytes),
+            oks: FromBytes::from_bytes(bytes),
+            errs: FromBytes::from_bytes(bytes),
         }
     }
 }
 
-impl <TC: AsBytes, CC: AsBytes, VC: AsBytes> AsBytes for ColumnOption<TC, CC, VC> {
+impl <TC: AsBytes, CC: AsBytes, VC: AsBytes> AsBytes for Options<TC, CC, VC> {
+    type Borrowed<'a> = Options<TC::Borrowed<'a>, CC::Borrowed<'a>, VC::Borrowed<'a>>;
     fn as_bytes(&self) -> impl Iterator<Item=(usize, &[u8])> {
-        self.indexes.as_bytes().chain(self.t_store.as_bytes())
+        self.indexes.as_bytes().chain(self.somes.as_bytes())
     }
 }
 
-impl <'a, TC: FromBytes<'a>, CC: FromBytes<'a>, VC: FromBytes<'a>> FromBytes<'a> for ColumnOption<TC, CC, VC> {
+impl <'a, TC: FromBytes<'a>, CC: FromBytes<'a>, VC: FromBytes<'a>> FromBytes<'a> for Options<TC, CC, VC> {
     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
         Self {
             indexes: FromBytes::from_bytes(bytes),
-            t_store: FromBytes::from_bytes(bytes),
+            somes: FromBytes::from_bytes(bytes),
         }
     }
 }
@@ -184,13 +220,13 @@ mod test {
             assert_eq!(column.get(2*i+1), Err(&i));
         }
 
-        let column2 = crate::ColumnResult::<&[usize], &[usize], &[u64], &[u64]>::from_bytes(&mut column.as_bytes().map(|(_, bytes)| bytes));
+        let column2 = crate::Results::<&[usize], &[usize], &[u64], &[u64]>::from_bytes(&mut column.as_bytes().map(|(_, bytes)| bytes));
         for i in 0..100 {
             assert_eq!(column.get(2*i+0), column2.get(2*i+0));
             assert_eq!(column.get(2*i+1), column2.get(2*i+1));
         }
 
-        let column3 = crate::ColumnResult::<&[usize], &[usize], &[u64], &[u64]>::from_bytes(&mut column2.as_bytes().map(|(_, bytes)| bytes));
+        let column3 = crate::Results::<&[usize], &[usize], &[u64], &[u64]>::from_bytes(&mut column2.as_bytes().map(|(_, bytes)| bytes));
         for i in 0..100 {
             assert_eq!(column3.get(2*i+0), column2.get(2*i+0));
             assert_eq!(column3.get(2*i+1), column2.get(2*i+1));
