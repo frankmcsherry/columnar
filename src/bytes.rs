@@ -40,7 +40,7 @@ implement_byteslices!(i8, i16, i32, i64, i128, isize);
 implement_byteslices!(f32, f64);
 implement_byteslices!(());
 
-use crate::{Strings, Vecs, Results, Options, BitsRank};
+use crate::{Strings, Vecs, Results, Options, RankSelect};
 
 impl<BC: AsBytes, VC: AsBytes> AsBytes for Strings<BC, VC> {
     type Borrowed<'a> = Strings<BC::Borrowed<'a>, VC::Borrowed<'a>>;
@@ -150,13 +150,13 @@ impl<'a, SC: FromBytes<'a>, NC: FromBytes<'a>> FromBytes<'a> for crate::primitiv
     }
 }
 
-impl<CC: AsBytes, VC: AsBytes> AsBytes for BitsRank<CC, VC> {
-    type Borrowed<'a> = BitsRank<CC::Borrowed<'a>, VC::Borrowed<'a>>;
+impl<CC: AsBytes, VC: AsBytes> AsBytes for RankSelect<CC, VC> {
+    type Borrowed<'a> = RankSelect<CC::Borrowed<'a>, VC::Borrowed<'a>>;
     fn as_bytes(&self) -> impl Iterator<Item=(usize, &[u8])> {
         self.counts.as_bytes().chain(self.values.as_bytes())
     }
 }
-impl<'a, CC: FromBytes<'a>, VC: FromBytes<'a>> FromBytes<'a> for BitsRank<CC, VC> {
+impl<'a, CC: FromBytes<'a>, VC: FromBytes<'a>> FromBytes<'a> for RankSelect<CC, VC> {
     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
         Self {
             counts: FromBytes::from_bytes(bytes),
@@ -197,13 +197,76 @@ impl <'a, TC: FromBytes<'a>, CC: FromBytes<'a>, VC: FromBytes<'a>> FromBytes<'a>
     }
 }
 
+/// A sequential byte layout for `AsBytes` and `FromBytes` implementors.
+///
+/// The layout is aligned like a sequence of `u64`, where we repeatedly announce a length,
+/// and then follow it by that many bytes. We may need to follow this with padding bytes.
+pub mod serialization {
+
+    pub fn encode<'a>(store: &mut Vec<u64>, bytes: impl Iterator<Item=(usize, &'a [u8])>) {
+        for (align, bytes) in bytes {
+            assert!(align <= 8);
+            store.push(bytes.len() as u64);
+            let whole_words = bytes.len() / 8;
+            store.extend(bytemuck::try_cast_slice(&bytes[..whole_words]).unwrap());
+            let mut remainder = [0u8; 8];
+            for (i, byte) in bytes[whole_words..].iter().enumerate() {
+                remainder[i] = *byte;
+            }
+            store.push(bytemuck::try_cast_slice(&remainder).unwrap()[0]);
+        }
+    }
+
+    pub fn decode(store: &[u64]) -> Decoder<'_> {
+        Decoder { store }
+    }
+
+    pub struct Decoder<'a> {
+        store: &'a [u64],
+    }
+
+    impl<'a> Iterator for Decoder<'a> {
+        type Item = &'a [u8];
+        fn next(&mut self) -> Option<Self::Item> {
+            if let Some(length) = self.store.first() {
+                let length = *length as usize;
+                self.store = &self.store[1..];
+                let whole_words = if length % 8 == 0 { length / 8 } else { length / 8 + 1 };
+                let bytes: &[u8] = bytemuck::try_cast_slice(&self.store[..whole_words]).unwrap();
+                self.store = &self.store[whole_words..];
+                Some(&bytes[..length])
+            } else {
+                None
+            }
+        }
+    }
+
+    pub struct ColumnarBytes<B, C> {
+        bytes: B,
+        phantom: std::marker::PhantomData<C>,
+    }
+
+    use crate::bytes::{AsBytes, FromBytes};
+
+    impl<B, C> ColumnarBytes<B, C>
+    where
+        B: std::ops::Deref<Target = [u64]>,
+        C: AsBytes,
+    {
+        pub fn decode(&self) -> C::Borrowed<'_> {
+            FromBytes::from_bytes(&mut decode(&self.bytes))
+        }
+    }
+}
+
+
 #[cfg(test)]
 mod test {
     #[test]
     fn round_trip() {
 
         use crate::Columnable;
-        use crate::common::{Index, Push, HeapSize, Len};
+        use crate::common::{IndexOwn, Push, HeapSize, Len};
         use crate::bytes::{AsBytes, FromBytes};
 
         let mut column: <Result<usize, usize> as Columnable>::Columns = Default::default();
@@ -213,17 +276,17 @@ mod test {
         }
 
         assert_eq!(column.len(), 200);
-        assert_eq!(column.heap_size(), (1656, 2112));
+        assert_eq!(column.heap_size(), (1624, 2080));
 
         for i in 0..100 {
-            assert_eq!(column.get(2*i+0), Ok(&i));
-            assert_eq!(column.get(2*i+1), Err(&i));
+            assert_eq!(column.get(2*i+0), Ok(i));
+            assert_eq!(column.get(2*i+1), Err(i));
         }
 
         let column2 = crate::Results::<&[usize], &[usize], &[u64], &[u64]>::from_bytes(&mut column.as_bytes().map(|(_, bytes)| bytes));
         for i in 0..100 {
-            assert_eq!(column.get(2*i+0), column2.get(2*i+0));
-            assert_eq!(column.get(2*i+1), column2.get(2*i+1));
+            assert_eq!(column.get(2*i+0), column2.get(2*i+0).copied().map_err(|e| *e));
+            assert_eq!(column.get(2*i+1), column2.get(2*i+1).copied().map_err(|e| *e));
         }
 
         let column3 = crate::Results::<&[usize], &[usize], &[u64], &[u64]>::from_bytes(&mut column2.as_bytes().map(|(_, bytes)| bytes));
