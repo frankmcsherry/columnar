@@ -24,7 +24,7 @@ pub trait Columnable : Sized {
     }
 }
 
-pub use common::{Clear, Len, Push, IndexGat, IndexMut, IndexOwn, HeapSize, Slice, IndexIter};
+pub use common::{Clear, Len, Push, IndexGat, IndexMut, IndexOwn, IndexAs, HeapSize, Slice, IndexIter};
 /// Common traits and types that are re-used throughout the module.
 pub mod common {
 
@@ -75,7 +75,7 @@ pub mod common {
     }
 
 
-    pub use index::{IndexOwn, IndexGat, IndexMut};
+    pub use index::{IndexOwn, IndexGat, IndexMut, IndexAs};
     /// Traits for accessing elements by `usize` indexes.
     ///
     /// There are several traits, with a core distinction being whether the returned reference depends on the lifetime of `&self`.
@@ -177,6 +177,10 @@ pub mod common {
             /// Notably, this does not vary with lifetime, and will not depend on the lifetime of `&self`.
             type Ref;
             fn get(&self, index: usize) -> Self::Ref;
+            #[inline(always)] fn last(&self) -> Option<Self::Ref> where Self: Len {
+                if self.is_empty() { None }
+                else { Some(self.get(self.len()-1)) }
+            }
             fn iter(self) -> IterOwn<Self> where Self: Len + Sized {
                 IterOwn {
                     index: 0,
@@ -201,6 +205,33 @@ pub mod common {
         impl<T: Copy> IndexOwn for Vec<T> {
             type Ref = T;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self[index] }
+        }
+
+
+        /// Types that can be converted into another type by copying.
+        ///
+        /// We use this trait to unify the ability of `T` and `&T` to be converted into `T`.
+        /// This is handy for copy types that we'd like to use, like `u8`, `u64` and `usize`.
+        pub trait CopyAs<T> {
+            fn copy_as(self) -> T;
+        }
+        impl<T: Copy> CopyAs<T> for &T {
+            fn copy_as(self) -> T { *self }
+        }
+        impl<T> CopyAs<T> for T {
+            fn copy_as(self) -> T { self }
+        }
+
+        pub trait IndexAs<T> {
+            fn index_as(&self, index: usize) -> T;
+            fn last(&self) -> Option<T> where Self: Len {
+                if self.is_empty() { None }
+                else { Some(self.index_as(self.len()-1)) }
+            }
+        }
+
+        impl<T: IndexOwn, S> IndexAs<S> for T where T::Ref: CopyAs<S> {
+            fn index_as(&self, index: usize) -> S { self.get(index).copy_as() }
         }
     }
 
@@ -468,9 +499,7 @@ pub mod primitive {
     /// A columnar store for `bool`.
     mod boolean {
 
-        use std::ops::Deref;
-
-        use crate::{Clear, Len, IndexGat, IndexOwn, Push, HeapSize};
+        use crate::{Clear, Len, IndexGat, IndexOwn, IndexAs, Push, HeapSize};
 
         impl crate::Columnable for bool {
             type Columns = Bools;
@@ -492,30 +521,27 @@ pub mod primitive {
             #[inline(always)] fn len(&self) -> usize { self.values.len() * 64 + (self.last_bits as usize) }
         }
 
-        // Our `Index` implementation needs `VC` to implement `Deref<Target=[u64]>`,
-        // because I couldn't figure out how to exress the constraint that the
-        // `Index::Ref<'_>` type is always `u64` or `&u64` or something similar.
-        impl<VC: Len + Deref<Target = [u64]>> IndexGat for Bools<VC> {
+        impl<VC: Len + IndexAs<u64>> IndexGat for Bools<VC> {
             type Ref<'a> = bool where VC: 'a;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref<'_> {
                 let block = index / 64;
                 let word = if block == self.values.len() {
                     self.last_word
                 } else {
-                    self.values[block]
+                    self.values.index_as(block)
                 };
                 let bit = index % 64;
                 (word >> bit) & 1 == 1
             }
         }
-        impl<VC: Len + IndexOwn<Ref=u64>> IndexOwn for Bools<VC> {
+        impl<VC: Len + IndexAs<u64>> IndexOwn for Bools<VC> {
             type Ref = bool;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
                 let block = index / 64;
                 let word = if block == self.values.len() {
                     self.last_word
                 } else {
-                    self.values.get(block)
+                    self.values.index_as(block)
                 };
                 let bit = index % 64;
                 (word >> bit) & 1 == 1
@@ -617,8 +643,7 @@ pub mod primitive {
 pub use string::Strings;
 pub mod string {
 
-    use std::ops::Deref;
-    use super::{Clear, Columnable, Len, IndexGat, IndexOwn, Push, HeapSize};
+    use super::{Clear, Columnable, Len, IndexGat, IndexOwn, IndexAs, Push, HeapSize};
 
     impl Columnable for String {
         type Columns = Strings;
@@ -641,36 +666,36 @@ pub mod string {
     }
     // Manual implementation for slices and vecs rather than for `Deref` implementors.
     // This is because the lifetime for `Ref<'a>` can be extended to `'t` for slices.
-    impl<'t, BC: Len+Deref<Target=[usize]>> IndexGat for Strings<BC, &'t [u8]> {
+    impl<'t, BC: Len+IndexAs<usize>> IndexGat for Strings<BC, &'t [u8]> {
         // type Ref<'a> = &'t [u8];
         type Ref<'a> = &'t str where BC: 'a, 't: 'a;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref<'_> {
-            let lower = if index == 0 { 0 } else { self.bounds[index - 1] };
-            let upper = self.bounds[index];
+            let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
+            let upper = self.bounds.index_as(index);
             std::str::from_utf8(&self.values[lower .. upper]).unwrap()
         }
     }
-    impl<BC: Len+Deref<Target=[usize]>> IndexGat for Strings<BC, Vec<u8>> {
+    impl<BC: Len+IndexAs<usize>> IndexGat for Strings<BC, Vec<u8>> {
         type Ref<'a> = &'a str where BC: 'a;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref<'_> {
-            let lower = if index == 0 { 0 } else { self.bounds[index - 1] };
-            let upper = self.bounds[index];
+            let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
+            let upper = self.bounds.index_as(index);
             std::str::from_utf8(&self.values[lower .. upper]).unwrap()
         }
     }
-    impl<'a, BC: Len+Deref<Target=[usize]>> IndexOwn for Strings<BC, &'a [u8]> {
+    impl<'a, BC: Len+IndexAs<usize>> IndexOwn for Strings<BC, &'a [u8]> {
         type Ref = &'a str;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
-            let lower = if index == 0 { 0 } else { self.bounds[index - 1] };
-            let upper = self.bounds[index];
+            let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
+            let upper = self.bounds.index_as(index);
             std::str::from_utf8(&self.values[lower .. upper]).unwrap()
         }
     }
-    impl<'a, BC: Len+Deref<Target=[usize]>> IndexOwn for &'a Strings<BC, Vec<u8>> {
+    impl<'a, BC: Len+IndexAs<usize>> IndexOwn for &'a Strings<BC, Vec<u8>> {
         type Ref = &'a str;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
-            let lower = if index == 0 { 0 } else { self.bounds[index - 1] };
-            let upper = self.bounds[index];
+            let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
+            let upper = self.bounds.index_as(index);
             std::str::from_utf8(&self.values[lower .. upper]).unwrap()
         }
     }
@@ -713,8 +738,7 @@ pub mod string {
 pub use vector::Vecs;
 pub mod vector {
 
-    use std::ops::Deref;
-    use super::{Clear, Columnable, Len, IndexGat, IndexMut, IndexOwn, Push, HeapSize, Slice};
+    use super::{Clear, Columnable, Len, IndexGat, IndexMut, IndexOwn, IndexAs, Push, HeapSize, Slice};
 
     impl<T: Columnable> Columnable for Vec<T> {
         type Columns = Vecs<T::Columns>;
@@ -741,41 +765,41 @@ pub mod vector {
         #[inline(always)] fn len(&self) -> usize { self.bounds.len() }
     }
 
-    impl<TC, BC: Len+Deref<Target=[usize]>> IndexGat for Vecs<TC, BC> {
+    impl<TC, BC: Len+IndexAs<usize>> IndexGat for Vecs<TC, BC> {
         type Ref<'a> = Slice<&'a TC> where TC: 'a, BC: 'a;
 
         #[inline(always)]
         fn get(&self, index: usize) -> Self::Ref<'_> {
-            let lower = if index == 0 { 0 } else { self.bounds[index - 1] };
-            let upper = self.bounds[index];
+            let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
+            let upper = self.bounds.index_as(index);
             Slice::new(lower, upper, &self.values)
         }
     }
-    impl<TC: Copy, BC: Len+Deref<Target=[usize]>> IndexOwn for Vecs<TC, BC> {
+    impl<TC: Copy, BC: Len+IndexAs<usize>> IndexOwn for Vecs<TC, BC> {
         type Ref = Slice<TC>;
         #[inline(always)]
         fn get(&self, index: usize) -> Self::Ref {
-            let lower = if index == 0 { 0 } else { self.bounds[index - 1] };
-            let upper = self.bounds[index];
+            let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
+            let upper = self.bounds.index_as(index);
             Slice::new(lower, upper, self.values)
         }
     }
-    impl<'a, TC, BC: Len+Deref<Target=[usize]>> IndexOwn for &'a Vecs<TC, BC> {
+    impl<'a, TC, BC: Len+IndexAs<usize>> IndexOwn for &'a Vecs<TC, BC> {
         type Ref = Slice<&'a TC>;
         #[inline(always)]
         fn get(&self, index: usize) -> Self::Ref {
-            let lower = if index == 0 { 0 } else { self.bounds[index - 1] };
-            let upper = self.bounds[index];
+            let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
+            let upper = self.bounds.index_as(index);
             Slice::new(lower, upper, &self.values)
         }
     }
-    impl<TC, BC: Len+Deref<Target=[usize]>> IndexMut for Vecs<TC, BC> {
+    impl<TC, BC: Len+IndexAs<usize>> IndexMut for Vecs<TC, BC> {
         type IndexMut<'a> = Slice<&'a mut TC> where TC: 'a, BC: 'a;
 
         #[inline(always)]
         fn get_mut(&mut self, index: usize) -> Self::IndexMut<'_> {
-            let lower = if index == 0 { 0 } else { self.bounds[index - 1] };
-            let upper = self.bounds[index];
+            let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
+            let upper = self.bounds.index_as(index);
             Slice::new(lower, upper, &mut self.values)
         }
     }
@@ -956,10 +980,8 @@ pub mod sums {
     /// that make the operation constant time (using additional amortized memory).
     pub mod rank_select {
 
-        use std::ops::Deref;
-
         use crate::primitive::Bools;
-        use crate::{Len, IndexGat, Push, Clear, HeapSize};
+        use crate::{Len, IndexOwn, IndexAs, Push, Clear, HeapSize};
 
         /// A store for maintaining `Vec<bool>` with fast `rank` and `select` access.
         ///
@@ -974,13 +996,13 @@ pub mod sums {
             pub values: Bools<VC>,
         }
 
-        impl<CC, VC: Len + Deref<Target = [u64]>> RankSelect<CC, VC> {
+        impl<CC, VC: Len + IndexAs<u64>> RankSelect<CC, VC> {
             #[inline]
             pub fn get(&self, index: usize) -> bool {
-                self.values.get(index)
+                IndexOwn::get(&self.values, index)
             }
         }
-        impl<CC: Deref<Target = [u64]>, VC: Len + Deref<Target = [u64]>> RankSelect<CC, VC> {
+        impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>> RankSelect<CC, VC> {
             /// The number of set bits *strictly* preceding `index`.
             ///
             /// This number is accumulated first by reading out of `self.counts` at the correct position,
@@ -990,12 +1012,12 @@ pub mod sums {
                 let bit = index % 64;
                 let block = index / 64;
                 let chunk = block / 16;
-                let mut count = if chunk > 0 { self.counts[chunk - 1] as usize } else { 0 };
+                let mut count = if chunk > 0 { self.counts.index_as(chunk - 1) as usize } else { 0 };
                 for pos in (16 * chunk) .. block {
-                    count += self.values.values[pos].count_ones() as usize;
+                    count += self.values.values.index_as(pos).count_ones() as usize;
                 }
                 // TODO: Panic if out of bounds?
-                let intra_word = if block == self.values.values.len() { self.values.last_word } else { self.values.values[block] };
+                let intra_word = if block == self.values.values.len() { self.values.last_word } else { self.values.values.index_as(block) };
                 count += (intra_word & ((1 << bit) - 1)).count_ones() as usize;
                 count
             }
@@ -1005,19 +1027,19 @@ pub mod sums {
                 // Step one is to find the position in `counts` where we go from `rank` to `rank + 1`.
                 // The position we are looking for is within that chunk of bits.
                 // TODO: Binary search is likely better at many scales. Rust's binary search is .. not helpful with ties.
-                while chunk < self.counts.len() && self.counts[chunk] <= rank {
+                while chunk < self.counts.len() && self.counts.index_as(chunk) <= rank {
                     chunk += 1;
                 }
-                let mut count = if chunk < self.counts.len() { self.counts[chunk] } else { 0 };
+                let mut count = if chunk < self.counts.len() { self.counts.index_as(chunk) } else { 0 };
                 // Step two is to find the position within that chunk where the `rank`th bit is.
                 let mut block = 16 * chunk;
-                while block < self.values.values.len() && count + (self.values.values[block].count_ones() as u64) <= rank {
-                    count += self.values.values[block].count_ones() as u64;
+                while block < self.values.values.len() && count + (self.values.values.index_as(block).count_ones() as u64) <= rank {
+                    count += self.values.values.index_as(block).count_ones() as u64;
                     block += 1;
                 }
                 // Step three is to search the last word for the location, or return `None` if we run out of bits.
                 let last_bits = if block == self.values.values.len() { self.values.last_bits as usize } else { 64 };
-                let last_word = if block == self.values.values.len() { self.values.last_word } else { self.values.values[block] };
+                let last_word = if block == self.values.values.len() { self.values.last_word } else { self.values.values.index_as(block) };
                 for shift in 0 .. last_bits {
                     if ((last_word >> shift) & 0x01 == 0x01) && count + 1 == rank {
                         return Some(64 * block + shift);
@@ -1037,16 +1059,16 @@ pub mod sums {
 
         // This implementation probably only works for `Vec<u64>` and `Vec<u64>`, but we could fix that.
         // Partly, it's hard to name the `Index` flavor that allows one to get back a `u64`.
-        impl<CC: Push<u64> + Len + Deref<Target=[u64]>, VC: Push<u64> + Len + Deref<Target=[u64]>> RankSelect<CC, VC> {
+        impl<CC: Push<u64> + Len + IndexAs<u64>, VC: Push<u64> + Len + IndexAs<u64>> RankSelect<CC, VC> {
             #[inline]
             pub fn push(&mut self, bit: bool) {
                 self.values.push(bit);
                 while self.counts.len() < self.values.len() / 1024 {
-                    let mut count = self.counts.last().copied().unwrap_or(0);
+                    let mut count = self.counts.last().unwrap_or(0);
                     let lower = 16 * self.counts.len();
                     let upper = lower + 16;
                     for i in lower .. upper {
-                        count += self.values.values[i].count_ones() as u64;
+                        count += self.values.values.index_as(i).count_ones() as u64;
                     }
                     self.counts.push(count);
                 }
@@ -1069,9 +1091,7 @@ pub mod sums {
 
     pub mod result {
 
-        use std::ops::Deref;
-
-        use crate::{Clear, Columnable, Len, IndexGat, IndexMut, IndexOwn, Push, HeapSize};
+        use crate::{Clear, Columnable, Len, IndexGat, IndexMut, IndexOwn, IndexAs, Push, HeapSize};
         use crate::RankSelect;
 
         impl<S: Columnable, T: Columnable> Columnable for Result<S, T> {
@@ -1094,8 +1114,8 @@ pub mod sums {
         where
             SC: IndexGat,
             TC: IndexGat,
-            CC: Deref<Target = [u64]>,
-            VC: Deref<Target = [u64]> + Len,
+            CC: IndexAs<u64> + Len,
+            VC: IndexAs<u64> + Len,
         {
             type Ref<'a> = Result<SC::Ref<'a>, TC::Ref<'a>> where SC: 'a, TC: 'a, CC: 'a, VC: 'a;
             fn get(&self, index: usize) -> Self::Ref<'_> {
@@ -1110,8 +1130,8 @@ pub mod sums {
         where
             SC: IndexOwn,
             TC: IndexOwn,
-            CC: Deref<Target = [u64]>,
-            VC: Deref<Target = [u64]> + Len,
+            CC: IndexAs<u64> + Len,
+            VC: IndexAs<u64> + Len,
         {
             type Ref = Result<SC::Ref, TC::Ref>;
             fn get(&self, index: usize) -> Self::Ref {
@@ -1126,8 +1146,8 @@ pub mod sums {
         where
             &'a SC: IndexOwn,
             &'a TC: IndexOwn,
-            CC: Deref<Target = [u64]>,
-            VC: Deref<Target = [u64]> + Len,
+            CC: IndexAs<u64> + Len,
+            VC: IndexAs<u64> + Len,
         {
             type Ref = Result<<&'a SC as IndexOwn>::Ref, <&'a TC as IndexOwn>::Ref>;
             fn get(&self, index: usize) -> Self::Ref {
@@ -1140,7 +1160,7 @@ pub mod sums {
         }
 
         // NB: You are not allowed to change the variant, but can change its contents.
-        impl<SC: IndexMut, TC: IndexMut, CC: Deref<Target = [u64]>, VC: Len+Deref<Target = [u64]>> IndexMut for Results<SC, TC, CC, VC> {
+        impl<SC: IndexMut, TC: IndexMut, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len> IndexMut for Results<SC, TC, CC, VC> {
             type IndexMut<'a> = Result<SC::IndexMut<'a>, TC::IndexMut<'a>> where SC: 'a, TC: 'a, CC: 'a, VC: 'a;
             fn get_mut(&mut self, index: usize) -> Self::IndexMut<'_> {
                 if self.indexes.get(index) {
@@ -1238,8 +1258,7 @@ pub mod sums {
 
     pub mod option {
 
-        use std::ops::Deref;
-        use crate::{Clear, Columnable, Len, IndexGat, IndexMut, IndexOwn, Push, HeapSize};
+        use crate::{Clear, Columnable, Len, IndexGat, IndexMut, IndexOwn, IndexAs, Push, HeapSize};
         use crate::RankSelect;
 
         impl<T: Columnable> Columnable for Option<T> {
@@ -1258,7 +1277,7 @@ pub mod sums {
             #[inline(always)] fn len(&self) -> usize { self.indexes.len() }
         }
 
-        impl<TC: IndexGat, CC: Deref<Target = [u64]>, VC: Len + Deref<Target = [u64]>> IndexGat for Options<TC, CC, VC> {
+        impl<TC: IndexGat, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len> IndexGat for Options<TC, CC, VC> {
             type Ref<'a> = Option<TC::Ref<'a>> where TC: 'a, CC: 'a, VC: 'a;
             fn get(&self, index: usize) -> Self::Ref<'_> {
                 if self.indexes.get(index) {
@@ -1268,7 +1287,7 @@ pub mod sums {
                 }
             }
         }
-        impl<TC: IndexOwn, CC: Deref<Target = [u64]>, VC: Len + Deref<Target = [u64]>> IndexOwn for Options<TC, CC, VC> {
+        impl<TC: IndexOwn, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len> IndexOwn for Options<TC, CC, VC> {
             type Ref = Option<TC::Ref>;
             fn get(&self, index: usize) -> Self::Ref {
                 if self.indexes.get(index) {
@@ -1278,7 +1297,7 @@ pub mod sums {
                 }
             }
         }
-        impl<'a, TC, CC: Deref<Target = [u64]>, VC: Len + Deref<Target = [u64]>> IndexOwn for &'a Options<TC, CC, VC>
+        impl<'a, TC, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len> IndexOwn for &'a Options<TC, CC, VC>
         where &'a TC: IndexOwn 
         {
             type Ref = Option<<&'a TC as IndexOwn>::Ref>;
@@ -1290,7 +1309,7 @@ pub mod sums {
                 }
             }
         }
-        impl<TC: IndexMut, CC: Deref<Target = [u64]>, VC: Len + Deref<Target = [u64]>> IndexMut for Options<TC, CC, VC> {
+        impl<TC: IndexMut, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len> IndexMut for Options<TC, CC, VC> {
             type IndexMut<'a> = Option<TC::IndexMut<'a>> where TC: 'a, CC: 'a, VC: 'a;
             fn get_mut(&mut self, index: usize) -> Self::IndexMut<'_> {
                 if self.indexes.get(index) {
@@ -1607,7 +1626,7 @@ mod maps {
     #[cfg(test)]
     mod test {
 
-        use crate::common::{IndexGat, HeapSize, Len, Push};
+        use crate::common::{Len, Push};
         use crate::{Results, Strings};
 
         #[test]
