@@ -266,7 +266,7 @@ mod test {
     fn round_trip() {
 
         use crate::Columnable;
-        use crate::common::{IndexOwn, Push, HeapSize, Len};
+        use crate::common::{Index, Push, HeapSize, Len};
         use crate::bytes::{AsBytes, FromBytes};
 
         let mut column: <Result<usize, usize> as Columnable>::Columns = Default::default();

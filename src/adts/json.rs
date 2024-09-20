@@ -1,6 +1,6 @@
 use serde_json::Value as JsonJson;
 
-use crate::{Push, Len, IndexOwn, HeapSize};
+use crate::{Push, Len, Index, HeapSize};
 use crate::{Vecs, Strings, Lookbacks};
 
 /// Stand in for JSON, from `serde_json`.
@@ -138,11 +138,11 @@ impl<'a> PartialEq<Json> for JsonsRef<'a> {
             (JsonsRef::String(s0), Json::String(s1)) => { *s0 == s1 },
             (JsonsRef::Array(a0), Json::Array(a1)) => {
                 let slice: crate::Slice<&Vec<JsonIdx>> = (&a0.store.arrays).get(a0.index);
-                slice.len() == a1.len() && slice.iter().zip(a1).all(|(a,b)| a0.store.dereference(*a).eq(b))
+                slice.len() == a1.len() && slice.into_iter().zip(a1).all(|(a,b)| a0.store.dereference(*a).eq(b))
             },
             (JsonsRef::Object(o0), Json::Object(o1)) => {
                 let slice: crate::Slice<&(_, _)> = (&o0.store.objects).get(o0.index);
-                slice.len() == o1.len() && slice.iter().zip(o1).all(|((xs, xv),(ys, yv))| xs == ys && o0.store.dereference(*xv).eq(yv))
+                slice.len() == o1.len() && slice.into_iter().zip(o1).all(|((xs, xv),(ys, yv))| xs == ys && o0.store.dereference(*xv).eq(yv))
             },
             _ => { false }
         }
@@ -189,7 +189,7 @@ impl Len for Jsons {
 //         self.dereference(self.roots[index])
 //     }
 // }
-impl<'a> IndexOwn for &'a Jsons {
+impl<'a> Index for &'a Jsons {
     type Ref = JsonsRef<'a>;
     #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
         self.dereference(self.roots[index])

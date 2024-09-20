@@ -1,6 +1,6 @@
 fn main() {
 
-    use columnar::{Columnable, Len, IndexOwn};
+    use columnar::{Columnable, Len, Index};
     use columnar::bytes::{AsBytes, FromBytes};
 
     // A sequence of complex, nested, and variously typed records.
@@ -21,12 +21,12 @@ fn main() {
     let columns = Columnable::as_columns(records.clone());
 
     // Each item in `columns` matches the original in `records`.
-    // Equality testing is awkward, because the GAT reference types don't match.
+    // Equality testing is awkward, because the reference types don't match.
     // For example, `Option<&T>` cannot be equated to `Option<T>` without help,
     // and tuples `(&A, &B, &C)` cannot be equated to `&(A, B, C)` without help.
-    for (a, b) in columns.iter().zip(records) {
+    for (a, b) in columns.into_iter().zip(records) {
         assert_eq!(a.len(), b.len());
-        for (a, b) in a.iter().zip(b) {
+        for (a, b) in a.into_iter().zip(b) {
             match (a, b) {
                 (Ok(a), Ok(b)) => {
                     assert_eq!(a.0, &b.0);
@@ -75,7 +75,7 @@ fn _main2() {
     use columnar::adts::tree::{Tree, Trees};
     use columnar::adts::json::{Json, Jsons};
 
-    use columnar::{Push, Len, IndexOwn, HeapSize};
+    use columnar::{Push, Len, Index, HeapSize};
 
     let mut tree = Tree { data: 0, kids: vec![] };
     for i in 0 .. 11 {

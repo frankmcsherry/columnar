@@ -24,7 +24,7 @@ pub trait Columnable : Sized {
     }
 }
 
-pub use common::{Clear, Len, Push, IndexMut, IndexOwn, IndexAs, HeapSize, Slice};
+pub use common::{Clear, Len, Push, IndexMut, Index, IndexAs, HeapSize, Slice};
 /// Common traits and types that are re-used throughout the module.
 pub mod common {
 
@@ -75,11 +75,11 @@ pub mod common {
     }
 
 
-    pub use index::{IndexOwn, IndexMut, IndexAs};
+    pub use index::{Index, IndexMut, IndexAs};
     /// Traits for accessing elements by `usize` indexes.
     ///
     /// There are several traits, with a core distinction being whether the returned reference depends on the lifetime of `&self`.
-    /// For one trait `IndexOwn` the result does not depend on this lifetime.
+    /// For one trait `Index` the result does not depend on this lifetime.
     /// There is a third trait `IndexMut` that allows mutable access, that may be less commonly implemented.
     pub mod index {
 
@@ -122,7 +122,7 @@ pub mod common {
         /// This trait may be challenging to implement for owning containers,
         /// for example `Vec<_>`, which would need their `Ref` type to depend 
         /// on the lifetime of the `&self` borrow in the `get()` function.
-        pub trait IndexOwn {
+        pub trait Index {
             /// The type returned by the `get` method.
             ///
             /// Notably, this does not vary with lifetime, and will not depend on the lifetime of `&self`.
@@ -132,28 +132,34 @@ pub mod common {
                 if self.is_empty() { None }
                 else { Some(self.get(self.len()-1)) }
             }
-            fn iter(self) -> IterOwn<Self> where Self: Len + Sized {
+            fn iter(&self) -> IterOwn<&Self> {
                 IterOwn {
                     index: 0,
-                    slice: self
+                    slice: self,
+                }
+            }
+            fn into_iter(self) -> IterOwn<Self> where Self: Sized {
+                IterOwn {
+                    index: 0,
+                    slice: self,
                 }
             }
         }
 
         // These implementations aim to reveal a longer lifetime, or to copy results to avoid a lifetime.
-        impl<'a, T> IndexOwn for &'a [T] {
+        impl<'a, T> Index for &'a [T] {
             type Ref = &'a T;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { &self[index] }
         }
-        impl<T: Copy> IndexOwn for [T] {
+        impl<T: Copy> Index for [T] {
             type Ref = T;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self[index] }
         }
-        impl<'a, T> IndexOwn for &'a Vec<T> {
+        impl<'a, T> Index for &'a Vec<T> {
             type Ref = &'a T;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { &self[index] }
         }
-        impl<T: Copy> IndexOwn for Vec<T> {
+        impl<T: Copy> Index for Vec<T> {
             type Ref = T;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self[index] }
         }
@@ -181,7 +187,7 @@ pub mod common {
             }
         }
 
-        impl<T: IndexOwn, S> IndexAs<S> for T where T::Ref: CopyAs<S> {
+        impl<T: Index, S> IndexAs<S> for T where T::Ref: CopyAs<S> {
             fn index_as(&self, index: usize) -> S { self.get(index).copy_as() }
         }
     }
@@ -264,15 +270,44 @@ pub mod common {
         }
     }
 
+    impl<S: Index> PartialEq<[S::Ref]> for Slice<S> where S::Ref: PartialEq {
+        fn eq(&self, other: &[S::Ref]) -> bool {
+            if self.len() != other.len() { return false; }
+            for i in 0 .. self.len() {
+                if self.get(i) != other[i] { return false; }
+            }
+            true
+        }
+    }
+    impl<S: Index> PartialEq<Vec<S::Ref>> for Slice<S> where S::Ref: PartialEq {
+        fn eq(&self, other: &Vec<S::Ref>) -> bool {
+            if self.len() != other.len() { return false; }
+            for i in 0 .. self.len() {
+                if self.get(i) != other[i] { return false; }
+            }
+            true
+        }
+    }
+
     impl<S> Len for Slice<S> {
         #[inline(always)] fn len(&self) -> usize { self.upper - self.lower }
     }
 
-    impl<S: IndexOwn> IndexOwn for Slice<S> {
+    impl<S: Index> Index for Slice<S> {
         type Ref = S::Ref;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
             assert!(index < self.upper - self.lower);
             self.slice.get(self.lower + index)
+        }
+    }
+    impl<'a, S> Index for &'a Slice<S>
+    where
+        &'a S : Index,
+    {
+        type Ref = <&'a S as Index>::Ref;
+        #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
+            assert!(index < self.upper - self.lower);
+            (&self.slice).get(self.lower + index)
         }
     }
 
@@ -295,7 +330,7 @@ pub mod common {
         }
     }
 
-    impl<S: IndexOwn + Len> Iterator for IterOwn<S> {
+    impl<S: Index + Len> Iterator for IterOwn<S> {
         type Item = S::Ref;
         #[inline(always)] fn next(&mut self) -> Option<Self::Item> {
             if self.index < self.slice.len() {
@@ -332,7 +367,7 @@ pub mod primitive {
     /// A columnar store for `()`.
     mod empty {
 
-        use crate::{Clear, Columnable, Len, IndexMut, IndexOwn, Push, HeapSize};
+        use crate::{Clear, Columnable, Len, IndexMut, Index, Push, HeapSize};
 
         #[derive(Default)]
         pub struct Empties { pub count: usize, pub empty: () }
@@ -345,9 +380,13 @@ pub mod primitive {
             // TODO: panic if out of bounds?
             #[inline(always)] fn get_mut(&mut self, _index: usize) -> Self::IndexMut<'_> { &mut self.empty }
         }
-        impl IndexOwn for Empties {
+        impl Index for Empties {
             type Ref = ();
             fn get(&self, _index: usize) -> Self::Ref { () }
+        }
+        impl<'a> Index for &'a Empties {
+            type Ref = &'a ();
+            fn get(&self, _index: usize) -> Self::Ref { &() }
         }
         impl Push<()> for Empties {
             // TODO: check for overflow?
@@ -373,7 +412,7 @@ pub mod primitive {
     /// A columnar store for `bool`.
     mod boolean {
 
-        use crate::{Clear, Len, IndexOwn, IndexAs, Push, HeapSize};
+        use crate::{Clear, Len, Index, IndexAs, Push, HeapSize};
 
         impl crate::Columnable for bool {
             type Columns = Bools;
@@ -395,7 +434,7 @@ pub mod primitive {
             #[inline(always)] fn len(&self) -> usize { self.values.len() * 64 + (self.last_bits as usize) }
         }
 
-        impl<VC: Len + IndexAs<u64>> IndexOwn for Bools<VC> {
+        impl<VC: Len + IndexAs<u64>> Index for Bools<VC> {
             type Ref = bool;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
                 let block = index / 64;
@@ -441,7 +480,7 @@ pub mod primitive {
     /// A columnar store for `std::time::Duration`.
     mod duration {
 
-        use crate::{Len, IndexOwn, Push, Clear, HeapSize};
+        use crate::{Len, Index, Push, Clear, HeapSize};
 
         impl crate::Columnable for std::time::Duration {
             type Columns = Durations;
@@ -458,7 +497,7 @@ pub mod primitive {
             #[inline(always)] fn len(&self) -> usize { self.seconds.len() }
         }
 
-        impl<SC: IndexOwn, NC: IndexOwn> IndexOwn for Durations<SC, NC> {
+        impl<SC: Index, NC: Index> Index for Durations<SC, NC> {
             type Ref = (SC::Ref, NC::Ref);
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
                 (self.seconds.get(index), self.nanoseconds.get(index))
@@ -498,7 +537,7 @@ pub mod primitive {
 pub use string::Strings;
 pub mod string {
 
-    use super::{Clear, Columnable, Len, IndexOwn, IndexAs, Push, HeapSize};
+    use super::{Clear, Columnable, Len, Index, IndexAs, Push, HeapSize};
 
     impl Columnable for String {
         type Columns = Strings;
@@ -520,7 +559,7 @@ pub mod string {
         #[inline(always)] fn len(&self) -> usize { self.bounds.len() }
     }
 
-    impl<'a, BC: Len+IndexAs<usize>> IndexOwn for Strings<BC, &'a [u8]> {
+    impl<'a, BC: Len+IndexAs<usize>> Index for Strings<BC, &'a [u8]> {
         type Ref = &'a str;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
             let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
@@ -528,7 +567,7 @@ pub mod string {
             std::str::from_utf8(&self.values[lower .. upper]).unwrap()
         }
     }
-    impl<'a, BC: Len+IndexAs<usize>> IndexOwn for &'a Strings<BC, Vec<u8>> {
+    impl<'a, BC: Len+IndexAs<usize>> Index for &'a Strings<BC, Vec<u8>> {
         type Ref = &'a str;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
             let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
@@ -575,7 +614,7 @@ pub mod string {
 pub use vector::Vecs;
 pub mod vector {
 
-    use super::{Clear, Columnable, Len, IndexMut, IndexOwn, IndexAs, Push, HeapSize, Slice};
+    use super::{Clear, Columnable, Len, IndexMut, Index, IndexAs, Push, HeapSize, Slice};
 
     impl<T: Columnable> Columnable for Vec<T> {
         type Columns = Vecs<T::Columns>;
@@ -602,7 +641,7 @@ pub mod vector {
         #[inline(always)] fn len(&self) -> usize { self.bounds.len() }
     }
 
-    impl<TC: Copy, BC: Len+IndexAs<usize>> IndexOwn for Vecs<TC, BC> {
+    impl<TC: Copy, BC: Len+IndexAs<usize>> Index for Vecs<TC, BC> {
         type Ref = Slice<TC>;
         #[inline(always)]
         fn get(&self, index: usize) -> Self::Ref {
@@ -611,7 +650,7 @@ pub mod vector {
             Slice::new(lower, upper, self.values)
         }
     }
-    impl<'a, TC, BC: Len+IndexAs<usize>> IndexOwn for &'a Vecs<TC, BC> {
+    impl<'a, TC, BC: Len+IndexAs<usize>> Index for &'a Vecs<TC, BC> {
         type Ref = Slice<&'a TC>;
         #[inline(always)]
         fn get(&self, index: usize) -> Self::Ref {
@@ -669,7 +708,7 @@ pub mod vector {
 #[allow(non_snake_case)]
 pub mod tuple {
 
-    use super::{Clear, Columnable, Len, IndexMut, IndexOwn, Push, HeapSize};
+    use super::{Clear, Columnable, Len, IndexMut, Index, Push, HeapSize};
 
     // Implementations for tuple types.
     // These are all macro based, because the implementations are very similar.
@@ -699,15 +738,15 @@ pub mod tuple {
                     (l, c)
                 }
             }
-            impl<$($name: IndexOwn),*> IndexOwn for ($($name,)*) {
+            impl<$($name: Index),*> Index for ($($name,)*) {
                 type Ref = ($($name::Ref,)*);
                 fn get(&self, index: usize) -> Self::Ref {
                     let ($($name,)*) = self;
                     ($($name.get(index),)*)
                 }
             }
-            impl<'a, $($name),*> IndexOwn for &'a ($($name,)*) where $( &'a $name: IndexOwn),* {
-                type Ref = ($(<&'a $name as IndexOwn>::Ref,)*);
+            impl<'a, $($name),*> Index for &'a ($($name,)*) where $( &'a $name: Index),* {
+                type Ref = ($(<&'a $name as Index>::Ref,)*);
                 fn get(&self, index: usize) -> Self::Ref {
                     let ($($name,)*) = self;
                     ($($name.get(index),)*)
@@ -755,7 +794,7 @@ pub mod tuple {
         fn round_trip() {
 
             use crate::Columnable;
-            use crate::common::{IndexOwn, Push, HeapSize, Len};
+            use crate::common::{Index, Push, HeapSize, Len};
 
             let mut column: <(usize, u8, String) as Columnable>::Columns = Default::default();
             for i in 0..100 {
@@ -800,7 +839,7 @@ pub mod sums {
     pub mod rank_select {
 
         use crate::primitive::Bools;
-        use crate::{Len, IndexOwn, IndexAs, Push, Clear, HeapSize};
+        use crate::{Len, Index, IndexAs, Push, Clear, HeapSize};
 
         /// A store for maintaining `Vec<bool>` with fast `rank` and `select` access.
         ///
@@ -818,7 +857,7 @@ pub mod sums {
         impl<CC, VC: Len + IndexAs<u64>> RankSelect<CC, VC> {
             #[inline]
             pub fn get(&self, index: usize) -> bool {
-                IndexOwn::get(&self.values, index)
+                Index::get(&self.values, index)
             }
         }
         impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>> RankSelect<CC, VC> {
@@ -910,7 +949,7 @@ pub mod sums {
 
     pub mod result {
 
-        use crate::{Clear, Columnable, Len, IndexMut, IndexOwn, IndexAs, Push, HeapSize};
+        use crate::{Clear, Columnable, Len, IndexMut, Index, IndexAs, Push, HeapSize};
         use crate::RankSelect;
 
         impl<S: Columnable, T: Columnable> Columnable for Result<S, T> {
@@ -929,10 +968,10 @@ pub mod sums {
             #[inline(always)] fn len(&self) -> usize { self.indexes.len() }
         }
 
-        impl<SC, TC, CC, VC> IndexOwn for Results<SC, TC, CC, VC>
+        impl<SC, TC, CC, VC> Index for Results<SC, TC, CC, VC>
         where
-            SC: IndexOwn,
-            TC: IndexOwn,
+            SC: Index,
+            TC: Index,
             CC: IndexAs<u64> + Len,
             VC: IndexAs<u64> + Len,
         {
@@ -945,14 +984,14 @@ pub mod sums {
                 }
             }
         }
-        impl<'a, SC, TC, CC, VC> IndexOwn for &'a Results<SC, TC, CC, VC>
+        impl<'a, SC, TC, CC, VC> Index for &'a Results<SC, TC, CC, VC>
         where
-            &'a SC: IndexOwn,
-            &'a TC: IndexOwn,
+            &'a SC: Index,
+            &'a TC: Index,
             CC: IndexAs<u64> + Len,
             VC: IndexAs<u64> + Len,
         {
-            type Ref = Result<<&'a SC as IndexOwn>::Ref, <&'a TC as IndexOwn>::Ref>;
+            type Ref = Result<<&'a SC as Index>::Ref, <&'a TC as Index>::Ref>;
             fn get(&self, index: usize) -> Self::Ref {
                 if self.indexes.get(index) {
                     Ok((&self.oks).get(self.indexes.rank(index)))
@@ -1026,7 +1065,7 @@ pub mod sums {
             fn round_trip() {
 
                 use crate::Columnable;
-                use crate::common::{IndexOwn, Push, HeapSize, Len};
+                use crate::common::{Index, Push, HeapSize, Len};
 
                 let mut column: <Result<usize, usize> as Columnable>::Columns = Default::default();
                 for i in 0..100 {
@@ -1061,7 +1100,7 @@ pub mod sums {
 
     pub mod option {
 
-        use crate::{Clear, Columnable, Len, IndexMut, IndexOwn, IndexAs, Push, HeapSize};
+        use crate::{Clear, Columnable, Len, IndexMut, Index, IndexAs, Push, HeapSize};
         use crate::RankSelect;
 
         impl<T: Columnable> Columnable for Option<T> {
@@ -1080,7 +1119,7 @@ pub mod sums {
             #[inline(always)] fn len(&self) -> usize { self.indexes.len() }
         }
 
-        impl<TC: IndexOwn, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len> IndexOwn for Options<TC, CC, VC> {
+        impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len> Index for Options<TC, CC, VC> {
             type Ref = Option<TC::Ref>;
             fn get(&self, index: usize) -> Self::Ref {
                 if self.indexes.get(index) {
@@ -1090,10 +1129,10 @@ pub mod sums {
                 }
             }
         }
-        impl<'a, TC, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len> IndexOwn for &'a Options<TC, CC, VC>
-        where &'a TC: IndexOwn 
+        impl<'a, TC, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len> Index for &'a Options<TC, CC, VC>
+        where &'a TC: Index 
         {
-            type Ref = Option<<&'a TC as IndexOwn>::Ref>;
+            type Ref = Option<<&'a TC as Index>::Ref>;
             fn get(&self, index: usize) -> Self::Ref {
                 if self.indexes.get(index) {
                     Some((&self.somes).get(self.indexes.rank(index)))
@@ -1159,7 +1198,7 @@ pub mod sums {
         mod test {
 
             use crate::Columnable;
-            use crate::common::{IndexOwn, HeapSize, Len};
+            use crate::common::{Index, HeapSize, Len};
             use crate::Options;
 
             #[test]
@@ -1199,7 +1238,7 @@ pub use lookback::{Repeats, Lookbacks};
 /// close proximity. Values must be equatable, and the degree of lookback can be configured.
 pub mod lookback {
 
-    use crate::{Options, Results, Push, IndexOwn, Len, HeapSize};
+    use crate::{Options, Results, Push, Index, Len, HeapSize};
 
     /// A container that encodes repeated values with a `None` variant, at the cost of extra bits for every record.
     #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -1210,8 +1249,8 @@ pub mod lookback {
 
     impl<T: PartialEq, TC: Push<T> + Len, const N: u8> Push<T> for Repeats<TC, N>
     where
-        for<'a> &'a TC: IndexOwn,
-        for<'a> <&'a TC as IndexOwn>::Ref : PartialEq<T>,
+        for<'a> &'a TC: Index,
+        for<'a> <&'a TC as Index>::Ref : PartialEq<T>,
     {
         fn push(&mut self, item: T) {
             // Look at the last `somes` value for a potential match.
@@ -1228,7 +1267,7 @@ pub mod lookback {
         #[inline(always)] fn len(&self) -> usize { self.inner.len() }
     }
 
-    impl<TC: IndexOwn, const N: u8> IndexOwn for Repeats<TC, N> {
+    impl<TC: Index, const N: u8> Index for Repeats<TC, N> {
         type Ref = TC::Ref;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
             match self.inner.get(index) {
@@ -1255,8 +1294,8 @@ pub mod lookback {
 
     impl<T: PartialEq, TC: Push<T> + Len, VC: Push<u8>, const N: u8> Push<T> for Lookbacks<TC, VC, N>
     where
-        for<'a> &'a TC: IndexOwn,
-        for<'a> <&'a TC as IndexOwn>::Ref : PartialEq<T>,
+        for<'a> &'a TC: Index,
+        for<'a> <&'a TC as Index>::Ref : PartialEq<T>,
     {
         fn push(&mut self, item: T) {
             // Look backwards through (0 .. N) to look for a matching value.
@@ -1271,7 +1310,7 @@ pub mod lookback {
         #[inline(always)] fn len(&self) -> usize { self.inner.len() }
     }
 
-    impl<TC: IndexOwn, VC: IndexOwn<Ref=u8>, const N: u8> IndexOwn for Lookbacks<TC, VC, N> {
+    impl<TC: Index, VC: Index<Ref=u8>, const N: u8> Index for Lookbacks<TC, VC, N> {
         type Ref = TC::Ref;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
             match self.inner.get(index) {
@@ -1283,11 +1322,11 @@ pub mod lookback {
             }
         }
     }
-    impl<'a, TC, const N: u8> IndexOwn for &'a Lookbacks<TC, Vec<u8>, N> 
+    impl<'a, TC, const N: u8> Index for &'a Lookbacks<TC, Vec<u8>, N> 
     where 
-        &'a TC: IndexOwn,
+        &'a TC: Index,
     {
-        type Ref = <&'a TC as IndexOwn>::Ref;
+        type Ref = <&'a TC as Index>::Ref;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
             match (&self.inner).get(index) {
                 Ok(item) => item,
