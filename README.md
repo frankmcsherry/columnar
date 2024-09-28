@@ -10,7 +10,7 @@ The container supports efficient random access for reads, and limited forms of r
 
 ## An example
 
-Starting from a sequence of complicated types, the `Columnable::as_columns` method converts them to a columnar container.
+Starting from a sequence of complicated types, the `Columnar::as_columns` method converts them to a columnar container.
 ```rust
 // A sequence of complex, nested, and variously typed records.
 let records =
@@ -27,7 +27,7 @@ let records =
 // An appendable replacement for `&[T]`: indexable, shareable.
 // Layout in memory is a small number of contiguous buffers,
 // even though `records` contains many small allocations.
-let columns = Columnable::as_columns(records.clone());
+let columns = Columnar::as_columns(records.clone());
 ```
 
 The contents of `columns` now match the items of `records`.

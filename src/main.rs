@@ -1,6 +1,6 @@
 fn main() {
 
-    use columnar::{Columnable, Len, Index};
+    use columnar::{Columnar, Len, Index};
     use columnar::bytes::{AsBytes, FromBytes};
 
     // A sequence of complex, nested, and variously typed records.
@@ -18,7 +18,7 @@ fn main() {
     // An appendable replacement for `&[T]`: indexable, shareable.
     // Layout in memory is a small number of contiguous buffers,
     // even though `records` contains many small allocations.
-    let columns = Columnable::as_columns(records.clone());
+    let columns = Columnar::as_columns(records.clone());
 
     // Each item in `columns` matches the original in `records`.
     // Equality testing is awkward, because the reference types don't match.

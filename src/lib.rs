@@ -10,13 +10,13 @@ pub mod bytes;
 pub mod adts;
 
 /// A type that can be represented in columnar form.
-pub trait Columnable : Sized {
+pub trait Columnar : Sized {
     /// The type that stores the columnar representation.
-    type Columns: Push<Self> + Len + Clear + Default;
+    type Container: Push<Self> + Len + Clear + Default;
 
     /// Converts a sequence of the type into columnar form.
-    fn as_columns<I>(selves: I) -> Self::Columns where I: Iterator<Item = Self>, Self: Sized {
-        let mut columns: Self::Columns = Default::default();
+    fn as_columns<I>(selves: I) -> Self::Container where I: Iterator<Item = Self>, Self: Sized {
+        let mut columns: Self::Container = Default::default();
         for item in selves {
             columns.push(item);
         }
@@ -351,8 +351,8 @@ pub mod primitive {
     /// An implementation of opinions for types that want to use `Vec<T>`.
     macro_rules! implement_columnable {
         ($($index_type:ty),*) => { $(
-            impl crate::Columnable for $index_type {
-                type Columns = Vec<$index_type>;
+            impl crate::Columnar for $index_type {
+                type Container = Vec<$index_type>;
             }
             impl crate::HeapSize for $index_type { }
         )* }
@@ -367,7 +367,7 @@ pub mod primitive {
     /// A columnar store for `()`.
     mod empty {
 
-        use crate::{Clear, Columnable, Len, IndexMut, Index, Push, HeapSize};
+        use crate::{Clear, Columnar, Len, IndexMut, Index, Push, HeapSize};
 
         #[derive(Default)]
         pub struct Empties { pub count: usize, pub empty: () }
@@ -397,8 +397,8 @@ pub mod primitive {
             fn push(&mut self, _item: &()) { self.count += 1; }
         }
 
-        impl Columnable for () {
-            type Columns = Empties;
+        impl Columnar for () {
+            type Container = Empties;
         }
         impl HeapSize for Empties {
             fn heap_size(&self) -> (usize, usize) { (0, 0) }
@@ -414,8 +414,8 @@ pub mod primitive {
 
         use crate::{Clear, Len, Index, IndexAs, Push, HeapSize};
 
-        impl crate::Columnable for bool {
-            type Columns = Bools;
+        impl crate::Columnar for bool {
+            type Container = Bools;
         }
 
         /// A store for maintaining `Vec<bool>`.
@@ -482,8 +482,8 @@ pub mod primitive {
 
         use crate::{Len, Index, Push, Clear, HeapSize};
 
-        impl crate::Columnable for std::time::Duration {
-            type Columns = Durations;
+        impl crate::Columnar for std::time::Duration {
+            type Container = Durations;
         }
 
         // `std::time::Duration` is equivalent to `(u64, u32)`, corresponding to seconds and nanoseconds.
@@ -537,13 +537,13 @@ pub mod primitive {
 pub use string::Strings;
 pub mod string {
 
-    use super::{Clear, Columnable, Len, Index, IndexAs, Push, HeapSize};
+    use super::{Clear, Columnar, Len, Index, IndexAs, Push, HeapSize};
 
-    impl Columnable for String {
-        type Columns = Strings;
+    impl Columnar for String {
+        type Container = Strings;
     }
-    impl Columnable for &str {
-        type Columns = Strings;
+    impl Columnar for &str {
+        type Container = Strings;
     }
 
     /// A stand-in for `Vec<String>`.
@@ -614,13 +614,13 @@ pub mod string {
 pub use vector::Vecs;
 pub mod vector {
 
-    use super::{Clear, Columnable, Len, IndexMut, Index, IndexAs, Push, HeapSize, Slice};
+    use super::{Clear, Columnar, Len, IndexMut, Index, IndexAs, Push, HeapSize, Slice};
 
-    impl<T: Columnable> Columnable for Vec<T> {
-        type Columns = Vecs<T::Columns>;
+    impl<T: Columnar> Columnar for Vec<T> {
+        type Container = Vecs<T::Container>;
     }
-    impl<'a, T: Columnable> Columnable for &'a [T] where T::Columns : Push<&'a T> {
-        type Columns = Vecs<T::Columns>;
+    impl<'a, T: Columnar> Columnar for &'a [T] where T::Container : Push<&'a T> {
+        type Container = Vecs<T::Container>;
     }
 
     /// A stand-in for `Vec<Vec<T>>` for complex `T`.
@@ -708,15 +708,15 @@ pub mod vector {
 #[allow(non_snake_case)]
 pub mod tuple {
 
-    use super::{Clear, Columnable, Len, IndexMut, Index, Push, HeapSize};
+    use super::{Clear, Columnar, Len, IndexMut, Index, Push, HeapSize};
 
     // Implementations for tuple types.
     // These are all macro based, because the implementations are very similar.
     // The macro requires two names, one for the store and one for pushable types.
     macro_rules! tuple_impl {
         ( $($name:ident,$name2:ident)+) => (
-            impl<$($name: Columnable),*> Columnable for ($($name,)*) {
-                type Columns = ($($name::Columns,)*);
+            impl<$($name: Columnar),*> Columnar for ($($name,)*) {
+                type Container = ($($name::Container,)*);
             }
             impl<$($name: Len),*> Len for ($($name,)*) {
                 fn len(&self) -> usize {
@@ -793,10 +793,10 @@ pub mod tuple {
         #[test]
         fn round_trip() {
 
-            use crate::Columnable;
+            use crate::Columnar;
             use crate::common::{Index, Push, HeapSize, Len};
 
-            let mut column: <(usize, u8, String) as Columnable>::Columns = Default::default();
+            let mut column: <(usize, u8, String) as Columnar>::Container = Default::default();
             for i in 0..100 {
                 column.push((i, i as u8, i.to_string()));
                 column.push((i, i as u8, "".to_string()));
@@ -949,11 +949,11 @@ pub mod sums {
 
     pub mod result {
 
-        use crate::{Clear, Columnable, Len, IndexMut, Index, IndexAs, Push, HeapSize};
+        use crate::{Clear, Columnar, Len, IndexMut, Index, IndexAs, Push, HeapSize};
         use crate::RankSelect;
 
-        impl<S: Columnable, T: Columnable> Columnable for Result<S, T> {
-            type Columns = Results<S::Columns, T::Columns>;
+        impl<S: Columnar, T: Columnar> Columnar for Result<S, T> {
+            type Container = Results<S::Container, T::Container>;
         }
 
         #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -1064,10 +1064,10 @@ pub mod sums {
             #[test]
             fn round_trip() {
 
-                use crate::Columnable;
+                use crate::Columnar;
                 use crate::common::{Index, Push, HeapSize, Len};
 
-                let mut column: <Result<usize, usize> as Columnable>::Columns = Default::default();
+                let mut column: <Result<usize, usize> as Columnar>::Container = Default::default();
                 for i in 0..100 {
                     column.push(Ok::<usize, usize>(i));
                     column.push(Err::<usize, usize>(i));
@@ -1081,7 +1081,7 @@ pub mod sums {
                     assert_eq!(column.get(2*i+1), Err(i));
                 }
 
-                let mut column: <Result<usize, u8> as Columnable>::Columns = Default::default();
+                let mut column: <Result<usize, u8> as Columnar>::Container = Default::default();
                 for i in 0..100 {
                     column.push(Ok::<usize, u8>(i));
                     column.push(Err::<usize, u8>(i as u8));
@@ -1100,11 +1100,11 @@ pub mod sums {
 
     pub mod option {
 
-        use crate::{Clear, Columnable, Len, IndexMut, Index, IndexAs, Push, HeapSize};
+        use crate::{Clear, Columnar, Len, IndexMut, Index, IndexAs, Push, HeapSize};
         use crate::RankSelect;
 
-        impl<T: Columnable> Columnable for Option<T> {
-            type Columns = Options<T::Columns>;
+        impl<T: Columnar> Columnar for Option<T> {
+            type Container = Options<T::Container>;
         }
 
         #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -1197,14 +1197,14 @@ pub mod sums {
         #[cfg(test)]
         mod test {
 
-            use crate::Columnable;
+            use crate::Columnar;
             use crate::common::{Index, HeapSize, Len};
             use crate::Options;
 
             #[test]
             fn round_trip_some() {
                 // Type annotation is important to avoid some inference overflow.
-                let store: Options<Vec<i32>> = Columnable::as_columns((0..100).map(Some));
+                let store: Options<Vec<i32>> = Columnar::as_columns((0..100).map(Some));
                 assert_eq!(store.len(), 100);
                 assert!((&store).iter().zip(0..100).all(|(a, b)| a == Some(&b)));
                 assert_eq!(store.heap_size(), (408, 544));
@@ -1212,7 +1212,7 @@ pub mod sums {
 
             #[test]
             fn round_trip_none() {
-                let store = Columnable::as_columns((0..100).map(|_x| None::<i32>));
+                let store = Columnar::as_columns((0..100).map(|_x| None::<i32>));
                 assert_eq!(store.len(), 100);
                 let foo = &store;
                 assert!(foo.iter().zip(0..100).all(|(a, _b)| a == None));
@@ -1222,7 +1222,7 @@ pub mod sums {
             #[test]
             fn round_trip_mixed() {
                 // Type annotation is important to avoid some inference overflow.
-                let store: Options<Vec<i32>>  = Columnable::as_columns((0..100).map(|x| if x % 2 == 0 { Some(x) } else { None }));
+                let store: Options<Vec<i32>>  = Columnar::as_columns((0..100).map(|x| if x % 2 == 0 { Some(x) } else { None }));
                 assert_eq!(store.len(), 100);
                 assert!((&store).iter().zip(0..100).all(|(a, b)| a == if b % 2 == 0 { Some(&b) } else { None }));
                 assert_eq!(store.heap_size(), (208, 288));

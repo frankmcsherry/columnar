@@ -3,7 +3,7 @@
 extern crate columnar;
 extern crate test;
 
-use columnar::{Clear, Columnable, Push, Len};
+use columnar::{Clear, Columnar, Push, Len};
 use test::Bencher;
 
 #[bench] fn empty_copy(bencher: &mut Bencher) { _bench_copy(bencher, vec![(); 1024]); }
@@ -44,7 +44,7 @@ use test::Bencher;
 // #[bench] fn vec_u_s_prealloc(bencher: &mut Bencher) { _bench_prealloc(bencher, vec![vec![(0u64, format!("grawwwwrr!")); 32]; 32]); }
 // #[bench] fn vec_u_vn_s_prealloc(bencher: &mut Bencher) { _bench_prealloc(bencher, vec![vec![(0u64, vec![(); 1 << 40], format!("grawwwwrr!")); 32]; 32]); }
 
-fn _bench_copy<T: Columnable+Eq>(bencher: &mut Bencher, record: T) where T::Columns : for<'a> Push<&'a T> {
+fn _bench_copy<T: Columnar+Eq>(bencher: &mut Bencher, record: T) where T::Columns : for<'a> Push<&'a T> {
 
     // prepare encoded data for bencher.bytes
     let mut arena: T::Columns = Default::default();
@@ -57,7 +57,7 @@ fn _bench_copy<T: Columnable+Eq>(bencher: &mut Bencher, record: T) where T::Colu
     });
 }
 
-fn _bench_clone<T: Columnable+Eq+Clone>(bencher: &mut Bencher, record: T) {
+fn _bench_clone<T: Columnar+Eq+Clone>(bencher: &mut Bencher, record: T) {
 
     // prepare encoded data for bencher.bytes
     let mut arena = Vec::new();
@@ -70,7 +70,7 @@ fn _bench_clone<T: Columnable+Eq+Clone>(bencher: &mut Bencher, record: T) {
     });
 }
 
-// fn _bench_realloc<T: Columnable+Eq>(bencher: &mut Bencher, record: T) {
+// fn _bench_realloc<T: Columnar+Eq>(bencher: &mut Bencher, record: T) {
 
 //     bencher.iter(|| {
 //         // prepare encoded data for bencher.bytes
@@ -82,7 +82,7 @@ fn _bench_clone<T: Columnable+Eq+Clone>(bencher: &mut Bencher, record: T) {
 //     });
 // }
 
-// fn _bench_prealloc<T: Columnable+Eq>(bencher: &mut Bencher, record: T) {
+// fn _bench_prealloc<T: Columnar+Eq>(bencher: &mut Bencher, record: T) {
 
 //     bencher.iter(|| {
 //         // prepare encoded data for bencher.bytes
