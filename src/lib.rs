@@ -243,6 +243,7 @@ pub mod common {
     /// A struct representing a slice of a range of values.
     ///
     /// The lower and upper bounds should be meaningfully set on construction.
+    #[derive(Copy, Clone)]
     pub struct Slice<S> {
         lower: usize,
         upper: usize,
