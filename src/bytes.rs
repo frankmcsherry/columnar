@@ -269,7 +269,7 @@ mod test {
         use crate::common::{Index, Push, HeapSize, Len};
         use crate::bytes::{AsBytes, FromBytes};
 
-        let mut column: <Result<usize, usize> as Columnar>::Columns = Default::default();
+        let mut column: <Result<usize, usize> as Columnar>::Container = Default::default();
         for i in 0..100 {
             column.push(Ok::<usize, usize>(i));
             column.push(Err::<usize, usize>(i));

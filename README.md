@@ -3,31 +3,38 @@
 A crate to convert from arrays of (complex) structs to structs of (simple) arrays.
 
 The crate provides containers for types built out of product (`struct`), sum (`enum`), and list (`Vec`) combinators (and examples for structurally recursive types, like trees).
-The containers represent a sequence of the input types, but are backed by only a small number of Rust allocations (vectors or slices).
-Each of the Rust allocations contains only primitive types, and are easily converted to and from (correctly aligned) binary slices `&[u8]`.
+The containers represent a sequence of the input types, but are backed by only a small number of Rust allocations (vectors or slices) even though each instance of the type may have many more allocations.
+Each of the container allocations contains only primitive types, and are easily converted to and from (correctly aligned) binary slices `&[u8]`.
 
-The container supports efficient random access for reads, and limited forms of random access for writes.
+The containers supports efficient random access for reads, and limited forms of random access for writes.
 
 ## An example
 
 Starting from a sequence of complicated types, the `Columnar::as_columns` method converts them to a columnar container.
 ```rust
-// A sequence of complex, nested, and variously typed records.
-let records =
-(0 .. 1024u64).map(|i| {
-    (0 .. i).map(|j| {
-        if (i - j) % 2 == 0 {
-            Ok((j, "grawwwwrr!".to_string()))
-        } else {
-            Err(Some(vec![(); 1 << 40]))
-        }
-    }).collect::<Vec<_>>()
-});
+use columnar::Columnar;
 
-// An appendable replacement for `&[T]`: indexable, shareable.
-// Layout in memory is a small number of contiguous buffers,
-// even though `records` contains many small allocations.
-let columns = Columnar::as_columns(records.clone());
+#[derive(Columnar)]
+enum Group<T> {
+    Solo(T),
+    Team(Vec<T>),
+}
+
+fn main() {
+
+    let mut roster = Vec::new();
+    roster.push(Group::Solo(
+        ("Alice".to_string(), 20u64)
+    ));
+    roster.push(Group::Team(vec![
+        ("Bob".to_string(), 21),
+        ("Carol".to_string(), 22),
+    ]));
+
+    // An appendable replacement for `&[T]`: indexable, shareable.
+    // Layout in memory is a small number of contiguous buffers,
+    // even though `roster` contains many small allocations.
+    let mut columns = Columnar::as_columns(roster.iter());
 ```
 
 The contents of `columns` now match the items of `records`.
@@ -35,66 +42,77 @@ However, confirming this can be annoying because the reference types returned by
 Here is the code you might write in place of `assert_eq!(columns, records)`:
 
 ```rust
-// Each item in `columns` matches the original in `records`.
-// Equality testing is awkward, because the reference types don't match.
-// For example, `Option<&T>` cannot be equated to `&Option<T>` without help,
-// and tuples `(&A, &B, &C)` cannot be equated to `&(A, B, C)` without help.
-assert_eq(columns.len(), records.clone().count());
-for (a, b) in columns.into_iter().zip(records.clone()) {
-    assert_eq!(a.len(), b.len());
-    for (a, b) in a.into_iter().zip(b) {
-        match (a, b) {
-            (Ok(a), Ok(b)) => {
-                assert_eq!(a.0, &b.0);
-                assert_eq!(a.1, b.1);
+    // Each item in `columns` matches the original in `records`.
+    // Equality testing can be awkward, because the reference types don't match.
+    // For example, `Option<&T>` cannot be equated to `&Option<T>` without help,
+    // and tuples `(&A, &B, &C)` cannot be equated to `&(A, B, C)` without help.
+    // Iterated column values should match the original `roster`.
+    use columnar::Index;
+    for (col, row) in columns.into_iter().zip(roster) {
+        match (col, row) {
+            (GroupReference::Solo(p0), Group::Solo(p1)) => {
+                assert_eq!(p0.0, p1.0);
+                assert_eq!(p0.1, &p1.1);
             },
-            (Err(a), Err(b)) => {
-                match (a, b) {
-                    (Some(a), Some(b)) => { assert_eq!(a.len(), b.len()); },
-                    (None, None) => { },
-                    _ => { panic!("Variant mismatch"); }
+            (GroupReference::Team(p0s), Group::Team(p1s)) => {
+                assert_eq!(p0s.len(), p1s.len());
+                for (p0, p1) in p0s.into_iter().zip(p1s) {
+                    assert_eq!(p0.0, p1.0);
+                    assert_eq!(p0.1, &p1.1);
                 }
             },
             _ => { panic!("Variant mismatch"); }
         }
     }
-}
+
 ```
 
 Having transformed the records, `columns` can now report on the allocations backing it.
-This prints out fourteen lines, describing the relatively few allocations required (for a half million items).
+We feed in a thousand more reconds, and confirm that there are nonetheless only nine allocations.
 ```rust
-// Report the small number of large buffers backing `columns`.
-for (align, bytes) in columns.as_bytes() {
-    println!("align: {:?}, bytes.len(): {:?}", align, bytes.len());
-}
+    // Append a number of rows to `columns`.
+    use columnar::Push;
+    for index in 0 .. 1024 {
+        columns.push(&Group::Team(vec![
+            (format!("Brain{}", index), index),
+            (format!("Brawn{}", index), index),
+        ]));
+    }
+
+    // Report the fixed number of large buffers backing `columns`.
+    use columnar::bytes::{AsBytes, FromBytes};
+    assert_eq!(columns.as_bytes().count(), 9);
+    for (align, bytes) in columns.as_bytes() {
+        println!("align: {:?}, bytes.len(): {:?}", align, bytes.len());
+    }
 ```
 
 Columnar containers are backed by allocations of primitive types that can be converted to binary slices, and back again if their alignment is correct.
 This is "zero copy", performing no allocations, copies, or data manipulation.
 ```rust
-// Borrow bytes from `columns`, and reconstruct a borrowed `columns`.
-// In practice, we would use serialized bytes from somewhere else.
-// Function defined to get type support, relating `T` to `T::Borrowed`.
-fn round_trip<T: AsBytes>(container: &T) -> T::Borrowed<'_> {
-    // Grab a reference to underlying bytes, as if serialized.
-    let mut bytes_iter = container.as_bytes().map(|(_, bytes)| bytes);
-    FromBytes::from_bytes(&mut bytes_iter)
-}
+    // Borrow raw bytes from `columns`, and reconstruct a borrowed `columns`.
+    // In practice, we would use serialized bytes from somewhere else.
+    // This local function gives type support, relating `T` to `T::Borrowed`.
+    fn round_trip<T: AsBytes>(container: &T) -> T::Borrowed<'_> {
+        // Grab a reference to underlying bytes, as if serialized.
+        let mut bytes_iter = container.as_bytes().map(|(_, bytes)| bytes);
+        columnar::bytes::FromBytes::from_bytes(&mut bytes_iter)
+    }
 
-let borrowed = round_trip(&columns);
+    let borrowed = round_trip(&columns);
 ```
 
 Columnar containers support zero-cost reshaping of their data.
-Here we extract all of the `j` values from the first field of `Ok` variants across all lists.
-The sum is performed across one allocation, and benefits from efficient cache access and SIMD support.
+Hree we extract all of the ages (integer tuple element) from each group member, both solo and teams.
+Each sum is performed across one allocation, and benefits from efficient cache access and SIMD support.
 
 ```rust
-// Project down to columns and variants using only field accessors.
-// This gets all Ok(j, _) numbers from across all lists.
-let values: &[u64] = borrowed.values.oks.0;
-let total = values.iter().sum::<u64>();
-println!("Present values summed: {:?}", total);
+    // Project down to columns and variants using field accessors.
+    // This gets all ages from people in both solo and team groups.
+    let solo_values: &[u64] = borrowed.Solo.1;
+    let team_values: &[u64] = borrowed.Team.values.1;
+    let total = solo_values.iter().sum::<u64>() + team_values.iter().sum::<u64>();
+    println!("Present values summed: {:?}", total);
 ```
 
 ## Advantages
@@ -179,8 +197,8 @@ Informally, the transformation proceeds through structural induction on the type
 4. A vector of a list type becomes a product of a vector of offsets and a vector of its simpler type.
 5. A vector of a recursive type is more complicated, but undergoes the same structural changes with recursive uses replaced by integers.
 
-The transformation is currently for tuples, the `Result` and `Ok` enumerations, and `Vec`.
-It is reasonable to imagine `derive` macros, but they are non-trivial for enumerations with more than two variants.
+The transformation is implemented directly tuples, the `Result` and `Ok` enumerations, and `Vec`.
+One can `#[derive(Columnar)]` for `struct` and `enum` types.
 
 ## Implementation details ##
 

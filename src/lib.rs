@@ -6,16 +6,27 @@
 //! a real `T` lying around to return as a reference. Instead, we will
 //! use Generic Associated Types (GATs) to provide alternate references.
 
+// Re-export derive crate.
+extern crate columnar_derive;
+pub use columnar_derive::Columnar;
+
 pub mod bytes;
 pub mod adts;
 
 /// A type that can be represented in columnar form.
 pub trait Columnar : Sized {
     /// The type that stores the columnar representation.
-    type Container: Push<Self> + Len + Clear + Default;
+    type Container: Push<Self> + Len + Clear + Default + bytes::AsBytes + for<'a> Push<&'a Self>;
 
     /// Converts a sequence of the type into columnar form.
-    fn as_columns<I>(selves: I) -> Self::Container where I: Iterator<Item = Self>, Self: Sized {
+    fn as_columns<'a, I>(selves: I) -> Self::Container where I: IntoIterator<Item =&'a Self>, Self: 'a {
+        let mut columns: Self::Container = Default::default();
+        for item in selves {
+            columns.push(item);
+        }
+        columns
+    }
+    fn into_columns<I>(selves: I) -> Self::Container where I: IntoIterator<Item = Self> {
         let mut columns: Self::Container = Default::default();
         for item in selves {
             columns.push(item);
@@ -243,7 +254,7 @@ pub mod common {
     /// A struct representing a slice of a range of values.
     ///
     /// The lower and upper bounds should be meaningfully set on construction.
-    #[derive(Copy, Clone)]
+    #[derive(Copy, Clone, Debug)]
     pub struct Slice<S> {
         lower: usize,
         upper: usize,
@@ -269,6 +280,7 @@ pub mod common {
         pub fn new(lower: usize, upper: usize, slice: S) -> Self {
             Self { lower, upper, slice }
         }
+        pub fn len(&self) -> usize { self.upper - self.lower }
     }
 
     impl<S: Index> PartialEq<[S::Ref]> for Slice<S> where S::Ref: PartialEq {
@@ -291,7 +303,7 @@ pub mod common {
     }
 
     impl<S> Len for Slice<S> {
-        #[inline(always)] fn len(&self) -> usize { self.upper - self.lower }
+        #[inline(always)] fn len(&self) -> usize { self.len() }
     }
 
     impl<S: Index> Index for Slice<S> {
@@ -359,7 +371,6 @@ pub mod primitive {
         )* }
     }
 
-    implement_columnable!(char);
     implement_columnable!(u8, u16, u32, u64, u128, usize);
     implement_columnable!(i8, i16, i32, i64, i128, isize);
     implement_columnable!(f32, f64);
@@ -461,6 +472,12 @@ pub mod primitive {
                 }
             }
         }
+        impl<'a, VC: Push<u64>> Push<&'a bool> for Bools<VC> {
+            fn push(&mut self, bit: &'a bool) {
+                self.push(*bit)
+            }
+        }
+
 
         impl<VC: Clear> Clear for Bools<VC> {
             fn clear(&mut self) {
@@ -511,6 +528,11 @@ pub mod primitive {
                 self.nanoseconds.push(item.subsec_nanos());
             }
         }
+        impl<'a, SC: Push<u64>, NC: Push<u32>> Push<&'a std::time::Duration> for Durations<SC, NC> {
+            fn push(&mut self, item: &'a std::time::Duration) {
+                self.push(*item)
+            }
+        }
         impl<'a, SC: Push<&'a u64>, NC: Push<&'a u32>> Push<(&'a u64, &'a u32)> for Durations<SC, NC> {
             fn push(&mut self, item: (&'a u64, &'a u32)) {
                 self.seconds.push(item.0);
@@ -541,9 +563,6 @@ pub mod string {
     use super::{Clear, Columnar, Len, Index, IndexAs, Push, HeapSize};
 
     impl Columnar for String {
-        type Container = Strings;
-    }
-    impl Columnar for &str {
         type Container = Strings;
     }
 
@@ -618,9 +637,6 @@ pub mod vector {
     use super::{Clear, Columnar, Len, IndexMut, Index, IndexAs, Push, HeapSize, Slice};
 
     impl<T: Columnar> Columnar for Vec<T> {
-        type Container = Vecs<T::Container>;
-    }
-    impl<'a, T: Columnar> Columnar for &'a [T] where T::Container : Push<&'a T> {
         type Container = Vecs<T::Container>;
     }
 
@@ -1205,7 +1221,7 @@ pub mod sums {
             #[test]
             fn round_trip_some() {
                 // Type annotation is important to avoid some inference overflow.
-                let store: Options<Vec<i32>> = Columnar::as_columns((0..100).map(Some));
+                let store: Options<Vec<i32>> = Columnar::into_columns((0..100).map(Some));
                 assert_eq!(store.len(), 100);
                 assert!((&store).iter().zip(0..100).all(|(a, b)| a == Some(&b)));
                 assert_eq!(store.heap_size(), (408, 544));
@@ -1213,7 +1229,7 @@ pub mod sums {
 
             #[test]
             fn round_trip_none() {
-                let store = Columnar::as_columns((0..100).map(|_x| None::<i32>));
+                let store = Columnar::into_columns((0..100).map(|_x| None::<i32>));
                 assert_eq!(store.len(), 100);
                 let foo = &store;
                 assert!(foo.iter().zip(0..100).all(|(a, _b)| a == None));
@@ -1223,7 +1239,7 @@ pub mod sums {
             #[test]
             fn round_trip_mixed() {
                 // Type annotation is important to avoid some inference overflow.
-                let store: Options<Vec<i32>>  = Columnar::as_columns((0..100).map(|x| if x % 2 == 0 { Some(x) } else { None }));
+                let store: Options<Vec<i32>>  = Columnar::into_columns((0..100).map(|x| if x % 2 == 0 { Some(x) } else { None }));
                 assert_eq!(store.len(), 100);
                 assert!((&store).iter().zip(0..100).all(|(a, b)| a == if b % 2 == 0 { Some(&b) } else { None }));
                 assert_eq!(store.heap_size(), (208, 288));

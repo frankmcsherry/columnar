@@ -1,73 +1,82 @@
+use columnar::Columnar;
+
+#[derive(Columnar)]
+enum Group<T> {
+    Solo(T),
+    Team(Vec<T>),
+}
+
 fn main() {
 
-    use columnar::{Columnar, Len, Index};
-    use columnar::bytes::{AsBytes, FromBytes};
-
-    // A sequence of complex, nested, and variously typed records.
-    let records =
-    (0 .. 1024u64).map(|i| {
-        (0 .. i).map(|j| {
-            if (i - j) % 2 == 0 {
-                Ok((j, format!("grawwwwrr!")))
-            } else {
-                Err(Some(vec![(); 1 << 40]))
-            }
-        }).collect::<Vec<_>>()
-    });
+    let mut roster = Vec::new();
+    roster.push(Group::Solo(
+        ("Alice".to_string(), 20u64)
+    ));
+    roster.push(Group::Team(vec![
+        ("Bob".to_string(), 21),
+        ("Carol".to_string(), 22),
+    ]));
 
     // An appendable replacement for `&[T]`: indexable, shareable.
     // Layout in memory is a small number of contiguous buffers,
-    // even though `records` contains many small allocations.
-    let columns = Columnar::as_columns(records.clone());
+    // even though `roster` contains many small allocations.
+    let mut columns = Columnar::as_columns(roster.iter());
 
-    // Each item in `columns` matches the original in `records`.
-    // Equality testing is awkward, because the reference types don't match.
-    // For example, `Option<&T>` cannot be equated to `Option<T>` without help,
-    // and tuples `(&A, &B, &C)` cannot be equated to `&(A, B, C)` without help.
-    for (a, b) in columns.into_iter().zip(records) {
-        assert_eq!(a.len(), b.len());
-        for (a, b) in a.into_iter().zip(b) {
-            match (a, b) {
-                (Ok(a), Ok(b)) => {
-                    assert_eq!(a.0, &b.0);
-                    assert_eq!(a.1, b.1);
-                },
-                (Err(a), Err(b)) => {
-                    match (a, b) {
-                        (Some(a), Some(b)) => { assert_eq!(a.len(), b.len()); },
-                        (None, None) => { },
-                        _ => { panic!("Variant mismatch"); }
-                    }
-                },
-                _ => { panic!("Variant mismatch"); }
-            }
+    // Iterated column values should match the original `roster`.
+    use columnar::Index;
+    for (col, row) in columns.into_iter().zip(roster) {
+        match (col, row) {
+            (GroupReference::Solo(p0), Group::Solo(p1)) => {
+                assert_eq!(p0.0, p1.0);
+                assert_eq!(p0.1, &p1.1);
+            },
+            (GroupReference::Team(p0s), Group::Team(p1s)) => {
+                assert_eq!(p0s.len(), p1s.len());
+                for (p0, p1) in p0s.into_iter().zip(p1s) {
+                    assert_eq!(p0.0, p1.0);
+                    assert_eq!(p0.1, &p1.1);
+                }
+            },
+            _ => { panic!("Variant mismatch"); }
         }
     }
 
-    // Report the small number of large buffers backing `columns`.
+    // Append a number of rows to `columns`.
+    use columnar::Push;
+    for index in 0 .. 1024 {
+        columns.push(&Group::Team(vec![
+            (format!("Brain{}", index), index),
+            (format!("Brawn{}", index), index),
+        ]));
+    }
+
+    // Report the fixed number of large buffers backing `columns`.
+    use columnar::bytes::AsBytes;
+    assert_eq!(columns.as_bytes().count(), 9);
     for (align, bytes) in columns.as_bytes() {
         println!("align: {:?}, bytes.len(): {:?}", align, bytes.len());
     }
 
-    // Borrow bytes from `columns`, and reconstruct a borrowed `columns`.
+    // Borrow raw bytes from `columns`, and reconstruct a borrowed `columns`.
     // In practice, we would use serialized bytes from somewhere else.
-    // Function defined to get type support, relating `T` to `T::Borrowed`.
+    // This local function gives type support, relating `T` to `T::Borrowed`.
     fn round_trip<T: AsBytes>(container: &T) -> T::Borrowed<'_> {
         // Grab a reference to underlying bytes, as if serialized.
         let mut bytes_iter = container.as_bytes().map(|(_, bytes)| bytes);
-        FromBytes::from_bytes(&mut bytes_iter)
+        columnar::bytes::FromBytes::from_bytes(&mut bytes_iter)
     }
 
     let borrowed = round_trip(&columns);
 
-    // Project down to columns and variants using only field accessors.
-    // This gets all Some(_) variants from the first tuple coordinate.
-    let values: &[u64] = borrowed.values.oks.0;
-    let total = values.iter().sum::<u64>();
+    // Project down to columns and variants using field accessors.
+    // This gets all ages from people in teams.
+    let solo_values: &[u64] = borrowed.Solo.1;
+    let team_values: &[u64] = borrowed.Team.values.1;
+    let total = solo_values.iter().sum::<u64>() + team_values.iter().sum::<u64>();
     println!("Present values summed: {:?}", total);
 
 
-    _main2();
+    // _main2();
 }
 
 fn _main2() {
@@ -201,3 +210,52 @@ fn _main2() {
 
 }
 
+#[cfg(test)]
+mod test {
+    use columnar::Columnar;
+
+    #[derive(Columnar, Debug)]
+    struct Test1<T: Copy> where T: Clone {
+        foo: Vec<T>,
+        bar: i16,
+    }
+
+    #[derive(Columnar, Debug)]
+    struct Test2<T: Copy> (Vec<T>, i16) where T: Clone;
+
+    #[derive(Columnar, Debug)]
+    pub enum Test3<T> {
+        Foo(Vec<T>, u8),
+        Bar(i16),
+    }
+
+    #[test]
+    fn round_trip() {
+
+        use columnar::Index;
+
+        let test3s = vec![
+            Test3::Foo(vec![1, 2, 3], 4),
+            Test3::Bar(4),
+        ];
+        let test3c = columnar::Columnar::as_columns(test3s.iter());
+        
+        println!("{:?}", test3c);
+
+        let iterc = (&test3c).into_iter();
+
+        for (a, b) in test3s.into_iter().zip(iterc) {
+            match (a, &b) {
+                (Test3::Foo(a, b), Test3Reference::Foo((c, d))) => {
+                    assert_eq!(a.len(), c.len());
+                    assert_eq!(b, **d);
+                },
+                (Test3::Bar(a), Test3Reference::Bar(b)) => {
+                    assert_eq!(a, **b);
+                },
+                _ => { panic!("Variant mismatch"); }
+            }
+        }
+
+    }
+}
