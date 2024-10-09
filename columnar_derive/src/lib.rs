@@ -56,7 +56,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn:: Generics, data_struct: syn:
     // The container struct is a tuple of containers, named to correspond with fields.
     let container_struct = {
         quote! {
-            #[derive(Clone, Default)]
+            #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
             pub struct #c_ident < #(#container_types),* >{
                 #(pub #names : #container_types, )*
             }
@@ -73,10 +73,41 @@ fn derive_struct(name: &syn::Ident, generics: &syn:: Generics, data_struct: syn:
         let ty_gen = quote! { < #(#reference_types),* > };
 
         quote! {
+            #[derive(Copy, Clone, Debug)]
             pub struct #r_ident #ty_gen {
                 #(pub #names : #reference_types, )*
             }
         }
+    };
+
+    let partial_eq = {
+
+        let reference_types = &names.iter().enumerate().map(|(index, name)| {
+            let new_name = format!("R{}", index);
+            syn::Ident::new(&new_name, name.span())
+        }).collect::<Vec<_>>();
+
+        let (_impl_gen, ty_gen, _where_clause) = generics.split_for_impl();
+
+        let struct_generics = generics.params.iter();
+        let impl_gen = quote! { < #(#struct_generics,)* #(#reference_types),* > };
+
+        let where_clause = quote! { where #(#reference_types: PartialEq<#types>),* };
+
+        // Either use curly braces or parentheses to destructure the item.
+        let destructure_self =
+        if named { quote! { let #name { #(#names),* } = other; } }
+        else     { quote! { let #name ( #(#names),* ) = other; } };
+
+        quote! {
+            impl #impl_gen PartialEq<#name #ty_gen> for #r_ident < #(#reference_types),* >  #where_clause {
+                fn eq(&self, other: &#name #ty_gen) -> bool {
+                    #destructure_self
+                    #(self.#names == *#names) &&*
+                }
+            }
+        }
+
     };
 
     let push_own = { 
@@ -128,13 +159,19 @@ fn derive_struct(name: &syn::Ident, generics: &syn:: Generics, data_struct: syn:
 
     // Implementation of `Push<#r_ident>`
     let push_new = { 
+
+        let reference_types = &names.iter().enumerate().map(|(index, name)| {
+            let new_name = format!("R{}", index);
+            syn::Ident::new(&new_name, name.span())
+        }).collect::<Vec<_>>();
+
         let push = names.iter().map(|name| { quote! { self.#name.push(#name); } });
         
-        let impl_gen = quote! { < #(#container_types),* > };
+        let impl_gen = quote! { < #(#container_types,)* #(#reference_types),* > };
 
-        let where_clause = quote! { where #(#container_types: ::columnar::Index + ::columnar::Push<<#container_types as ::columnar::Index>::Ref>),* };
+        let where_clause = quote! { where #(#container_types: ::columnar::Push<#reference_types>),* };
 
-        let index_type = quote! { #r_ident < #(<#container_types as ::columnar::Index>::Ref,)* > };
+        let index_type = quote! { #r_ident < #(#reference_types,)* > };
         let destructure_self = quote! { let #r_ident { #(#names),* } = item; };
 
         quote! {
@@ -270,6 +307,8 @@ fn derive_struct(name: &syn::Ident, generics: &syn:: Generics, data_struct: syn:
         #container_struct
         #reference_struct
 
+        #partial_eq
+
         #push_own
         #push_ref
         #push_new
@@ -322,7 +361,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
     
     let container_struct = {
         quote! {
-            #[derive(Clone, Debug, Default)]
+            #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
             #[allow(non_snake_case)]
             pub struct #c_ident < #(#container_types,)* CVar = Vec<u8>, COff = Vec<usize>, >{
                 #(pub #names : #container_types, )*
@@ -342,6 +381,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         let ty_gen = quote! { < #(#reference_types),* > };
 
         quote! {
+            #[derive(Copy, Clone, Debug)]
             pub enum #r_ident #ty_gen {
                 #(#names(#reference_types),)*
             }
@@ -426,13 +466,17 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
     // Implementation of `Push<#r_ident>`
     let push_new = { 
-        
-        let impl_gen = quote! { < #(#container_types),* > };
 
-        let where_clause = quote! { where #(#container_types: ::columnar::Len + ::columnar::Index + ::columnar::Push<<#container_types as ::columnar::Index>::Ref>),* };
+        let reference_types = &names.iter().enumerate().map(|(index, name)| {
+            let new_name = format!("R{}", index);
+            syn::Ident::new(&new_name, name.span())
+        }).collect::<Vec<_>>();
 
-        let index_type = quote! { #r_ident < #(<#container_types as ::columnar::Index>::Ref,)* > };
-        let destructure_self = quote! { let #r_ident { #(#names),* } = item; };
+        let impl_gen = quote! { < #(#container_types,)* #(#reference_types),* > };
+
+        let where_clause = quote! { where #(#container_types: ::columnar::Len + ::columnar::Push<#reference_types>),* };
+
+        let index_type = quote! { #r_ident < #(#reference_types,)* > };
         let numbers = (0 .. variants.len());
 
         quote! {

@@ -234,6 +234,16 @@ mod test {
 
         use columnar::Index;
 
+        let test1s = vec![
+            Test1 { foo: vec![1, 2, 3], bar: 4 },
+            Test1 { foo: vec![5, 6, 7], bar: 8 },
+        ];
+        let test1c = columnar::Columnar::as_columns(test1s.iter());
+        for (a, b) in test1s.into_iter().zip((&test1c).into_iter()) {
+            assert_eq!(a.foo.len(), b.foo.len());
+            assert_eq!(a.bar, *b.bar);
+        }
+
         let test3s = vec![
             Test3::Foo(vec![1, 2, 3], 4),
             Test3::Bar(4),

@@ -10,3 +10,4 @@ proc-macro = true
 quote = "*"
 syn = { version = "*", features = ["extra-traits"] }
 proc-macro2 = "*"
+serde = { version = "1.0.114", features = ["derive"] }

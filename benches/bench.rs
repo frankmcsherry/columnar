@@ -44,10 +44,10 @@ use test::Bencher;
 // #[bench] fn vec_u_s_prealloc(bencher: &mut Bencher) { _bench_prealloc(bencher, vec![vec![(0u64, format!("grawwwwrr!")); 32]; 32]); }
 // #[bench] fn vec_u_vn_s_prealloc(bencher: &mut Bencher) { _bench_prealloc(bencher, vec![vec![(0u64, vec![(); 1 << 40], format!("grawwwwrr!")); 32]; 32]); }
 
-fn _bench_copy<T: Columnar+Eq>(bencher: &mut Bencher, record: T) where T::Columns : for<'a> Push<&'a T> {
+fn _bench_copy<T: Columnar+Eq>(bencher: &mut Bencher, record: T) where T::Container : for<'a> Push<&'a T> {
 
     // prepare encoded data for bencher.bytes
-    let mut arena: T::Columns = Default::default();
+    let mut arena: T::Container = Default::default();
 
     bencher.iter(|| {
         arena.clear();
