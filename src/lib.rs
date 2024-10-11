@@ -277,7 +277,9 @@ pub mod common {
             assert!(lower <= upper);
             Self { lower, upper, slice: self.slice }
         }
-        pub fn new(lower: usize, upper: usize, slice: S) -> Self {
+        pub fn new(lower: u64, upper: u64, slice: S) -> Self {
+            let lower: usize = lower.try_into().unwrap();
+            let upper: usize = upper.try_into().unwrap();
             Self { lower, upper, slice }
         }
         pub fn len(&self) -> usize { self.upper - self.lower }
@@ -371,8 +373,8 @@ pub mod primitive {
         )* }
     }
 
-    implement_columnable!(u8, u16, u32, u64, u128, usize);
-    implement_columnable!(i8, i16, i32, i64, i128, isize);
+    implement_columnable!(u8, u16, u32, u64, u128);
+    implement_columnable!(i8, i16, i32, i64, i128);
     implement_columnable!(f32, f64);
 
     pub use empty::Empties;
@@ -568,7 +570,7 @@ pub mod string {
 
     /// A stand-in for `Vec<String>`.
     #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct Strings<BC = Vec<usize>, VC = Vec<u8>> {
+    pub struct Strings<BC = Vec<u64>, VC = Vec<u8>> {
         /// Bounds container; provides indexed access to offsets.
         pub bounds: BC,
         /// Values container; provides slice access to bytes.
@@ -579,39 +581,43 @@ pub mod string {
         #[inline(always)] fn len(&self) -> usize { self.bounds.len() }
     }
 
-    impl<'a, BC: Len+IndexAs<usize>> Index for Strings<BC, &'a [u8]> {
+    impl<'a, BC: Len+IndexAs<u64>> Index for Strings<BC, &'a [u8]> {
         type Ref = &'a str;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
             let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
             let upper = self.bounds.index_as(index);
+            let lower: usize = lower.try_into().unwrap();
+            let upper: usize = upper.try_into().unwrap();
             std::str::from_utf8(&self.values[lower .. upper]).unwrap()
         }
     }
-    impl<'a, BC: Len+IndexAs<usize>> Index for &'a Strings<BC, Vec<u8>> {
+    impl<'a, BC: Len+IndexAs<u64>> Index for &'a Strings<BC, Vec<u8>> {
         type Ref = &'a str;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
             let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
             let upper = self.bounds.index_as(index);
+            let lower: usize = lower.try_into().unwrap();
+            let upper: usize = upper.try_into().unwrap();
             std::str::from_utf8(&self.values[lower .. upper]).unwrap()
         }
     }
 
-    impl<BC: Push<usize>> Push<String> for Strings<BC> {
+    impl<BC: Push<u64>> Push<String> for Strings<BC> {
         #[inline(always)] fn push(&mut self, item: String) {
             self.values.extend_from_slice(item.as_bytes());
-            self.bounds.push(self.values.len());
+            self.bounds.push(self.values.len() as u64);
         }
     }
-    impl<BC: Push<usize>> Push<&String> for Strings<BC> {
+    impl<BC: Push<u64>> Push<&String> for Strings<BC> {
         #[inline(always)] fn push(&mut self, item: &String) {
             self.values.extend_from_slice(item.as_bytes());
-            self.bounds.push(self.values.len());
+            self.bounds.push(self.values.len() as u64);
         }
     }
-    impl<BC: Push<usize>> Push<&str> for Strings<BC> {
+    impl<BC: Push<u64>> Push<&str> for Strings<BC> {
         fn push(&mut self, item: &str) {
             self.values.extend_from_slice(item.as_bytes());
-            self.bounds.push(self.values.len());
+            self.bounds.push(self.values.len() as u64);
         }
     }
     impl Clear for Strings {
@@ -642,7 +648,7 @@ pub mod vector {
 
     /// A stand-in for `Vec<Vec<T>>` for complex `T`.
     #[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct Vecs<TC, BC = Vec<usize>> {
+    pub struct Vecs<TC, BC = Vec<u64>> {
         pub bounds: BC,
         pub values: TC,
     }
@@ -650,7 +656,7 @@ pub mod vector {
     impl<TC: Len> Vecs<TC> {
         pub fn push_iter<I>(&mut self, iter: I) where I: IntoIterator, TC: Push<I::Item> {
             self.values.extend(iter);
-            self.bounds.push(self.values.len());
+            self.bounds.push(self.values.len() as u64);
         }
     }
 
@@ -658,7 +664,7 @@ pub mod vector {
         #[inline(always)] fn len(&self) -> usize { self.bounds.len() }
     }
 
-    impl<TC: Copy, BC: Len+IndexAs<usize>> Index for Vecs<TC, BC> {
+    impl<TC: Copy, BC: Len+IndexAs<u64>> Index for Vecs<TC, BC> {
         type Ref = Slice<TC>;
         #[inline(always)]
         fn get(&self, index: usize) -> Self::Ref {
@@ -667,7 +673,7 @@ pub mod vector {
             Slice::new(lower, upper, self.values)
         }
     }
-    impl<'a, TC, BC: Len+IndexAs<usize>> Index for &'a Vecs<TC, BC> {
+    impl<'a, TC, BC: Len+IndexAs<u64>> Index for &'a Vecs<TC, BC> {
         type Ref = Slice<&'a TC>;
         #[inline(always)]
         fn get(&self, index: usize) -> Self::Ref {
@@ -676,7 +682,7 @@ pub mod vector {
             Slice::new(lower, upper, &self.values)
         }
     }
-    impl<TC, BC: Len+IndexAs<usize>> IndexMut for Vecs<TC, BC> {
+    impl<TC, BC: Len+IndexAs<u64>> IndexMut for Vecs<TC, BC> {
         type IndexMut<'a> = Slice<&'a mut TC> where TC: 'a, BC: 'a;
 
         #[inline(always)]
@@ -690,7 +696,7 @@ pub mod vector {
     impl<T, TC: Push<T> + Len> Push<Vec<T>> for Vecs<TC> {
         fn push(&mut self, item: Vec<T>) {
             self.values.extend(item);
-            self.bounds.push(self.values.len());
+            self.bounds.push(self.values.len() as u64);
         }
     }
     impl<'a, T, TC: Push<&'a T> + Len> Push<&'a Vec<T>> for Vecs<TC> {
@@ -701,7 +707,7 @@ pub mod vector {
     impl<'a, T, TC: Push<&'a T> + Len> Push<&'a [T]> for Vecs<TC> {
         fn push(&mut self, item: &'a [T]) {
             self.values.extend(item.iter());
-            self.bounds.push(self.values.len());
+            self.bounds.push(self.values.len() as u64);
         }
     }
     impl<TC: Clear> Clear for Vecs<TC> {
@@ -813,7 +819,7 @@ pub mod tuple {
             use crate::Columnar;
             use crate::common::{Index, Push, HeapSize, Len};
 
-            let mut column: <(usize, u8, String) as Columnar>::Container = Default::default();
+            let mut column: <(u64, u8, String) as Columnar>::Container = Default::default();
             for i in 0..100 {
                 column.push((i, i as u8, i.to_string()));
                 column.push((i, i as u8, "".to_string()));
@@ -822,13 +828,13 @@ pub mod tuple {
             assert_eq!(column.len(), 200);
             assert_eq!(column.heap_size(), (3590, 4608));
 
-            for i in 0..100 {
-                assert_eq!((&column).get(2*i+0), (&i, &(i as u8), i.to_string().as_str()));
-                assert_eq!((&column).get(2*i+1), (&i, &(i as u8), ""));
+            for i in 0..100u64 {
+                assert_eq!((&column).get((2*i+0) as usize), (&i, &(i as u8), i.to_string().as_str()));
+                assert_eq!((&column).get((2*i+1) as usize), (&i, &(i as u8), ""));
             }
 
             // Compare to the heap size of a `Vec<Option<usize>>`.
-            let mut column: Vec<(usize, u8, String)> = Default::default();
+            let mut column: Vec<(u64, u8, String)> = Default::default();
             for i in 0..100 {
                 column.push((i, i as u8, i.to_string()));
                 column.push((i, i as u8, "".to_string()));
@@ -1084,31 +1090,31 @@ pub mod sums {
                 use crate::Columnar;
                 use crate::common::{Index, Push, HeapSize, Len};
 
-                let mut column: <Result<usize, usize> as Columnar>::Container = Default::default();
+                let mut column: <Result<u64, u64> as Columnar>::Container = Default::default();
                 for i in 0..100 {
-                    column.push(Ok::<usize, usize>(i));
-                    column.push(Err::<usize, usize>(i));
+                    column.push(Ok::<u64, u64>(i));
+                    column.push(Err::<u64, u64>(i));
                 }
 
                 assert_eq!(column.len(), 200);
                 assert_eq!(column.heap_size(), (1624, 2080));
 
                 for i in 0..100 {
-                    assert_eq!(column.get(2*i+0), Ok(i));
-                    assert_eq!(column.get(2*i+1), Err(i));
+                    assert_eq!(column.get(2*i+0), Ok(i as u64));
+                    assert_eq!(column.get(2*i+1), Err(i as u64));
                 }
 
-                let mut column: <Result<usize, u8> as Columnar>::Container = Default::default();
+                let mut column: <Result<u64, u8> as Columnar>::Container = Default::default();
                 for i in 0..100 {
-                    column.push(Ok::<usize, u8>(i));
-                    column.push(Err::<usize, u8>(i as u8));
+                    column.push(Ok::<u64, u8>(i as u64));
+                    column.push(Err::<u64, u8>(i as u8));
                 }
 
                 assert_eq!(column.len(), 200);
                 assert_eq!(column.heap_size(), (924, 1184));
 
                 for i in 0..100 {
-                    assert_eq!(column.get(2*i+0), Ok(i));
+                    assert_eq!(column.get(2*i+0), Ok(i as u64));
                     assert_eq!(column.get(2*i+1), Err(i as u8));
                 }
             }

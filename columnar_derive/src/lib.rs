@@ -257,7 +257,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn:: Generics, data_struct: syn:
         quote! {
             impl #impl_gen ::columnar::bytes::AsBytes for #c_ident #ty_gen #where_clause {
                 type Borrowed<'columnar> = #c_ident < #(<#container_types as ::columnar::bytes::AsBytes>::Borrowed<'columnar>,)*>;
-                fn as_bytes(&self) -> impl Iterator<Item=(usize, &[u8])> {
+                fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
                     let iter = None.into_iter();
                     #( let iter = iter.chain(self.#names.as_bytes()); )*
                     iter
@@ -363,7 +363,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         quote! {
             #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
             #[allow(non_snake_case)]
-            pub struct #c_ident < #(#container_types,)* CVar = Vec<u8>, COff = Vec<usize>, >{
+            pub struct #c_ident < #(#container_types,)* CVar = Vec<u8>, COff = Vec<u64>, >{
                 #(pub #names : #container_types, )*
                 pub variant: CVar,
                 pub offset: COff,
@@ -401,7 +401,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         
             quote! {
                 #name::#variant( #(#temp_names),* ) => {
-                    self.offset.push(self.#variant.len());
+                    self.offset.push(self.#variant.len() as u64);
                     self.#variant.push((#(#temp_names),*));
                     self.variant.push(#index as u8);
                 },
@@ -439,7 +439,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         
             quote! {
                 #name::#variant( #(#temp_names),* ) => {
-                    self.offset.push(self.#variant.len());
+                    self.offset.push(self.#variant.len() as u64);
                     self.#variant.push((#(#temp_names),*));
                     self.variant.push(#index as u8);
                 },
@@ -485,7 +485,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                     match item {
                         #( 
                             #r_ident::#names(x) => {
-                                self.offset.push(self.#names.len());
+                                self.offset.push(self.#names.len() as u64);
                                 self.#names.push(x);
                                 self.variant.push(#numbers as u8);
                             }, 
@@ -499,7 +499,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
     let index_own = {
         let impl_gen = quote! { < #(#container_types,)* CVal, COff> };
         let ty_gen = quote! { < #(#container_types,)* CVal, COff> };
-        let where_clause = quote! { where #(#container_types: ::columnar::Index,)* CVal: ::columnar::Len + ::columnar::IndexAs<u8>, COff: ::columnar::Len + ::columnar::IndexAs<usize>  };
+        let where_clause = quote! { where #(#container_types: ::columnar::Index,)* CVal: ::columnar::Len + ::columnar::IndexAs<u8>, COff: ::columnar::Len + ::columnar::IndexAs<u64>  };
 
         let index_type = quote! { #r_ident < #(<#container_types as ::columnar::Index>::Ref,)* > };
 
@@ -511,7 +511,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                 type Ref = #index_type;
                 fn get(&self, index: usize) -> Self::Ref {
                     match self.variant.index_as(index) as usize {
-                        #( #numbers => #r_ident::#names(self.#names.get(self.offset.index_as(index))), )*
+                        #( #numbers => #r_ident::#names(self.#names.get(self.offset.index_as(index) as usize)), )*
                         x => panic!("Unacceptable discriminant found: {:?}", x),
                     }
                 }
@@ -522,7 +522,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
     let index_ref = {
         let impl_gen = quote! { < 'columnar, #(#container_types,)* CVal, COff> };
         let ty_gen = quote! { < #(#container_types,)* CVal, COff> };
-        let where_clause = quote! { where #(&'columnar #container_types: ::columnar::Index,)* CVal: ::columnar::Len + ::columnar::IndexAs<u8>, COff: ::columnar::Len + ::columnar::IndexAs<usize>  };
+        let where_clause = quote! { where #(&'columnar #container_types: ::columnar::Index,)* CVal: ::columnar::Len + ::columnar::IndexAs<u8>, COff: ::columnar::Len + ::columnar::IndexAs<u64>  };
 
         let index_type = quote! { #r_ident < #(<&'columnar #container_types as ::columnar::Index>::Ref,)* > };
 
@@ -534,7 +534,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                 type Ref = #index_type;
                 fn get(&self, index: usize) -> Self::Ref {
                     match self.variant.index_as(index) as usize {
-                        #( #numbers => #r_ident::#names((&self.#names).get(self.offset.index_as(index))), )*
+                        #( #numbers => #r_ident::#names((&self.#names).get(self.offset.index_as(index) as usize)), )*
                         x => panic!("Unacceptable discriminant found: {:?}", x),
                     }
                 }
@@ -582,7 +582,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         quote! {
             impl #impl_gen ::columnar::bytes::AsBytes for #c_ident #ty_gen #where_clause {
                 type Borrowed<'columnar> = #c_ident < #(<#container_types as ::columnar::bytes::AsBytes>::Borrowed<'columnar>,)* <CVar as ::columnar::bytes::AsBytes>::Borrowed<'columnar>, <COff as ::columnar::bytes::AsBytes>::Borrowed<'columnar>>;
-                fn as_bytes(&self) -> impl Iterator<Item=(usize, &[u8])> {
+                fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
                     let iter = None.into_iter();
                     #( let iter = iter.chain(self.#names.as_bytes()); )*
                     let iter = iter.chain(self.variant.as_bytes());

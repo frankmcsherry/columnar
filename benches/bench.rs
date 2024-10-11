@@ -3,7 +3,7 @@
 extern crate columnar;
 extern crate test;
 
-use columnar::{Clear, Columnar, Push, Len};
+use columnar::{Clear, Columnar, Push};
 use test::Bencher;
 
 #[bench] fn empty_copy(bencher: &mut Bencher) { _bench_copy(bencher, vec![(); 1024]); }
