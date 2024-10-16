@@ -331,6 +331,10 @@ fn derive_struct(name: &syn::Ident, generics: &syn:: Generics, data_struct: syn:
 #[allow(unused)]
 fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::DataEnum) -> proc_macro::TokenStream {
 
+    if data_enum.variants.iter().all(|variant| variant.fields.is_empty()) {
+        return derive_tags(name, generics, data_enum);
+    }
+
     let c_name = format!("{}Container", name);
     let c_ident = syn::Ident::new(&c_name, name.span());
 
@@ -338,6 +342,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
     let r_ident = syn::Ident::new(&r_name, name.span());
 
     // Record everything we know about the variants.
+    // TODO: Distinguish between unit and 0-tuple variants.
     let variants: Vec<(&syn::Ident, Vec<_>)> = 
     data_enum
         .variants
@@ -394,17 +399,28 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         
         let push = variants.iter().enumerate().map(|(index, (variant, types))| {
 
-            let temp_names = &types.iter().enumerate().map(|(index, _)| {
-                let new_name = format!("t{}", index);
-                syn::Ident::new(&new_name, variant.span())
-            }).collect::<Vec<_>>();
-        
-            quote! {
-                #name::#variant( #(#temp_names),* ) => {
-                    self.offset.push(self.#variant.len() as u64);
-                    self.#variant.push((#(#temp_names),*));
-                    self.variant.push(#index as u8);
-                },
+            if types.is_empty() {
+                quote! {
+                    #name::#variant => {
+                        self.offset.push(self.#variant.len() as u64);
+                        self.#variant.push(());
+                        self.variant.push(#index as u8);
+                    }
+                }
+            }
+            else {
+                let temp_names = &types.iter().enumerate().map(|(index, _)| {
+                    let new_name = format!("t{}", index);
+                    syn::Ident::new(&new_name, variant.span())
+                }).collect::<Vec<_>>();
+
+                quote! {
+                    #name::#variant( #(#temp_names),* ) => {
+                        self.offset.push(self.#variant.len() as u64);
+                        self.#variant.push((#(#temp_names),*));
+                        self.variant.push(#index as u8);
+                    },
+                }
             }
         });
 
@@ -432,17 +448,28 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         
         let push = variants.iter().enumerate().map(|(index, (variant, types))| {
 
-            let temp_names = &types.iter().enumerate().map(|(index, _)| {
-                let new_name = format!("t{}", index);
-                syn::Ident::new(&new_name, variant.span())
-            }).collect::<Vec<_>>();
-        
-            quote! {
-                #name::#variant( #(#temp_names),* ) => {
-                    self.offset.push(self.#variant.len() as u64);
-                    self.#variant.push((#(#temp_names),*));
-                    self.variant.push(#index as u8);
-                },
+            if types.is_empty() {
+                quote! {
+                    #name::#variant => {
+                        self.offset.push(self.#variant.len() as u64);
+                        self.#variant.push(());
+                        self.variant.push(#index as u8);
+                    }
+                }
+            }
+            else {
+                let temp_names = &types.iter().enumerate().map(|(index, _)| {
+                    let new_name = format!("t{}", index);
+                    syn::Ident::new(&new_name, variant.span())
+                }).collect::<Vec<_>>();
+
+                quote! {
+                    #name::#variant( #(#temp_names),* ) => {
+                        self.offset.push(self.#variant.len() as u64);
+                        self.#variant.push((#(#temp_names),*));
+                        self.variant.push(#index as u8);
+                    },
+                }
             }
         });
 
@@ -626,8 +653,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
             quote! { where #(#types : ::columnar::Columnar,)* }
         };
 
-        let container_types = &variants.iter().flat_map(|(_, types)| quote! { (#(<#types as ::columnar::Columnar>::Container),*) }).collect::<Vec<_>>();
-
+        let container_types = &variants.iter().map(|(_, types)| quote! { <(#(#types),*) as ::columnar::Columnar>::Container }).collect::<Vec<_>>();
 
         quote! {
             impl #impl_gen ::columnar::Columnar for #name #ty_gen #where_clause2 {
@@ -655,5 +681,97 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
         #columnar_impl
 
+    }.into()
+}
+
+/// A derivation for an enum type with no fields in any of its variants.
+#[allow(unused)]
+fn derive_tags(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::DataEnum) -> proc_macro::TokenStream {
+
+    let c_name = format!("{}Container", name);
+    let c_ident = syn::Ident::new(&c_name, name.span());
+
+    let names: Vec<&syn::Ident> =
+    data_enum
+        .variants
+        .iter()
+        .map(|variant| &variant.ident)
+        .collect();
+
+    let indices: &Vec<u8> = &(0 .. names.len()).map(|x| x as u8).collect();
+
+    // Bit silly, but to help us fit in a byte and reign in bloat.
+    assert!(names.len() <= 256, "Too many variants for enum");
+
+    quote! {
+        #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+        pub struct #c_ident <CVar = Vec<u8>> {
+            pub variant: CVar,
+        }
+
+        impl ::columnar::Push<#name> for #c_ident {
+            fn push(&mut self, item: #name) {
+                match item {
+                    #( #name::#names => self.variant.push(#indices), )*
+                }
+            }
+        }
+
+        impl<'columnar> ::columnar::Push<&'columnar #name> for #c_ident {
+            fn push(&mut self, item: &'columnar #name) {
+                match *item {
+                    #( #name::#names => self.variant.push(#indices), )*
+                }
+            }
+        }
+
+        impl<CVar: ::columnar::Len + ::columnar::IndexAs<u8>> ::columnar::Index for #c_ident <CVar> {
+            type Ref = #name;
+            fn get(&self, index: usize) -> Self::Ref {
+                match self.variant.index_as(index) {
+                    #( #indices => #name::#names, )*
+                    x => panic!("Unacceptable discriminant found: {:?}", x),
+                }
+            }
+        }
+
+        impl<'columnar, CVar: ::columnar::Len + ::columnar::IndexAs<u8>> ::columnar::Index for &'columnar #c_ident <CVar> {
+            type Ref = #name;
+            fn get(&self, index: usize) -> Self::Ref {
+                match self.variant.index_as(index) {
+                    #( #indices => #name::#names, )*
+                    x => panic!("Unacceptable discriminant found: {:?}", x),
+                }
+            }
+        }
+
+        impl<CVar: ::columnar::Clear> ::columnar::Clear for #c_ident <CVar> {
+            fn clear(&mut self) {
+                self.variant.clear();
+            }
+        }
+
+        impl<CVar: ::columnar::Len> ::columnar::Len for #c_ident <CVar> {
+            fn len(&self) -> usize {
+                self.variant.len()
+            }
+        }
+
+        impl<CVar: ::columnar::bytes::AsBytes> ::columnar::bytes::AsBytes for #c_ident <CVar> {
+            type Borrowed<'columnar> = #c_ident < <CVar as ::columnar::bytes::AsBytes>::Borrowed<'columnar> >;
+            fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
+                self.variant.as_bytes()
+            }
+        }
+
+        impl<'columnar, CVar: ::columnar::bytes::FromBytes<'columnar>> ::columnar::bytes::FromBytes<'columnar> for #c_ident <CVar> {
+            fn from_bytes(bytes: &mut impl Iterator<Item=&'columnar [u8]>) -> Self {
+                Self { variant: ::columnar::bytes::FromBytes::from_bytes(bytes) }
+            }
+        }
+
+        impl ::columnar::Columnar for #name {
+            type Container = #c_ident;
+        }
     }.into()
 }
