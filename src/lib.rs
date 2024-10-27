@@ -384,10 +384,10 @@ pub mod primitive {
         use crate::{Clear, Columnar, Len, IndexMut, Index, Push, HeapSize};
 
         #[derive(Default)]
-        pub struct Empties { pub count: usize, pub empty: () }
+        pub struct Empties { pub count: u64, pub empty: () }
 
         impl Len for Empties {
-            fn len(&self) -> usize { self.count }
+            fn len(&self) -> usize { self.count as usize }
         }
         impl IndexMut for Empties {
             type IndexMut<'a> = &'a mut ();
@@ -626,13 +626,11 @@ pub mod string {
             self.values.clear();
         }
     }
-    impl HeapSize for Strings {
+    impl<BC: HeapSize, VC: HeapSize> HeapSize for Strings<BC, VC> {
         fn heap_size(&self) -> (usize, usize) {
-            let bl = std::mem::size_of::<usize>() * self.bounds.len();
-            let bc = std::mem::size_of::<usize>() * self.bounds.capacity();
-            let vl = self.values.len();
-            let vc = self.values.capacity();
-            (bl + vl, bc + vc)
+            let (l0, c0) = self.bounds.heap_size();
+            let (l1, c1) = self.values.heap_size();
+            (l0 + l1, c0 + c1)
         }
     }
 }
@@ -717,13 +715,11 @@ pub mod vector {
         }
     }
 
-    impl<TC: HeapSize> HeapSize for Vecs<TC> {
+    impl<TC: HeapSize, BC: HeapSize> HeapSize for Vecs<TC, BC> {
         fn heap_size(&self) -> (usize, usize) {
-            let (inner_l, inner_c) = self.values.heap_size();
-            (
-                std::mem::size_of::<usize>() * self.bounds.len() + inner_l,
-                std::mem::size_of::<usize>() * self.bounds.capacity() + inner_c,
-            )
+            let (l0, c0) = self.bounds.heap_size();
+            let (l1, c1) = self.values.heap_size();
+            (l0 + l1, c0 + c1)
         }
     }
 }
