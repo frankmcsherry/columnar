@@ -108,7 +108,7 @@ tuple_impl!(A B C D E F G H I J);
 impl AsBytes for crate::primitive::Empties {
     type Borrowed<'a> = crate::primitive::Empties;
     fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-        std::iter::once((1, bytemuck::cast_slice(std::slice::from_ref(&self.count))))
+        std::iter::once((8, bytemuck::cast_slice(std::slice::from_ref(&self.count))))
     }
 }
 impl<'a> FromBytes<'a> for crate::primitive::Empties {

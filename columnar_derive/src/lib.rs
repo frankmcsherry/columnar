@@ -12,16 +12,19 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
     match ast.data {
         syn::Data::Struct(data_struct) => {
-            derive_struct(name, &ast.generics, data_struct)
+            match data_struct.fields {
+                syn::Fields::Unit => derive_unit_struct(name, &ast.generics, ast.vis),
+                _ => derive_struct(name, &ast.generics, data_struct, ast.vis),
+            }
         }
         syn::Data::Enum(data_enum) => {
-            derive_enum(name, &ast.generics, data_enum)
+            derive_enum(name, &ast.generics, data_enum, ast.vis)
         }
         _ => unimplemented!(),
     }
 }
 
-fn derive_struct(name: &syn::Ident, generics: &syn:: Generics, data_struct: syn::DataStruct) -> proc_macro::TokenStream {
+fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::DataStruct, vis: syn::Visibility) -> proc_macro::TokenStream {
 
     let c_name = format!("{}Container", name);
     let c_ident = syn::Ident::new(&c_name, name.span());
@@ -57,7 +60,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn:: Generics, data_struct: syn:
     let container_struct = {
         quote! {
             #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
-            pub struct #c_ident < #(#container_types),* >{
+            #vis struct #c_ident < #(#container_types),* >{
                 #(pub #names : #container_types, )*
             }
         }
@@ -74,7 +77,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn:: Generics, data_struct: syn:
 
         quote! {
             #[derive(Copy, Clone, Debug)]
-            pub struct #r_ident #ty_gen {
+            #vis struct #r_ident #ty_gen {
                 #(pub #names : #reference_types, )*
             }
         }
@@ -326,13 +329,84 @@ fn derive_struct(name: &syn::Ident, generics: &syn:: Generics, data_struct: syn:
     }.into()
 }
 
+// TODO: Do we need to use the generics?
+fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Visibility) -> proc_macro::TokenStream {
+    
+    let c_name = format!("{}Container", name);
+    let c_ident = syn::Ident::new(&c_name, name.span());
+
+    quote! {
+
+        #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+        #vis struct #c_ident {
+            count: u64,
+        }
+
+        impl ::columnar::Push<#name> for #c_ident {
+            fn push(&mut self, _item: #name) {
+                self.count += 1;
+            }
+        }
+
+        impl<'columnar> ::columnar::Push<&'columnar #name> for #c_ident {
+            fn push(&mut self, _item: &'columnar #name) {
+                self.count += 1;
+            }
+        }
+
+        impl ::columnar::Index for #c_ident {
+            type Ref = #name;
+            fn get(&self, index: usize) -> Self::Ref {
+                #name
+            }
+        }
+
+        impl<'columnar> ::columnar::Index for &'columnar #c_ident {
+            type Ref = #name;
+            fn get(&self, index: usize) -> Self::Ref {
+                #name
+            }
+        }
+
+        impl ::columnar::Clear for #c_ident {
+            fn clear(&mut self) {
+                self.count = 0;
+            }
+        }
+
+        impl ::columnar::Len for #c_ident {
+            fn len(&self) -> usize {
+                self.count as usize
+            }
+        }
+
+        impl ::columnar::bytes::AsBytes for #c_ident {
+            type Borrowed<'columnar> = #c_ident;
+            fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
+                std::iter::once((8, bytemuck::cast_slice(std::slice::from_ref(&self.count))))
+            }
+        }
+
+        impl<'columnar> ::columnar::bytes::FromBytes<'columnar> for #c_ident {
+            fn from_bytes(bytes: &mut impl Iterator<Item=&'columnar [u8]>) -> Self {
+                Self { count: bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0] }
+            }
+        }
+
+        impl ::columnar::Columnar for #name {
+            type Container = #c_ident;
+        }
+
+    }.into()
+}
+
 /// The derived container for an `enum` type will be a struct with containers for each field of each variant, plus an offset container and a discriminant container.
 /// Its index `Ref` type will be an enum with parallel variants, each containing the index `Ref` types of the corresponding variant containers.
 #[allow(unused)]
-fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::DataEnum) -> proc_macro::TokenStream {
+fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::DataEnum, vis: syn::Visibility) -> proc_macro::TokenStream {
 
     if data_enum.variants.iter().all(|variant| variant.fields.is_empty()) {
-        return derive_tags(name, generics, data_enum);
+        return derive_tags(name, generics, data_enum, vis);
     }
 
     let c_name = format!("{}Container", name);
@@ -368,7 +442,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         quote! {
             #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
             #[allow(non_snake_case)]
-            pub struct #c_ident < #(#container_types,)* CVar = Vec<u8>, COff = Vec<u64>, >{
+            #vis struct #c_ident < #(#container_types,)* CVar = Vec<u8>, COff = Vec<u64>, >{
                 #(pub #names : #container_types, )*
                 pub variant: CVar,
                 pub offset: COff,
@@ -387,7 +461,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
         quote! {
             #[derive(Copy, Clone, Debug)]
-            pub enum #r_ident #ty_gen {
+            #vis enum #r_ident #ty_gen {
                 #(#names(#reference_types),)*
             }
         }
@@ -399,7 +473,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         
         let push = variants.iter().enumerate().map(|(index, (variant, types))| {
 
-            if types.is_empty() {
+            if data_enum.variants[index].fields == syn::Fields::Unit {
                 quote! {
                     #name::#variant => {
                         self.offset.push(self.#variant.len() as u64);
@@ -448,7 +522,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         
         let push = variants.iter().enumerate().map(|(index, (variant, types))| {
 
-            if types.is_empty() {
+            if data_enum.variants[index].fields == syn::Fields::Unit {
                 quote! {
                     #name::#variant => {
                         self.offset.push(self.#variant.len() as u64);
@@ -686,7 +760,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
 /// A derivation for an enum type with no fields in any of its variants.
 #[allow(unused)]
-fn derive_tags(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::DataEnum) -> proc_macro::TokenStream {
+fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::DataEnum, vis: syn::Visibility) -> proc_macro::TokenStream {
 
     let c_name = format!("{}Container", name);
     let c_ident = syn::Ident::new(&c_name, name.span());
@@ -705,7 +779,7 @@ fn derive_tags(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
     quote! {
         #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
-        pub struct #c_ident <CVar = Vec<u8>> {
+        #vis struct #c_ident <CVar = Vec<u8>> {
             pub variant: CVar,
         }
 
