@@ -68,17 +68,6 @@ fn bench_decode(b: &mut Bencher) {
     });
 }
 
-// #[bench]
-// fn bench_deserialize_assert(b: &mut Bencher) {
-//     let log = Log::new();
-//     let mut bytes = vec![];
-//     unsafe { encode(&log, &mut bytes).unwrap(); }
-//     b.bytes = bytes.len() as u64;
-//     b.iter(|| {
-//         assert!(unsafe { decode::<Log>(&mut bytes) }.unwrap().0 == &log);
-//     });
-// }
-
 #[derive(Eq, PartialEq, Columnar)]
 pub struct Http {
     protocol: HttpProtocol,
