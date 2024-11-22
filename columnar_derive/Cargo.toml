@@ -1,13 +1,21 @@
 [package]
 name = "columnar_derive"
 version = "0.1.0"
+authors = ["Frank McSherry <fmcsherry@me.com>"]
+description = "Derive macros for columnar crate"
 edition = "2021"
+
+# These URLs point to more information about the repository
+documentation = "http://github.com/frankmcsherry/columnar"
+homepage = "http://github.com/frankmcsherry/columnar"
+repository = "https://github.com/frankmcsherry/columnar.git"
+license = "MIT"
 
 [lib]
 proc-macro = true
 
 [dependencies]
-quote = "*"
-syn = { version = "*", features = ["extra-traits"] }
-proc-macro2 = "*"
+quote = "1.0.37"
+syn = { version = "2.0.87", features = ["extra-traits"] }
+proc-macro2 = "1.0.89"
 serde = { version = "1.0.114", features = ["derive"] }

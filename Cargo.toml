@@ -17,4 +17,4 @@ bincode = "1.3.3"
 serde = { version = "1.0.114", features = ["derive"] }
 serde_json = "1.0.56"
 bytemuck = "1.18.0"
-columnar_derive = { path = "columnar_derive" }
+columnar_derive = { path = "columnar_derive", version = "0.1" }
