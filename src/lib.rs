@@ -77,9 +77,19 @@ pub mod common {
     }
     impl<T> Push<T> for Vec<T> {
         #[inline(always)] fn push(&mut self, item: T) { self.push(item) }
+
+        #[inline(always)]
+        fn extend(&mut self, iter: impl IntoIterator<Item=T>) {
+            std::iter::Extend::extend(self, iter)
+        }
     }
     impl<'a, T: Clone> Push<&'a T> for Vec<T> {
         #[inline(always)] fn push(&mut self, item: &'a T) { self.push(item.clone()) }
+
+        #[inline(always)]
+        fn extend(&mut self, iter: impl IntoIterator<Item=&'a T>) {
+            std::iter::Extend::extend(self, iter.into_iter().cloned())
+        }
     }
     impl<'a, T: Clone> Push<&'a [T]> for Vec<T> {
         #[inline(always)] fn push(&mut self, item: &'a [T]) { self.clone_from_slice(item) }
