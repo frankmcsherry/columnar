@@ -220,9 +220,13 @@ pub mod common {
         /// Clears `self`, without changing its capacity.
         fn clear(&mut self);
     }
-    // Vectors can be cleared, unlike slices.
+    // Vectors can be cleared.
     impl<T> Clear for Vec<T> {
         #[inline(always)] fn clear(&mut self) { self.clear() }
+    }
+    // Slice references can be cleared.
+    impl<'a, T> Clear for &'a [T] {
+        #[inline(always)] fn clear(&mut self) { *self = &[]; }
     }
     
     pub trait HeapSize {
@@ -630,7 +634,7 @@ pub mod string {
             self.bounds.push(self.values.len() as u64);
         }
     }
-    impl Clear for Strings {
+    impl<BC: Clear, VC: Clear> Clear for Strings<BC, VC> {
         fn clear(&mut self) {
             self.bounds.clear();
             self.values.clear();

@@ -22,6 +22,11 @@ columnar_derive = { path = "columnar_derive", version = "0.1" }
 [dev-dependencies]
 bencher = "0.1.5"
 
+[profile.test]
+opt-level = 2
+overflow-checks = false
+incremental = false
+
 [profile.bench]
 debug = "full"
 lto = true
