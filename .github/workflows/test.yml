@@ -1,0 +1,29 @@
+name: "Test Suite"
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os:
+          - ubuntu
+          - macos
+          - windows
+        toolchain:
+          - stable
+          - 1.65
+    name: cargo test on ${{ matrix.os }}, rust ${{ matrix.toolchain }}
+    runs-on: ${{ matrix.os }}-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - name: Cargo check
+        run: cargo test
+      - name: Cargo test
+        run: cargo test --workspace --all-targets
