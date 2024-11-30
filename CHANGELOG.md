@@ -11,7 +11,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Other
 
-- CI clean-up
-- Add benches/ops.rs
-- Add some missing functionality
-- CI integration
+- Added missing implementations and support methods
