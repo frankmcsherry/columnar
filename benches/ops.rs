@@ -1,12 +1,9 @@
-#![feature(test)]
+use bencher::{benchmark_group, benchmark_main, Bencher};
 
 extern crate columnar;
-extern crate test;
 
-use columnar::{Columnar, Index, Len, Push, Clear};
+use columnar::{Columnar, Index, Len};
 use columnar::Strings;
-
-use test::Bencher;
 
 pub enum Op {
     Add,    // binary
@@ -69,6 +66,7 @@ impl Op {
                 let aa: &Vec<i32> = &dataz[dataz.len()-1].as_ref().ok().unwrap();
                 let mut result = Strings::default();
                 for a in aa.iter() {
+                    use columnar::Push;
                     result.push(format!("{:?}", a));
                 }
                 Err(result)
@@ -77,7 +75,6 @@ impl Op {
     }
 }
 
-#[bench]
 fn bench_ops_rows(bencher: &mut Bencher) {
 
     let prog = vec![Op::Add, Op::Neg, Op::Add];
@@ -93,11 +90,10 @@ fn bench_ops_rows(bencher: &mut Bencher) {
                 row.push(op.eval(&row[..]));
             }
         }
-        test::black_box(&rows);
+        bencher::black_box(&rows);
     });
 }
 
-#[bench]
 fn bench_ops_rows_compiled(bencher: &mut Bencher) {
 
     // let prog = vec![Op::Add, Op::Neg, Op::Add];
@@ -113,11 +109,10 @@ fn bench_ops_rows_compiled(bencher: &mut Bencher) {
             row.push(Ok(- *row[row.len()-1].as_ref().unwrap()));
             row.push(Ok(*row[row.len()-2].as_ref().unwrap() + *row[row.len()-1].as_ref().unwrap()));
         }
-        test::black_box(&rows);
+        bencher::black_box(&rows);
     });
 }
 
-#[bench]
 fn bench_ops_rows_compiled2(bencher: &mut Bencher) {
 
     // let prog = vec![Op::Add, Op::Neg, Op::Add];
@@ -133,14 +128,10 @@ fn bench_ops_rows_compiled2(bencher: &mut Bencher) {
             row.push(- row[row.len()-1]);
             row.push(row[row.len()-2] + row[row.len()-1]);
         }
-        test::black_box(&rows);
+        bencher::black_box(&rows);
     });
 }
 
-
-
-
-#[bench]
 fn bench_ops_cols(bencher: &mut Bencher) {
 
     let prog = vec![Op::Add, Op::Neg, Op::Add];
@@ -156,7 +147,21 @@ fn bench_ops_cols(bencher: &mut Bencher) {
         for op in prog.iter() {
             cols.push(op.eval_vec(&cols));
         }
-        test::black_box(&cols);
+        bencher::black_box(&cols);
         cols.truncate(4);
     });
 }
+
+benchmark_group!(
+    cols,
+    bench_ops_cols,
+);
+
+benchmark_group!(
+    rows,
+    bench_ops_rows,
+    bench_ops_rows_compiled,
+    bench_ops_rows_compiled2,
+);
+
+benchmark_main!(cols, rows);
