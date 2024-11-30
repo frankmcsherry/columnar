@@ -4,6 +4,10 @@ pub trait AsBytes {
     type Borrowed<'a>: FromBytes<'a>;
     /// Presents `self` as a sequence of byte slices, with their required alignment.
     fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])>;
+    /// The number of `u64` words required to record `self` as aligned bytes.
+    fn length_in_words(&self) -> usize {
+        self.as_bytes().map(|(_, x)| 1 + (x.len()/8) + if x.len() % 8 == 0 { 0 } else { 1 }).sum()
+    }
 }
 pub trait FromBytes<'a> : AsBytes {
     /// Reconstructs `self` from a sequence of correctly aligned and sized bytes slices.
