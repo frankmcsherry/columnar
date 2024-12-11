@@ -59,9 +59,13 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
     // The container struct is a tuple of containers, named to correspond with fields.
     let container_struct = {
         quote! {
+            /// A container for a struct type.
             #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
             #vis struct #c_ident < #(#container_types),* >{
-                #(pub #names : #container_types, )*
+                #(
+                    /// Container for #names.
+                    pub #names : #container_types,
+                )*
             }
         }
     };
@@ -76,9 +80,13 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         let ty_gen = quote! { < #(#reference_types),* > };
 
         quote! {
+            /// A reference for a struct type.
             #[derive(Copy, Clone, Debug)]
             #vis struct #r_ident #ty_gen {
-                #(pub #names : #reference_types, )*
+                #(
+                    /// Reference for #names.
+                    pub #names : #reference_types,
+                )*
             }
         }
     };
@@ -336,7 +344,7 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
     let c_ident = syn::Ident::new(&c_name, name.span());
 
     quote! {
-
+        /// A container for a unit struct.
         #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
         #vis struct #c_ident {
             count: u64,
@@ -440,11 +448,17 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
     
     let container_struct = {
         quote! {
+            /// A container for an enum.
             #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
             #[allow(non_snake_case)]
             #vis struct #c_ident < #(#container_types,)* CVar = Vec<u8>, COff = Vec<u64>, >{
-                #(pub #names : #container_types, )*
+                #(
+                    /// Container for #names.
+                    pub #names : #container_types,
+                )*
+                /// Container for variant.
                 pub variant: CVar,
+                /// Container for offset.
                 pub offset: COff,
             }
         }
@@ -778,8 +792,10 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
     assert!(names.len() <= 256, "Too many variants for enum");
 
     quote! {
+        /// A container for a tag-only enum.
         #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
         #vis struct #c_ident <CVar = Vec<u8>> {
+            /// Container for variant.
             pub variant: CVar,
         }
 
