@@ -391,6 +391,81 @@ pub mod primitive {
     implement_columnable!(i8, i16, i32, i64, i128);
     implement_columnable!(f32, f64);
 
+    pub use sizes::{Usizes, Isizes};
+    /// Columnar stores for `usize` and `isize`, stored as 64 bits.
+    mod sizes {
+
+        use crate::{Clear, Columnar, Len, IndexMut, Index, IndexAs, Push, HeapSize};
+
+        #[derive(Clone, Default)]
+        pub struct Usizes<CV = Vec<u64>> { pub values: CV }
+
+        impl Columnar for usize {
+            type Container = Usizes;
+        }
+
+        impl<CV: Len> Len for Usizes<CV> { fn len(&self) -> usize { self.values.len() }}
+        impl IndexMut for Usizes {
+            type IndexMut<'a> = &'a mut u64;
+            #[inline(always)] fn get_mut(&mut self, index: usize) -> Self::IndexMut<'_> { &mut self.values[index] }
+        }
+        impl<CV: IndexAs<u64>> Index for Usizes<CV> {
+            type Ref = usize;
+            #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().unwrap() }
+        }
+        impl<'a, CV: IndexAs<u64>> Index for &'a Usizes<CV> {
+            type Ref = usize;
+            #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().unwrap() }
+        }
+        impl Push<usize> for Usizes {
+            fn push(&mut self, item: usize) { self.values.push(item.try_into().unwrap()) }
+        }
+        impl Push<&usize> for Usizes {
+            fn push(&mut self, item: &usize) { self.values.push((*item).try_into().unwrap()) }
+        }
+        impl<CV: Clear> Clear for Usizes<CV> { fn clear(&mut self) { self.values.clear() }}
+
+        impl<CV: HeapSize> HeapSize for Usizes<CV> {
+            fn heap_size(&self) -> (usize, usize) {
+                self.values.heap_size()
+            }
+        }
+
+        #[derive(Clone, Default)]
+        pub struct Isizes<CV = Vec<i64>> { pub values: CV }
+
+        impl Columnar for isize {
+            type Container = Isizes;
+        }
+
+        impl<CV: Len> Len for Isizes<CV> { fn len(&self) -> usize { self.values.len() }}
+        impl IndexMut for Isizes {
+            type IndexMut<'a> = &'a mut i64;
+            #[inline(always)] fn get_mut(&mut self, index: usize) -> Self::IndexMut<'_> { &mut self.values[index] }
+        }
+        impl<CV: IndexAs<i64>> Index for Isizes<CV> {
+            type Ref = isize;
+            #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().unwrap() }
+        }
+        impl<'a, CV: IndexAs<i64>> Index for &'a Isizes<CV> {
+            type Ref = isize;
+            #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().unwrap() }
+        }
+        impl Push<isize> for Isizes {
+            fn push(&mut self, item: isize) { self.values.push(item.try_into().unwrap()) }
+        }
+        impl Push<&isize> for Isizes {
+            fn push(&mut self, item: &isize) { self.values.push((*item).try_into().unwrap()) }
+        }
+        impl<CV: Clear> Clear for Isizes<CV> { fn clear(&mut self) { self.values.clear() }}
+
+        impl<CV: HeapSize> HeapSize for Isizes<CV> {
+            fn heap_size(&self) -> (usize, usize) {
+                self.values.heap_size()
+            }
+        }
+    }
+
     pub use empty::Empties;
     /// A columnar store for `()`.
     mod empty {

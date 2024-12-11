@@ -109,6 +109,33 @@ tuple_impl!(A B C D E F G H);
 tuple_impl!(A B C D E F G H I);
 tuple_impl!(A B C D E F G H I J);
 
+impl<CV: AsBytes> AsBytes for crate::primitive::Usizes<CV> {
+    type Borrowed<'a> = crate::primitive::Usizes<CV::Borrowed<'a>>;
+    fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
+        self.values.as_bytes()
+    }
+}
+
+impl<'a, CV: FromBytes<'a>> FromBytes<'a> for crate::primitive::Usizes<CV> {
+    fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+        Self { values: CV::from_bytes(bytes) }
+    }
+}
+
+impl<CV: AsBytes> AsBytes for crate::primitive::Isizes<CV> {
+    type Borrowed<'a> = crate::primitive::Isizes<CV::Borrowed<'a>>;
+    fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
+        self.values.as_bytes()
+    }
+}
+
+impl<'a, CV: FromBytes<'a>> FromBytes<'a> for crate::primitive::Isizes<CV> {
+    fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+        Self { values: CV::from_bytes(bytes) }
+    }
+}
+
+
 impl AsBytes for crate::primitive::Empties {
     type Borrowed<'a> = crate::primitive::Empties;
     fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
