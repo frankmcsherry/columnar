@@ -460,9 +460,13 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         let ty_gen = quote! { < #(#reference_types),* > };
 
         quote! {
+            /// Reference for an enum.
             #[derive(Copy, Clone, Debug)]
             #vis enum #r_ident #ty_gen {
-                #(#names(#reference_types),)*
+                #(
+                    /// Enum variant for #names.
+                    #names(#reference_types),
+                )*
             }
         }
     };
