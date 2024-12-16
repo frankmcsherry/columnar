@@ -1,5 +1,5 @@
 use bencher::{benchmark_group, benchmark_main, Bencher};
-use columnar::{Columnar, Clear, bytes::{AsBytes, FromBytes}};
+use columnar::{Columnar, Container, Clear, AsBytes, FromBytes};
 
 fn bench_new(b: &mut Bencher) {
     b.iter(|| {
@@ -17,7 +17,7 @@ fn bench_push(b: &mut Bencher) {
         container.push(&log);
     }
     let mut words = vec![];
-    ::columnar::bytes::serialization::encode(&mut words, container.as_bytes());
+    ::columnar::bytes::serialization::encode(&mut words, container.borrow().as_bytes());
     b.bytes = 8 * words.len() as u64;
     b.iter(|| {
         container.clear();
@@ -36,11 +36,11 @@ fn bench_encode(b: &mut Bencher) {
         container.push(&log);
     }
     let mut words = vec![];
-    ::columnar::bytes::serialization::encode(&mut words, container.as_bytes());
+    ::columnar::bytes::serialization::encode(&mut words, container.borrow().as_bytes());
     b.bytes = 8 * words.len() as u64;
     b.iter(|| {
         words.clear();
-        ::columnar::bytes::serialization::encode(&mut words, container.as_bytes());
+        ::columnar::bytes::serialization::encode(&mut words, container.borrow().as_bytes());
         bencher::black_box(&words);
     });
 }
@@ -53,11 +53,11 @@ fn bench_decode(b: &mut Bencher) {
     for _ in 0..1024 {
         container.push(&log);
     }
-    ::columnar::bytes::serialization::encode(&mut words, container.as_bytes());
+    ::columnar::bytes::serialization::encode(&mut words, container.borrow().as_bytes());
     b.bytes = 8 * words.len() as u64;
     b.iter(|| {
         let mut slices = ::columnar::bytes::serialization::decode(&mut words);
-        let foo = <<Log as Columnar>::Container as AsBytes>::Borrowed::from_bytes(&mut slices);
+        let foo = <<Log as Columnar>::Container as Container<Log>>::Borrowed::from_bytes(&mut slices);
         bencher::black_box(foo);
     });
 }
