@@ -13,7 +13,18 @@ pub use columnar_derive::Columnar;
 pub mod adts;
 
 /// A type that can be represented in columnar form.
-pub trait Columnar : Reference {
+pub trait Columnar : 'static {
+
+    /// For each lifetime, a reference with that lifetime.
+    ///
+    /// As an example, `(&A, &[B])`.
+    type Ref<'a> where Self: 'a;
+    /// Repopulates `self` from a reference.
+    fn copy_from<'a>(&mut self, other: Self::Ref<'a>) where Self: Sized {
+        *self = Self::into_owned(other);
+    }
+    /// Produce an instance of `Self` from `Self::Ref<'a>`.
+    fn into_owned<'a>(other: Self::Ref<'a>) -> Self;
 
     /// The type that stores the columnar representation.
     type Container: Len + Clear + Default + for<'a> Push<&'a Self> + for<'a> Push<Self::Ref<'a>> + Container<Self> + 'static;
@@ -35,26 +46,10 @@ pub trait Columnar : Reference {
     }
 }
 
-/// A type with an opinion about reference types.
-///
-/// As an example, `(A, Vec<B>)`.
-pub trait Reference : 'static {
-    /// For each lifetime, a reference with that lifetime.
-    ///
-    /// As an example, `(&A, &[B])`.
-    type Ref<'a> where Self: 'a;
-    /// Repopulates `self` from a reference.
-    fn copy_from<'a>(&mut self, other: Self::Ref<'a>) where Self: Sized {
-        *self = Self::into_owned(other);
-    }
-    /// Produce an instance of `Self` from `Self::Ref<'a>`.
-    fn into_owned<'a>(other: Self::Ref<'a>) -> Self;
-}
-
 /// A container that can hold `C`, and provide its preferred references.
 ///
 /// As an example, `(Vec<A>, Vecs<Vec<B>, Vec<u64>>)`.
-pub trait Container<C: Reference + ?Sized> {
+pub trait Container<C: Columnar + ?Sized> {
     /// The type of a borrowed container.
     ///
     /// As an example, `(&'a [A], Vecs<&'a [B], &'a [u64]>)`.
@@ -91,7 +86,7 @@ pub mod common {
     impl<T> Len for &[T] {
         #[inline(always)] fn len(&self) -> usize { <[T]>::len(self) }
     }
-    
+
     /// A type that can accept items of type `T`.
     pub trait Push<T> {
         /// Pushes an item onto `self`.
@@ -169,7 +164,7 @@ pub mod common {
         /// In the GAT `Index`, the `Ref<'_>` lifetime would be tied to `&self`.
         ///
         /// This trait may be challenging to implement for owning containers,
-        /// for example `Vec<_>`, which would need their `Ref` type to depend 
+        /// for example `Vec<_>`, which would need their `Ref` type to depend
         /// on the lifetime of the `&self` borrow in the `get()` function.
         pub trait Index {
             /// The type returned by the `get` method.
@@ -256,7 +251,7 @@ pub mod common {
     impl<'a, T> Clear for &'a [T] {
         #[inline(always)] fn clear(&mut self) { *self = &[]; }
     }
-    
+
     pub trait HeapSize {
         /// Active (len) and allocated (cap) heap sizes in bytes.
         /// This should not include the size of `self` itself.
@@ -533,15 +528,14 @@ pub mod primitive {
     /// An implementation of opinions for types that want to use `Vec<T>`.
     macro_rules! implement_columnable {
         ($($index_type:ty),*) => { $(
-            impl crate::Reference for $index_type {
-                type Ref<'a> = &'a $index_type;
-                fn into_owned<'a>(other: Self::Ref<'a>) -> Self { *other }
-            }
             impl crate::Container<$index_type> for Vec<$index_type> {
                 type Borrowed<'a> = &'a [$index_type];
                 fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { &self[..] }
             }
             impl crate::Columnar for $index_type {
+                type Ref<'a> = &'a $index_type;
+                fn into_owned<'a>(other: Self::Ref<'a>) -> Self { *other }
+
                 type Container = Vec<$index_type>;
             }
             impl crate::HeapSize for $index_type { }
@@ -572,11 +566,6 @@ pub mod primitive {
         #[derive(Copy, Clone, Default)]
         pub struct Usizes<CV = Vec<u64>> { pub values: CV }
 
-        impl crate::Reference for usize {
-            type Ref<'a> = usize;
-            fn into_owned<'a>(other: Self::Ref<'a>) -> Self { other }
-        }
-
         impl<CV: crate::Container<u64>> crate::Container<usize> for Usizes<CV> {
             type Borrowed<'a> = Usizes<CV::Borrowed<'a>> where CV: 'a;
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -585,6 +574,8 @@ pub mod primitive {
         }
 
         impl Columnar for usize {
+            type Ref<'a> = usize;
+            fn into_owned<'a>(other: Self::Ref<'a>) -> Self { other }
             type Container = Usizes;
         }
 
@@ -620,21 +611,16 @@ pub mod primitive {
                 self.values.as_bytes()
             }
         }
-        
+
         impl<'a, CV: crate::FromBytes<'a>> crate::FromBytes<'a> for crate::primitive::Usizes<CV> {
             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
                 Self { values: CV::from_bytes(bytes) }
             }
         }
-                
+
 
         #[derive(Copy, Clone, Default)]
         pub struct Isizes<CV = Vec<i64>> { pub values: CV }
-
-        impl crate::Reference for isize {
-            type Ref<'a> = isize;
-            fn into_owned<'a>(other: Self::Ref<'a>) -> Self { other }
-        }
 
         impl<CV: crate::Container<i64>> crate::Container<isize> for Isizes<CV> {
             type Borrowed<'a> = Isizes<CV::Borrowed<'a>> where CV: 'a;
@@ -644,6 +630,8 @@ pub mod primitive {
         }
 
         impl Columnar for isize {
+            type Ref<'a> = isize;
+            fn into_owned<'a>(other: Self::Ref<'a>) -> Self { other }
             type Container = Isizes;
         }
 
@@ -679,7 +667,7 @@ pub mod primitive {
                 self.values.as_bytes()
             }
         }
-        
+
         impl<'a, CV: crate::FromBytes<'a>> crate::FromBytes<'a> for crate::primitive::Isizes<CV> {
             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
                 Self { values: CV::from_bytes(bytes) }
@@ -722,17 +710,14 @@ pub mod primitive {
             fn push(&mut self, _item: &()) { self.count += 1; }
         }
 
-        impl crate::Reference for () {
-            type Ref<'a> = ();
-            fn into_owned<'a>(_other: Self::Ref<'a>) -> Self { () }
-        }
-
         impl crate::Container<()> for Empties {
             type Borrowed<'a> = Empties<&'a u64>;
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { Empties { count: &self.count, empty: () } }
         }
 
         impl Columnar for () {
+            type Ref<'a> = ();
+            fn into_owned<'a>(_other: Self::Ref<'a>) -> Self { () }
             type Container = Empties;
         }
         impl HeapSize for Empties {
@@ -762,12 +747,9 @@ pub mod primitive {
         use crate::{Clear, Len, Index, IndexAs, Push, HeapSize};
 
         impl crate::Columnar for bool {
-            type Container = Bools;
-        }
-
-        impl crate::Reference for bool {
             type Ref<'a> = bool;
             fn into_owned<'a>(other: Self::Ref<'a>) -> Self { other }
+            type Container = Bools;
         }
 
         impl<VC: crate::Container<u64>> crate::Container<bool> for Bools<VC> {
@@ -788,7 +770,7 @@ pub mod primitive {
                     .chain(std::iter::once((1, bytemuck::cast_slice(std::slice::from_ref(self.last_bits)))))
             }
         }
-        
+
         impl<'a, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for crate::primitive::Bools<VC, &'a u64> {
             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
                 let values = crate::FromBytes::from_bytes(bytes);
@@ -870,12 +852,9 @@ pub mod primitive {
         use crate::{Len, Index, IndexAs, Push, Clear, HeapSize};
 
         impl crate::Columnar for Duration {
-            type Container = Durations;
-        }
-
-        impl crate::Reference for Duration {
             type Ref<'a> = Duration;
             fn into_owned<'a>(other: Self::Ref<'a>) -> Self { other }
+            type Container = Durations;
         }
 
         impl<SC: crate::Container<u64>, NC: crate::Container<u32>> crate::Container<Duration> for Durations<SC, NC> {
@@ -961,16 +940,13 @@ pub mod string {
     use super::{Clear, Columnar, Len, Index, IndexAs, Push, HeapSize};
 
     impl Columnar for String {
-        type Container = Strings;
-    }
-
-    impl crate::Reference for String {
         type Ref<'a> = &'a str;
         fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
             self.clear();
             self.push_str(other);
         }
         fn into_owned<'a>(other: Self::Ref<'a>) -> Self { other.to_string() }
+        type Container = Strings;
     }
 
     impl<'b, BC: crate::Container<u64>> crate::Container<String> for Strings<BC, &'b [u8]> {
@@ -1079,10 +1055,6 @@ pub mod vector {
     use super::{Clear, Columnar, Len, IndexMut, Index, IndexAs, Push, HeapSize, Slice};
 
     impl<T: Columnar> Columnar for Vec<T> {
-        type Container = Vecs<T::Container>;
-    }
-
-    impl<T: Columnar> crate::Reference for Vec<T> {
         type Ref<'a> = Slice<<T::Container as crate::Container<T>>::Borrowed<'a>> where T: 'a;
         fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
             self.truncate(other.len());
@@ -1097,6 +1069,7 @@ pub mod vector {
         fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
             other.into_iter().map(|x| T::into_owned(x)).collect()
         }
+        type Container = Vecs<T::Container>;
     }
 
     impl<T: Columnar<Container = TC>, BC: crate::Container<u64>, TC: crate::Container<T>> crate::Container<Vec<T>> for Vecs<TC, BC> {
@@ -1220,20 +1193,7 @@ pub mod tuple {
     macro_rules! tuple_impl {
         ( $($name:ident,$name2:ident)+) => (
 
-            impl<$($name: crate::Reference,)*> crate::Reference for ($($name,)*) {
-                type Ref<'a> = ($($name::Ref<'a>,)*) where $($name: 'a,)*;
-                fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
-                    let ($($name,)*) = self;
-                    let ($($name2,)*) = other;
-                    $(crate::Reference::copy_from($name, $name2);)*
-                }
-                fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
-                    let ($($name2,)*) = other;
-                    ($($name::into_owned($name2),)*)
-                }
-            }
-
-            impl<$($name: crate::Reference, $name2: crate::Container<$name>,)*> crate::Container<($($name,)*)> for ($($name2,)*) {
+            impl<$($name: crate::Columnar, $name2: crate::Container<$name>,)*> crate::Container<($($name,)*)> for ($($name2,)*) {
                 type Borrowed<'a> = ($($name2::Borrowed<'a>,)*) where $($name: 'a, $name2: 'a,)*;
                 fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
                     let ($($name,)*) = self;
@@ -1259,6 +1219,16 @@ pub mod tuple {
             }
 
             impl<$($name: Columnar),*> Columnar for ($($name,)*) {
+                type Ref<'a> = ($($name::Ref<'a>,)*) where $($name: 'a,)*;
+                fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
+                    let ($($name,)*) = self;
+                    let ($($name2,)*) = other;
+                    $(crate::Columnar::copy_from($name, $name2);)*
+                }
+                fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
+                    let ($($name2,)*) = other;
+                    ($($name::into_owned($name2),)*)
+                }
                 type Container = ($($name::Container,)*);
             }
             impl<$($name: Len),*> Len for ($($name,)*) {
@@ -1421,7 +1391,7 @@ pub mod sums {
                 }
             }
         }
-        
+
 
         impl<CC, VC: Len + IndexAs<u64>, WC: Copy+CopyAs<u64>> RankSelect<CC, VC, WC> {
             #[inline]
@@ -1473,7 +1443,7 @@ pub mod sums {
                     }
                     count += (last_word >> shift) & 0x01;
                 }
-                
+
                 None
             }
         }
@@ -1522,23 +1492,6 @@ pub mod sums {
         use crate::{Clear, Columnar, Len, IndexMut, Index, IndexAs, Push, HeapSize};
         use crate::RankSelect;
 
-        impl<S: Columnar, T: Columnar> crate::Reference for Result<S, T> {
-            type Ref<'a> = Result<S::Ref<'a>, T::Ref<'a>> where S: 'a, T: 'a;
-            fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
-                match (&mut *self, other) {
-                    (Ok(x), Ok(y)) => x.copy_from(y),
-                    (Err(x), Err(y)) => x.copy_from(y),
-                    (_, other) => { *self = Self::into_owned(other); },
-                }
-            }
-            fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
-                match other {
-                    Ok(y) => Ok(S::into_owned(y)),
-                    Err(y) => Err(T::into_owned(y)),
-                }
-            }
-        }
-
         impl<S: Columnar, T: Columnar, SC: crate::Container<S>, TC: crate::Container<T>> crate::Container<Result<S, T>> for Results<SC, TC> {
             type Borrowed<'a> = Results<SC::Borrowed<'a>, TC::Borrowed<'a>, &'a [u64], &'a [u64], &'a u64> where SC: 'a, TC: 'a, S:'a, T: 'a;
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -1566,6 +1519,20 @@ pub mod sums {
         }
 
         impl<S: Columnar, T: Columnar> Columnar for Result<S, T> {
+            type Ref<'a> = Result<S::Ref<'a>, T::Ref<'a>> where S: 'a, T: 'a;
+            fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
+                match (&mut *self, other) {
+                    (Ok(x), Ok(y)) => x.copy_from(y),
+                    (Err(x), Err(y)) => x.copy_from(y),
+                    (_, other) => { *self = Self::into_owned(other); },
+                }
+            }
+            fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
+                match other {
+                    Ok(y) => Ok(S::into_owned(y)),
+                    Err(y) => Err(T::into_owned(y)),
+                }
+            }
             type Container = Results<S::Container, T::Container>;
         }
 
@@ -1719,19 +1686,6 @@ pub mod sums {
         use crate::{Clear, Columnar, Len, IndexMut, Index, IndexAs, Push, HeapSize};
         use crate::RankSelect;
 
-        impl<T: Columnar + Default> crate::Reference for Option<T> {
-            type Ref<'a> = Option<T::Ref<'a>> where T: 'a;
-            fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
-                match (&mut *self, other) {
-                    (Some(x), Some(y)) => { x.copy_from(y); }
-                    (_, other) => { *self = Self::into_owned(other); }
-                }
-            }
-            fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
-                other.map(|x| T::into_owned(x))
-            }
-        }
-
         impl<T: Columnar + Default, TC: crate::Container<T>> crate::Container<Option<T>> for Options<TC> {
             type Borrowed<'a> = Options<TC::Borrowed<'a>, &'a [u64], &'a [u64], &'a u64> where TC: 'a, T: 'a;
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -1747,7 +1701,7 @@ pub mod sums {
                 self.indexes.as_bytes().chain(self.somes.as_bytes())
             }
         }
-        
+
         impl <'a, TC: crate::FromBytes<'a>, CC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for Options<TC, CC, VC, &'a u64> {
             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
                 Self {
@@ -1758,6 +1712,16 @@ pub mod sums {
         }
 
         impl<T: Columnar + Default> Columnar for Option<T> {
+            type Ref<'a> = Option<T::Ref<'a>> where T: 'a;
+            fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
+                match (&mut *self, other) {
+                    (Some(x), Some(y)) => { x.copy_from(y); }
+                    (_, other) => { *self = Self::into_owned(other); }
+                }
+            }
+            fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
+                other.map(|x| T::into_owned(x))
+            }
             type Container = Options<T::Container>;
         }
 
@@ -1784,7 +1748,7 @@ pub mod sums {
             }
         }
         impl<'a, TC, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: Copy+CopyAs<u64>> Index for &'a Options<TC, CC, VC, WC>
-        where &'a TC: Index 
+        where &'a TC: Index
         {
             type Ref = Option<<&'a TC as Index>::Ref>;
             fn get(&self, index: usize) -> Self::Ref {
@@ -1976,8 +1940,8 @@ pub mod lookback {
             }
         }
     }
-    impl<'a, TC, const N: u8> Index for &'a Lookbacks<TC, Vec<u8>, N> 
-    where 
+    impl<'a, TC, const N: u8> Index for &'a Lookbacks<TC, Vec<u8>, N>
+    where
         &'a TC: Index,
     {
         type Ref = <&'a TC as Index>::Ref;
