@@ -20,7 +20,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
         syn::Data::Enum(data_enum) => {
             derive_enum(name, &ast.generics, data_enum, ast.vis)
         }
-        _ => unimplemented!(),
+        syn::Data::Union(_) => unimplemented!("Unions are unsupported by Columnar"),
     }
 }
 
@@ -59,9 +59,13 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
     // The container struct is a tuple of containers, named to correspond with fields.
     let container_struct = {
         quote! {
-            #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+            /// Derived columnar container for a struct.
+            #[derive(Copy, Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
             #vis struct #c_ident < #(#container_types),* >{
-                #(pub #names : #container_types, )*
+                #(
+                    /// Container for #names.
+                    pub #names : #container_types,
+                )*
             }
         }
     };
@@ -76,9 +80,13 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         let ty_gen = quote! { < #(#reference_types),* > };
 
         quote! {
+            /// Derived columnar reference for a struct.
             #[derive(Copy, Clone, Debug)]
             #vis struct #r_ident #ty_gen {
-                #(pub #names : #reference_types, )*
+                #(
+                    /// Field for #names.
+                    pub #names : #reference_types,
+                )*
             }
         }
     };
@@ -253,14 +261,14 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
 
     let as_bytes = { 
 
-        let impl_gen = quote! { < #(#container_types),* > };
+        let impl_gen = quote! { <'a, #(#container_types),* > };
         let ty_gen = quote! { < #(#container_types),* > };
-        let where_clause = quote! { where #(#container_types: ::columnar::bytes::AsBytes),* };
+        let where_clause = quote! { where #(#container_types: ::columnar::AsBytes<'a>),* };
         
         quote! {
-            impl #impl_gen ::columnar::bytes::AsBytes for #c_ident #ty_gen #where_clause {
-                type Borrowed<'columnar> = #c_ident < #(<#container_types as ::columnar::bytes::AsBytes>::Borrowed<'columnar>,)*>;
-                fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
+            impl #impl_gen ::columnar::AsBytes<'a> for #c_ident #ty_gen #where_clause {
+                // type Borrowed<'columnar> = #c_ident < #(<#container_types as ::columnar::AsBytes>::Borrowed<'columnar>,)*>;
+                fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
                     let iter = None.into_iter();
                     #( let iter = iter.chain(self.#names.as_bytes()); )*
                     iter
@@ -273,12 +281,12 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
 
         let impl_gen = quote! { < 'columnar, #(#container_types),* > };
         let ty_gen = quote! { < #(#container_types),* > };
-        let where_clause = quote! { where #(#container_types: ::columnar::bytes::FromBytes<'columnar>),* };
+        let where_clause = quote! { where #(#container_types: ::columnar::FromBytes<'columnar>),* };
         
         quote! {
-            impl #impl_gen ::columnar::bytes::FromBytes<'columnar> for #c_ident #ty_gen #where_clause {
+            impl #impl_gen ::columnar::FromBytes<'columnar> for #c_ident #ty_gen #where_clause {
                 fn from_bytes(bytes: &mut impl Iterator<Item=&'columnar [u8]>) -> Self {
-                    #(let #names = ::columnar::bytes::FromBytes::from_bytes(bytes);)*
+                    #(let #names = ::columnar::FromBytes::from_bytes(bytes);)*
                     Self { #(#names,)* }
                 }
             }
@@ -296,10 +304,37 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         else {
             quote! { where #(#types : ::columnar::Columnar,)* }
         };
+    
+        // Either use curly braces or parentheses to destructure the item.
+        let destructure_self = 
+        if named { quote! { let #name { #(#names),* } = self; } }
+        else     { quote! { let #name ( #(#names),* ) = self; } };
+        
+        // Either use curly braces or parentheses to destructure the item.
+        let into_self =
+        if named { quote! { #name { #(#names: ::columnar::Columnar::into_owned(other.#names)),* } } }
+        else     { quote! { #name ( #(::columnar::Columnar::into_owned(other.#names)),* ) } };
 
         quote! {
             impl #impl_gen ::columnar::Columnar for #name #ty_gen #where_clause2 {
+                type Ref<'a> = #r_ident < #(<#types as ::columnar::Columnar>::Ref<'a>,)* > where #(#types: 'a,)*;
+                fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
+                    #destructure_self
+                    #( ::columnar::Columnar::copy_from(#names, other.#names); )*
+                }
+                fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
+                    #into_self
+                }
                 type Container = #c_ident < #(<#types as ::columnar::Columnar>::Container ),* >;
+            }
+
+            impl #impl_gen ::columnar::Container<#name #ty_gen> for #c_ident < #(<#types as ::columnar::Columnar>::Container ),* > #where_clause2 {
+                type Borrowed<'a> = #c_ident < #(<<#types as ::columnar::Columnar>::Container as ::columnar::Container<#types>>::Borrowed<'a> ),* > where #(#types: 'a,)*;
+                fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
+                    #c_ident {
+                        #( #names: self.#names.borrow(), )*
+                    }
+                }
             }
         }
     };
@@ -337,9 +372,11 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
 
     quote! {
 
-        #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
-        #vis struct #c_ident {
-            count: u64,
+        /// Derived columnar container for a unit struct.
+        #[derive(Copy, Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+        #vis struct #c_ident<CW = u64> {
+            /// Count of the number of contained records.
+            pub count: CW,
         }
 
         impl ::columnar::Push<#name> for #c_ident {
@@ -354,14 +391,14 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
             }
         }
 
-        impl ::columnar::Index for #c_ident {
+        impl<CW> ::columnar::Index for #c_ident<CW> {
             type Ref = #name;
             fn get(&self, index: usize) -> Self::Ref {
                 #name
             }
         }
 
-        impl<'columnar> ::columnar::Index for &'columnar #c_ident {
+        impl<'columnar, CW> ::columnar::Index for &'columnar #c_ident<CW> {
             type Ref = #name;
             fn get(&self, index: usize) -> Self::Ref {
                 #name
@@ -374,27 +411,38 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
             }
         }
 
-        impl ::columnar::Len for #c_ident {
+        impl<CW: Copy+::columnar::common::index::CopyAs<u64>> ::columnar::Len for #c_ident<CW> {
             fn len(&self) -> usize {
-                self.count as usize
+                use columnar::common::index::CopyAs;
+                self.count.copy_as() as usize
             }
         }
 
-        impl ::columnar::bytes::AsBytes for #c_ident {
-            type Borrowed<'columnar> = #c_ident;
-            fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-                std::iter::once((8, bytemuck::cast_slice(std::slice::from_ref(&self.count))))
+        impl<'a> ::columnar::AsBytes<'a> for #c_ident <&'a u64> {
+            // type Borrowed<'columnar> = #c_ident;
+            fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
+                std::iter::once((8, bytemuck::cast_slice(std::slice::from_ref(self.count))))
             }
         }
 
-        impl<'columnar> ::columnar::bytes::FromBytes<'columnar> for #c_ident {
+        impl<'columnar> ::columnar::FromBytes<'columnar> for #c_ident <&'columnar u64> {
             fn from_bytes(bytes: &mut impl Iterator<Item=&'columnar [u8]>) -> Self {
-                Self { count: bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0] }
+                Self { count: &bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0] }
             }
         }
 
         impl ::columnar::Columnar for #name {
+            type Ref<'a> = #name;
+            fn copy_from<'a>(&mut self, other: Self::Ref<'a>) { *self = other; }
+            fn into_owned<'a>(other: Self::Ref<'a>) -> Self { other }
             type Container = #c_ident;
+        }
+
+        impl ::columnar::Container<#name> for #c_ident {
+            type Borrowed<'a> = #c_ident < &'a u64 >;
+            fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
+                #c_ident { count: &self.count }
+            }
         }
 
     }.into()
@@ -440,11 +488,17 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
     
     let container_struct = {
         quote! {
-            #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+            /// Derived columnar container for an enum.
+            #[derive(Copy, Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
             #[allow(non_snake_case)]
             #vis struct #c_ident < #(#container_types,)* CVar = Vec<u8>, COff = Vec<u64>, >{
-                #(pub #names : #container_types, )*
+                #(
+                    /// Container for #names.
+                    pub #names : #container_types,
+                )*
+                /// Container for variant.
                 pub variant: CVar,
+                /// Container for offset.
                 pub offset: COff,
             }
         }
@@ -680,14 +734,13 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
     let as_bytes = { 
 
-        let impl_gen = quote! { < #(#container_types,)* CVar, COff> };
+        let impl_gen = quote! { < 'a, #(#container_types,)* CVar, COff> };
         let ty_gen = quote! { < #(#container_types,)* CVar, COff > };
-        let where_clause = quote! { where #(#container_types: ::columnar::bytes::AsBytes,)* CVar: ::columnar::bytes::AsBytes, COff: ::columnar::bytes::AsBytes };
+        let where_clause = quote! { where #(#container_types: ::columnar::AsBytes<'a>,)* CVar: ::columnar::AsBytes<'a>, COff: ::columnar::AsBytes<'a> };
         
         quote! {
-            impl #impl_gen ::columnar::bytes::AsBytes for #c_ident #ty_gen #where_clause {
-                type Borrowed<'columnar> = #c_ident < #(<#container_types as ::columnar::bytes::AsBytes>::Borrowed<'columnar>,)* <CVar as ::columnar::bytes::AsBytes>::Borrowed<'columnar>, <COff as ::columnar::bytes::AsBytes>::Borrowed<'columnar>>;
-                fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
+            impl #impl_gen ::columnar::AsBytes<'a> for #c_ident #ty_gen #where_clause {
+                fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
                     let iter = None.into_iter();
                     #( let iter = iter.chain(self.#names.as_bytes()); )*
                     let iter = iter.chain(self.variant.as_bytes());
@@ -702,15 +755,15 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
         let impl_gen = quote! { < 'columnar, #(#container_types,)* CVar, COff> };
         let ty_gen = quote! { < #(#container_types,)* CVar, COff > };
-        let where_clause = quote! { where #(#container_types: ::columnar::bytes::FromBytes<'columnar>,)* CVar: ::columnar::bytes::FromBytes<'columnar>, COff: ::columnar::bytes::FromBytes<'columnar> };
+        let where_clause = quote! { where #(#container_types: ::columnar::FromBytes<'columnar>,)* CVar: ::columnar::FromBytes<'columnar>, COff: ::columnar::FromBytes<'columnar> };
         
         quote! {
             #[allow(non_snake_case)]
-            impl #impl_gen ::columnar::bytes::FromBytes<'columnar> for #c_ident #ty_gen #where_clause {
+            impl #impl_gen ::columnar::FromBytes<'columnar> for #c_ident #ty_gen #where_clause {
                 fn from_bytes(bytes: &mut impl Iterator<Item=&'columnar [u8]>) -> Self {
-                    #(let #names = ::columnar::bytes::FromBytes::from_bytes(bytes);)*
-                    let variant = ::columnar::bytes::FromBytes::from_bytes(bytes);
-                    let offset = ::columnar::bytes::FromBytes::from_bytes(bytes);
+                    #(let #names = ::columnar::FromBytes::from_bytes(bytes);)*
+                    let variant = ::columnar::FromBytes::from_bytes(bytes);
+                    let offset = ::columnar::FromBytes::from_bytes(bytes);
                     Self { #(#names,)* variant, offset }
                 }
             }
@@ -731,11 +784,87 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
             quote! { where #(#types : ::columnar::Columnar,)* }
         };
 
+
+        let variant_types = &variants.iter().map(|(_, types)| quote! { (#(#types),*) }).collect::<Vec<_>>();
+
         let container_types = &variants.iter().map(|(_, types)| quote! { <(#(#types),*) as ::columnar::Columnar>::Container }).collect::<Vec<_>>();
+
+        let reference_args = variants.iter().map(|(_, types)| quote! { <(#(#types),*) as ::columnar::Columnar>::Ref<'a> });
+
+        // For each variant of `other`, the matching and non-matching variant cases.
+        let copy_from = variants.iter().enumerate().map(|(index, (variant, types))| {
+
+            if data_enum.variants[index].fields == syn::Fields::Unit {
+                quote! { 
+                    (#name::#variant, #r_ident::#variant(_)) => { }
+                    (_, #r_ident::#variant(_)) => { *self = #name::#variant; }
+                }
+            }
+            else {
+                let temp_names1 = &types.iter().enumerate().map(|(index, _)| {
+                    let new_name = format!("s{}", index);
+                    syn::Ident::new(&new_name, variant.span())
+                }).collect::<Vec<_>>();
+                let temp_names2 = &types.iter().enumerate().map(|(index, _)| {
+                    let new_name = format!("t{}", index);
+                    syn::Ident::new(&new_name, variant.span())
+                }).collect::<Vec<_>>();
+
+                quote! {
+                    (#name::#variant( #( #temp_names1 ),* ), #r_ident::#variant( ( #( #temp_names2 ),* ) )) => {
+                        #( ::columnar::Columnar::copy_from(#temp_names1, #temp_names2); )*
+                    }
+                }
+            }
+        }).collect::<Vec<_>>();
+
+        // For each variant of `other`, the matching and non-matching variant cases.
+        let into_owned = variants.iter().enumerate().map(|(index, (variant, types))| {
+
+            if data_enum.variants[index].fields == syn::Fields::Unit {
+                quote! { #r_ident::#variant(_) => #name::#variant, }
+            }
+            else {
+                let temp_names = &types.iter().enumerate().map(|(index, _)| {
+                    let new_name = format!("t{}", index);
+                    syn::Ident::new(&new_name, variant.span())
+                }).collect::<Vec<_>>();
+
+                quote! {
+                    #r_ident::#variant(( #( #temp_names ),* )) => {
+                        #name::#variant( #( ::columnar::Columnar::into_owned(#temp_names) ),* )
+                    },
+                }
+            }
+        }).collect::<Vec<_>>();
+
 
         quote! {
             impl #impl_gen ::columnar::Columnar for #name #ty_gen #where_clause2 {
+                type Ref<'a> = #r_ident < #(#reference_args,)* > where Self: 'a, #(#variant_types: 'a,)*;
+                fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
+                    match (&mut *self, other) {
+                        #( #copy_from )*
+                        (_, other) => { *self = Self::into_owned(other); }
+                    }
+                }
+                fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
+                    match other {
+                        #( #into_owned )*
+                    }
+                }
                 type Container = #c_ident < #(#container_types),* >;
+            }
+
+            impl #impl_gen ::columnar::Container<#name #ty_gen> for #c_ident < #(#container_types),* > #where_clause2 {
+                type Borrowed<'a> = #c_ident < #( < #container_types as ::columnar::Container<#variant_types> >::Borrowed<'a>, )* &'a [u8], &'a [u64] > where #(#variant_types: 'a,)*;
+                fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
+                    #c_ident {
+                        #(#names: self.#names.borrow(),)*
+                        variant: self.variant.borrow(),
+                        offset: self.offset.borrow(),
+                    }
+                }
             }
         }
     };
@@ -782,8 +911,10 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
     assert!(names.len() <= 256, "Too many variants for enum");
 
     quote! {
-        #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+        /// Derived columnar container for all-unit enum.
+        #[derive(Copy, Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
         #vis struct #c_ident <CVar = Vec<u8>> {
+            /// Container for variant.
             pub variant: CVar,
         }
 
@@ -835,21 +966,33 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
             }
         }
 
-        impl<CVar: ::columnar::bytes::AsBytes> ::columnar::bytes::AsBytes for #c_ident <CVar> {
-            type Borrowed<'columnar> = #c_ident < <CVar as ::columnar::bytes::AsBytes>::Borrowed<'columnar> >;
-            fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
+        impl<'a, CVar: ::columnar::AsBytes<'a>> ::columnar::AsBytes<'a> for #c_ident <CVar> {
+            // type Borrowed<'columnar> = #c_ident < <CVar as ::columnar::AsBytes>::Borrowed<'columnar> >;
+            fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
                 self.variant.as_bytes()
             }
         }
 
-        impl<'columnar, CVar: ::columnar::bytes::FromBytes<'columnar>> ::columnar::bytes::FromBytes<'columnar> for #c_ident <CVar> {
+        impl<'columnar, CVar: ::columnar::FromBytes<'columnar>> ::columnar::FromBytes<'columnar> for #c_ident <CVar> {
             fn from_bytes(bytes: &mut impl Iterator<Item=&'columnar [u8]>) -> Self {
-                Self { variant: ::columnar::bytes::FromBytes::from_bytes(bytes) }
+                Self { variant: ::columnar::FromBytes::from_bytes(bytes) }
             }
         }
 
         impl ::columnar::Columnar for #name {
+            type Ref<'a> = #name;
+            fn copy_from<'a>(&mut self, other: Self::Ref<'a>) { *self = other; }
+            fn into_owned<'a>(other: Self::Ref<'a>) -> Self { other }
             type Container = #c_ident;
+        }
+
+        impl<CV: ::columnar::Container<u8>> ::columnar::Container<#name> for #c_ident <CV> {
+            type Borrowed<'a> = #c_ident < CV::Borrowed<'a> > where CV: 'a;
+            fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
+                #c_ident {
+                    variant: self.variant.borrow()
+                }
+            }
         }
     }.into()
 }

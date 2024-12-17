@@ -1,232 +1,291 @@
 /// Methods to convert containers to and from byte slices.
 
-pub trait AsBytes {
-    type Borrowed<'a>: FromBytes<'a>;
-    /// Presents `self` as a sequence of byte slices, with their required alignment.
-    fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])>;
-    /// The number of `u64` words required to record `self` as aligned bytes.
-    fn length_in_words(&self) -> usize {
-        self.as_bytes().map(|(_, x)| 1 + (x.len()/8) + if x.len() % 8 == 0 { 0 } else { 1 }).sum()
-    }
-}
-pub trait FromBytes<'a> : AsBytes {
-    /// Reconstructs `self` from a sequence of correctly aligned and sized bytes slices.
-    ///
-    /// The implementation is expected to consume the right number of items from the iterator,
-    /// which may go on to be used by other implementations of `FromBytes`.
-    fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self;
-}
+// pub trait AsBytes {
+//     type Borrowed<'a>: FromBytes<'a> where Self: 'a;
+//     fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { unimplemented!() }
+//     /// Presents `self` as a sequence of byte slices, with their required alignment.
+//     fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])>;
+//     /// The number of `u64` words required to record `self` as aligned bytes.
+//     fn length_in_words(&self) -> usize {
+//         self.as_bytes().map(|(_, x)| 1 + (x.len()/8) + if x.len() % 8 == 0 { 0 } else { 1 }).sum()
+//     }
+// }
+// pub trait FromBytes<'a> : AsBytes {
+//     /// Reconstructs `self` from a sequence of correctly aligned and sized bytes slices.
+//     ///
+//     /// The implementation is expected to consume the right number of items from the iterator,
+//     /// which may go on to be used by other implementations of `FromBytes`.
+//     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self;
+// }
 
-macro_rules! implement_byteslices {
-    ($($index_type:ty),*) => { $(
-        impl AsBytes for Vec<$index_type> {
-            type Borrowed<'a> = &'a [$index_type];
-            fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-                std::iter::once((std::mem::align_of::<$index_type>() as u64, bytemuck::cast_slice(&self[..])))
-            }
-        }
-        impl<'a> AsBytes for &'a [$index_type] {
-            type Borrowed<'b> = &'b [$index_type];
-            fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-                std::iter::once((std::mem::align_of::<$index_type>() as u64, bytemuck::cast_slice(&self[..])))
-            }
-        }
-        impl<'a> FromBytes<'a> for &'a [$index_type] {
-            fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-                bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()
-            }
-        }
-    )* }
-}
+// macro_rules! implement_byteslices {
+//     ($($index_type:ty),*) => { $(
+//         impl AsBytes for Vec<$index_type> {
+//             type Borrowed<'a> = &'a [$index_type];
+//             fn borrow(&self) -> Self::Borrowed<'_> { &self[..] }
+//             fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
+//                 std::iter::once((std::mem::align_of::<$index_type>() as u64, bytemuck::cast_slice(&self[..])))
+//             }
+//         }
+//         impl<'a> AsBytes for &'a [$index_type] {
+//             type Borrowed<'b> = &'b [$index_type];
+//             fn borrow(&self) -> Self::Borrowed<'_> { &self[..] }
+//             fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
+//                 std::iter::once((std::mem::align_of::<$index_type>() as u64, bytemuck::cast_slice(&self[..])))
+//             }
+//         }
+//         impl<'a> FromBytes<'a> for &'a [$index_type] {
+//             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+//                 bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()
+//             }
+//         }
+//     )* }
+// }
 
-implement_byteslices!(u8, u16, u32, u64, u128);
-implement_byteslices!(i8, i16, i32, i64, i128);
-implement_byteslices!(f32, f64);
-implement_byteslices!(());
+// implement_byteslices!(u8, u16, u32, u64, u128);
+// implement_byteslices!(i8, i16, i32, i64, i128);
+// implement_byteslices!(f32, f64);
+// implement_byteslices!(());
 
-use crate::{Strings, Vecs, Results, Options, RankSelect};
+// use crate::{Strings, Vecs, Results, Options, RankSelect};
 
-impl<BC: AsBytes, VC: AsBytes> AsBytes for Strings<BC, VC> {
-    type Borrowed<'a> = Strings<BC::Borrowed<'a>, VC::Borrowed<'a>>;
-    fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-        self.bounds.as_bytes().chain(self.values.as_bytes())
-    }
-}
-impl<'a, BC: FromBytes<'a>, VC: FromBytes<'a>> FromBytes<'a> for Strings<BC, VC> {
-    fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-        Self {
-            bounds: FromBytes::from_bytes(bytes),
-            values: FromBytes::from_bytes(bytes),
-        }
-    }
-}
+// impl<BC: AsBytes, VC: AsBytes> AsBytes for Strings<BC, VC> {
+//     type Borrowed<'a> = Strings<BC::Borrowed<'a>, VC::Borrowed<'a>> where BC: 'a, VC: 'a;
+//     fn borrow(&self) -> Self::Borrowed<'_> { 
+//         Strings { 
+//             values: self.values.borrow(),
+//             bounds: self.bounds.borrow(),
+//         } 
+//     }
+//     fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
+//         self.bounds.as_bytes().chain(self.values.as_bytes())
+//     }
+// }
+// impl<'a, BC: FromBytes<'a>, VC: FromBytes<'a>> FromBytes<'a> for Strings<BC, VC> {
+//     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+//         Self {
+//             bounds: FromBytes::from_bytes(bytes),
+//             values: FromBytes::from_bytes(bytes),
+//         }
+//     }
+// }
 
-impl<TC: AsBytes, BC: AsBytes> AsBytes for Vecs<TC, BC> {
-    type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>>;
-    fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-        self.bounds.as_bytes().chain(self.values.as_bytes())
-    }
-}
-impl<'a, TC: FromBytes<'a>, BC: FromBytes<'a>> FromBytes<'a> for Vecs<TC, BC> {
-    fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-        Self {
-            bounds: FromBytes::from_bytes(bytes),
-            values: FromBytes::from_bytes(bytes),
-        }
-    }
-}
+// impl<TC: AsBytes, BC: AsBytes> AsBytes for Vecs<TC, BC> {
+//     type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>> where BC: 'a, TC: 'a;
+//     fn borrow(&self) -> Self::Borrowed<'_> {
+//         Vecs {
+//             values: self.values.borrow(),
+//             bounds: self.bounds.borrow(),
+//         }
+//     }
+//     fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
+//         self.bounds.as_bytes().chain(self.values.as_bytes())
+//     }
+// }
+// impl<'a, TC: FromBytes<'a>, BC: FromBytes<'a>> FromBytes<'a> for Vecs<TC, BC> {
+//     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+//         Self {
+//             bounds: FromBytes::from_bytes(bytes),
+//             values: FromBytes::from_bytes(bytes),
+//         }
+//     }
+// }
 
-macro_rules! tuple_impl {
-    ( $($name:ident)+) => (
-        impl<$($name: AsBytes),*> AsBytes for ($($name,)*) {
-            type Borrowed<'a> = ($($name::Borrowed<'a>,)*);
-            #[allow(non_snake_case)]
-            fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-                let ($($name,)*) = self;
-                let iter = None.into_iter();
-                $( let iter = iter.chain($name.as_bytes()); )*
-                iter
-            }
-        }
-        impl<'a, $($name: FromBytes<'a>),*> FromBytes<'a> for ($($name,)*) {
-            #[allow(non_snake_case)]
-            fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-                $(let $name = FromBytes::from_bytes(bytes);)*
-                ($($name,)*)
-            }
-        }
-    )
-}
+// macro_rules! tuple_impl {
+//     ( $($name:ident)+) => (
+//         #[allow(non_snake_case)]
+//         impl<$($name: AsBytes),*> AsBytes for ($($name,)*) {
+//             type Borrowed<'a> = ($($name::Borrowed<'a>,)*) where $($name: 'a,)*;
+//             fn borrow(&self) -> Self::Borrowed<'_> {
+//                 let ($($name,)*) = self;
+//                 ($($name.borrow(),)*)
+//             }
+//             fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
+//                 let ($($name,)*) = self;
+//                 let iter = None.into_iter();
+//                 $( let iter = iter.chain($name.as_bytes()); )*
+//                 iter
+//             }
+//         }
+//         impl<'a, $($name: FromBytes<'a>),*> FromBytes<'a> for ($($name,)*) {
+//             #[allow(non_snake_case)]
+//             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+//                 $(let $name = FromBytes::from_bytes(bytes);)*
+//                 ($($name,)*)
+//             }
+//         }
+//     )
+// }
 
-tuple_impl!(A);
-tuple_impl!(A B);
-tuple_impl!(A B C);
-tuple_impl!(A B C D);
-tuple_impl!(A B C D E);
-tuple_impl!(A B C D E F);
-tuple_impl!(A B C D E F G);
-tuple_impl!(A B C D E F G H);
-tuple_impl!(A B C D E F G H I);
-tuple_impl!(A B C D E F G H I J);
+// tuple_impl!(A);
+// tuple_impl!(A B);
+// tuple_impl!(A B C);
+// tuple_impl!(A B C D);
+// tuple_impl!(A B C D E);
+// tuple_impl!(A B C D E F);
+// tuple_impl!(A B C D E F G);
+// tuple_impl!(A B C D E F G H);
+// tuple_impl!(A B C D E F G H I);
+// tuple_impl!(A B C D E F G H I J);
 
-impl<CV: AsBytes> AsBytes for crate::primitive::Usizes<CV> {
-    type Borrowed<'a> = crate::primitive::Usizes<CV::Borrowed<'a>>;
-    fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-        self.values.as_bytes()
-    }
-}
+// impl<CV: AsBytes> AsBytes for crate::primitive::Usizes<CV> {
+//     type Borrowed<'a> = crate::primitive::Usizes<CV::Borrowed<'a>> where CV: 'a;
+//     fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
+//         crate::primitive::Usizes { values: self.values.borrow() }
+//     }
+//     fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
+//         self.values.as_bytes()
+//     }
+// }
 
-impl<'a, CV: FromBytes<'a>> FromBytes<'a> for crate::primitive::Usizes<CV> {
-    fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-        Self { values: CV::from_bytes(bytes) }
-    }
-}
+// impl<'a, CV: FromBytes<'a>> FromBytes<'a> for crate::primitive::Usizes<CV> {
+//     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+//         Self { values: CV::from_bytes(bytes) }
+//     }
+// }
 
-impl<CV: AsBytes> AsBytes for crate::primitive::Isizes<CV> {
-    type Borrowed<'a> = crate::primitive::Isizes<CV::Borrowed<'a>>;
-    fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-        self.values.as_bytes()
-    }
-}
+// impl<CV: AsBytes> AsBytes for crate::primitive::Isizes<CV> {
+//     type Borrowed<'a> = crate::primitive::Isizes<CV::Borrowed<'a>> where CV: 'a;
+//     fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
+//         crate::primitive::Isizes { values: self.values.borrow() }
+//     }
+//     fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
+//         self.values.as_bytes()
+//     }
+// }
 
-impl<'a, CV: FromBytes<'a>> FromBytes<'a> for crate::primitive::Isizes<CV> {
-    fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-        Self { values: CV::from_bytes(bytes) }
-    }
-}
+// impl<'a, CV: FromBytes<'a>> FromBytes<'a> for crate::primitive::Isizes<CV> {
+//     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+//         Self { values: CV::from_bytes(bytes) }
+//     }
+// }
 
 
-impl AsBytes for crate::primitive::Empties {
-    type Borrowed<'a> = crate::primitive::Empties;
-    fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-        std::iter::once((8, bytemuck::cast_slice(std::slice::from_ref(&self.count))))
-    }
-}
-impl<'a> FromBytes<'a> for crate::primitive::Empties {
-    fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-        Self { count: bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0], empty: () }
-    }
-}
+// impl AsBytes for crate::primitive::Empties {
+//     type Borrowed<'a> = crate::primitive::Empties;
+//     fn borrow(&self) -> Self::Borrowed<'_> { 
+//         crate::primitive::Empties { count: self.count, empty: () }
+//     }
+//     fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
+//         std::iter::once((8, bytemuck::cast_slice(std::slice::from_ref(&self.count))))
+//     }
+// }
+// impl<'a> FromBytes<'a> for crate::primitive::Empties {
+//     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+//         Self { count: bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0], empty: () }
+//     }
+// }
 
-impl<VC: AsBytes> AsBytes for crate::primitive::Bools<VC> {
-    type Borrowed<'a> = crate::primitive::Bools<VC::Borrowed<'a>>;
-    fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-        self.values.as_bytes()
-        .chain(std::iter::once((std::mem::align_of::<u64>() as u64, bytemuck::cast_slice(std::slice::from_ref(&self.last_word)))))
-        .chain(std::iter::once((1, bytemuck::cast_slice(std::slice::from_ref(&self.last_bits)))))
-    }
-}
+// impl<VC: AsBytes> AsBytes for crate::primitive::Bools<VC> {
+//     type Borrowed<'a> = crate::primitive::Bools<VC::Borrowed<'a>> where VC: 'a;
+//     fn borrow(&self) -> Self::Borrowed<'_> { 
+//         crate::primitive::Bools {
+//             values: self.values.borrow(),
+//             last_word: self.last_word,
+//             last_bits: self.last_bits,
+//         }
+//     }
+//     fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
+//         self.values.as_bytes()
+//         .chain(std::iter::once((std::mem::align_of::<u64>() as u64, bytemuck::cast_slice(std::slice::from_ref(&self.last_word)))))
+//         .chain(std::iter::once((1, bytemuck::cast_slice(std::slice::from_ref(&self.last_bits)))))
+//     }
+// }
 
-impl<'a, VC: FromBytes<'a>> FromBytes<'a> for crate::primitive::Bools<VC> {
-    fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-        let values = FromBytes::from_bytes(bytes);
-        let last_word = bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0];
-        let last_bits = bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0];
-        Self { values, last_word, last_bits }
-    }
-}
+// impl<'a, VC: FromBytes<'a>> FromBytes<'a> for crate::primitive::Bools<VC> {
+//     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+//         let values = FromBytes::from_bytes(bytes);
+//         let last_word = bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0];
+//         let last_bits = bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0];
+//         Self { values, last_word, last_bits }
+//     }
+// }
 
-impl<SC: AsBytes, NC: AsBytes> AsBytes for crate::primitive::Durations<SC, NC> {
-    type Borrowed<'a> = crate::primitive::Durations<SC::Borrowed<'a>, NC::Borrowed<'a>>;
-    fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-        self.seconds.as_bytes().chain(self.nanoseconds.as_bytes())
-    }
-}
-impl<'a, SC: FromBytes<'a>, NC: FromBytes<'a>> FromBytes<'a> for crate::primitive::Durations<SC, NC> {
-    fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-        Self {
-            seconds: FromBytes::from_bytes(bytes),
-            nanoseconds: FromBytes::from_bytes(bytes),
-        }
-    }
-}
+// impl<SC: AsBytes, NC: AsBytes> AsBytes for crate::primitive::Durations<SC, NC> {
+//     type Borrowed<'a> = crate::primitive::Durations<SC::Borrowed<'a>, NC::Borrowed<'a>> where SC: 'a, NC: 'a;
+//     fn borrow(&self) -> Self::Borrowed<'_> {
+//         crate::primitive::Durations {
+//             seconds: self.seconds.borrow(),
+//             nanoseconds: self.nanoseconds.borrow(),
+//         }
+//     }
+//     fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
+//         self.seconds.as_bytes().chain(self.nanoseconds.as_bytes())
+//     }
+// }
+// impl<'a, SC: FromBytes<'a>, NC: FromBytes<'a>> FromBytes<'a> for crate::primitive::Durations<SC, NC> {
+//     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+//         Self {
+//             seconds: FromBytes::from_bytes(bytes),
+//             nanoseconds: FromBytes::from_bytes(bytes),
+//         }
+//     }
+// }
 
-impl<CC: AsBytes, VC: AsBytes> AsBytes for RankSelect<CC, VC> {
-    type Borrowed<'a> = RankSelect<CC::Borrowed<'a>, VC::Borrowed<'a>>;
-    fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-        self.counts.as_bytes().chain(self.values.as_bytes())
-    }
-}
-impl<'a, CC: FromBytes<'a>, VC: FromBytes<'a>> FromBytes<'a> for RankSelect<CC, VC> {
-    fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-        Self {
-            counts: FromBytes::from_bytes(bytes),
-            values: FromBytes::from_bytes(bytes),
-        }
-    }
-}
+// impl<CC: AsBytes, VC: AsBytes> AsBytes for RankSelect<CC, VC> {
+//     type Borrowed<'a> = RankSelect<CC::Borrowed<'a>, VC::Borrowed<'a>> where CC: 'a, VC: 'a;
+//     fn borrow(&self) -> Self::Borrowed<'_> {
+//         RankSelect {
+//             counts: self.counts.borrow(),
+//             values: self.values.borrow(),
+//         }
+//     }
+//     fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
+//         self.counts.as_bytes().chain(self.values.as_bytes())
+//     }
+// }
+// impl<'a, CC: FromBytes<'a>, VC: FromBytes<'a>> FromBytes<'a> for RankSelect<CC, VC> {
+//     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+//         Self {
+//             counts: FromBytes::from_bytes(bytes),
+//             values: FromBytes::from_bytes(bytes),
+//         }
+//     }
+// }
 
-impl<SC: AsBytes, TC: AsBytes, CC: AsBytes, VC: AsBytes> AsBytes for Results<SC, TC, CC, VC> {
-    type Borrowed<'a> = Results<SC::Borrowed<'a>, TC::Borrowed<'a>, CC::Borrowed<'a>, VC::Borrowed<'a>>;
-    fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-        self.indexes.as_bytes().chain(self.oks.as_bytes()).chain(self.errs.as_bytes())
-    }
-}
-impl<'a, SC: FromBytes<'a>, TC: FromBytes<'a>, CC: FromBytes<'a>, VC: FromBytes<'a>> FromBytes<'a> for Results<SC, TC, CC, VC> {
-    fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-        Self {
-            indexes: FromBytes::from_bytes(bytes),
-            oks: FromBytes::from_bytes(bytes),
-            errs: FromBytes::from_bytes(bytes),
-        }
-    }
-}
+// impl<SC: AsBytes, TC: AsBytes, CC: AsBytes, VC: AsBytes> AsBytes for Results<SC, TC, CC, VC> {
+//     type Borrowed<'a> = Results<SC::Borrowed<'a>, TC::Borrowed<'a>, CC::Borrowed<'a>, VC::Borrowed<'a>> where SC: 'a, TC: 'a, CC: 'a, VC: 'a;
+//     fn borrow(&self) -> Self::Borrowed<'_> {
+//         Results {
+//             indexes: self.indexes.borrow(),
+//             oks: self.oks.borrow(),
+//             errs: self.errs.borrow(),
+//         }
+//     }
+//     fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
+//         self.indexes.as_bytes().chain(self.oks.as_bytes()).chain(self.errs.as_bytes())
+//     }
+// }
+// impl<'a, SC: FromBytes<'a>, TC: FromBytes<'a>, CC: FromBytes<'a>, VC: FromBytes<'a>> FromBytes<'a> for Results<SC, TC, CC, VC> {
+//     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+//         Self {
+//             indexes: FromBytes::from_bytes(bytes),
+//             oks: FromBytes::from_bytes(bytes),
+//             errs: FromBytes::from_bytes(bytes),
+//         }
+//     }
+// }
 
-impl <TC: AsBytes, CC: AsBytes, VC: AsBytes> AsBytes for Options<TC, CC, VC> {
-    type Borrowed<'a> = Options<TC::Borrowed<'a>, CC::Borrowed<'a>, VC::Borrowed<'a>>;
-    fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-        self.indexes.as_bytes().chain(self.somes.as_bytes())
-    }
-}
+// impl <TC: AsBytes, CC: AsBytes, VC: AsBytes> AsBytes for Options<TC, CC, VC> {
+//     type Borrowed<'a> = Options<TC::Borrowed<'a>, CC::Borrowed<'a>, VC::Borrowed<'a>> where TC: 'a, CC: 'a, VC: 'a;
+//     fn borrow(&self) -> Self::Borrowed<'_> {
+//         Options {
+//             indexes: self.indexes.borrow(),
+//             somes: self.somes.borrow(),
+//         }
+//     }    fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
+//         self.indexes.as_bytes().chain(self.somes.as_bytes())
+//     }
+// }
 
-impl <'a, TC: FromBytes<'a>, CC: FromBytes<'a>, VC: FromBytes<'a>> FromBytes<'a> for Options<TC, CC, VC> {
-    fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-        Self {
-            indexes: FromBytes::from_bytes(bytes),
-            somes: FromBytes::from_bytes(bytes),
-        }
-    }
-}
+// impl <'a, TC: FromBytes<'a>, CC: FromBytes<'a>, VC: FromBytes<'a>> FromBytes<'a> for Options<TC, CC, VC> {
+//     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+//         Self {
+//             indexes: FromBytes::from_bytes(bytes),
+//             somes: FromBytes::from_bytes(bytes),
+//         }
+//     }
+// }
 
 /// A sequential byte layout for `AsBytes` and `FromBytes` implementors.
 ///

@@ -1,4 +1,4 @@
-use columnar::Columnar;
+use columnar::{Columnar, Container};
 
 #[derive(Columnar)]
 enum Group<T> {
@@ -51,22 +51,23 @@ fn main() {
     }
 
     // Report the fixed number of large buffers backing `columns`.
-    use columnar::bytes::AsBytes;
-    assert_eq!(columns.as_bytes().count(), 9);
-    for (align, bytes) in columns.as_bytes() {
+    use columnar::AsBytes;
+    assert_eq!(columns.borrow().as_bytes().count(), 9);
+    for (align, bytes) in columns.borrow().as_bytes() {
         println!("align: {:?}, bytes.len(): {:?}", align, bytes.len());
     }
 
     // Borrow raw bytes from `columns`, and reconstruct a borrowed `columns`.
     // In practice, we would use serialized bytes from somewhere else.
     // This local function gives type support, relating `T` to `T::Borrowed`.
-    fn round_trip<T: AsBytes>(container: &T) -> T::Borrowed<'_> {
+    fn round_trip<'a, C: Columnar>(container: &'a C::Container) -> <C::Container as Container<C>>::Borrowed<'a> {
         // Grab a reference to underlying bytes, as if serialized.
-        let mut bytes_iter = container.as_bytes().map(|(_, bytes)| bytes);
-        columnar::bytes::FromBytes::from_bytes(&mut bytes_iter)
+        let borrow = container.borrow();
+        let mut bytes_iter = borrow.as_bytes().map(|(_, bytes)| bytes);
+        columnar::FromBytes::from_bytes(&mut bytes_iter)
     }
 
-    let borrowed = round_trip(&columns);
+    let borrowed = round_trip::<Group<_>>(&columns);
 
     // Project down to columns and variants using field accessors.
     // This gets all ages from people in teams.
@@ -214,20 +215,36 @@ fn _main2() {
 mod test {
     use columnar::Columnar;
 
+    // Tests derived implementations for a struct with named fields.
     #[derive(Columnar, Debug)]
     struct Test1<T: Copy> where T: Clone {
         foo: Vec<T>,
         bar: i16,
     }
 
+    // Tests derived implementations for a struct with unnamed fields.
     #[derive(Columnar, Debug)]
     struct Test2<T: Copy> (Vec<T>, i16) where T: Clone;
 
+    // Tests derived implementations for an enum with valuable variants,
+    // but including unit variants.
     #[derive(Columnar, Debug)]
     pub enum Test3<T> {
         Foo(Vec<T>, u8),
         Bar(i16),
+        Void,
     }
+
+    // Tests derived implementations for a struct with all unit variants.
+    #[derive(Columnar, Debug)]
+    pub enum Test4 {
+        Foo,
+        Bar,
+    }
+    
+    // Tests derived implementations for a unit struct.
+    #[derive(Columnar, Debug)]
+    struct Test5;
 
     #[test]
     fn round_trip() {
