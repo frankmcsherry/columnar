@@ -59,9 +59,13 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
     // The container struct is a tuple of containers, named to correspond with fields.
     let container_struct = {
         quote! {
+            /// Derived columnar container for a struct.
             #[derive(Copy, Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
             #vis struct #c_ident < #(#container_types),* >{
-                #(pub #names : #container_types, )*
+                #(
+                    /// Container for #names.
+                    pub #names : #container_types,
+                )*
             }
         }
     };
@@ -76,9 +80,13 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         let ty_gen = quote! { < #(#reference_types),* > };
 
         quote! {
+            /// Derived columnar reference for a struct.
             #[derive(Copy, Clone, Debug)]
             #vis struct #r_ident #ty_gen {
-                #(pub #names : #reference_types, )*
+                #(
+                    /// Field for #names.
+                    pub #names : #reference_types,
+                )*
             }
         }
     };
@@ -302,6 +310,10 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         if named { quote! { let #name { #(#names),* } = self; } }
         else     { quote! { let #name ( #(#names),* ) = self; } };
         
+        // Either use curly braces or parentheses to destructure the item.
+        let into_self =
+        if named { quote! { #name { #(#names: ::columnar::Reference::into_owned(other.#names)),* } } }
+        else     { quote! { #name ( #(::columnar::Reference::into_owned(other.#names)),* ) } };
 
         quote! {
             impl #impl_gen ::columnar::Columnar for #name #ty_gen #where_clause2 {
@@ -313,6 +325,9 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
                 fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
                     #destructure_self
                     #( ::columnar::Reference::copy_from(#names, other.#names); )*
+                }
+                fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
+                    #into_self
                 }
             }
 
@@ -360,9 +375,11 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
 
     quote! {
 
+        /// Derived columnar container for a unit struct.
         #[derive(Copy, Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
         #vis struct #c_ident<CW = u64> {
-            count: CW,
+            /// Count of the number of contained records.
+            pub count: CW,
         }
 
         impl ::columnar::Push<#name> for #c_ident {
@@ -424,6 +441,7 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
         impl ::columnar::Reference for #name {
             type Ref<'a> = #name;
             fn copy_from<'a>(&mut self, other: Self::Ref<'a>) { *self = other; }
+            fn into_owned<'a>(other: Self::Ref<'a>) -> Self { other }
         }
 
         impl ::columnar::Container<#name> for #c_ident {
@@ -476,11 +494,17 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
     
     let container_struct = {
         quote! {
+            /// Derived columnar container for an enum.
             #[derive(Copy, Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
             #[allow(non_snake_case)]
             #vis struct #c_ident < #(#container_types,)* CVar = Vec<u8>, COff = Vec<u64>, >{
-                #(pub #names : #container_types, )*
+                #(
+                    /// Container for #names.
+                    pub #names : #container_types,
+                )*
+                /// Container for variant.
                 pub variant: CVar,
+                /// Container for offset.
                 pub offset: COff,
             }
         }
@@ -760,10 +784,10 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
         let where_clause2 = if let Some(enum_where) = where_clause {
             let params = enum_where.predicates.iter(); 
-            quote! {  where #(#types : ::columnar::Columnar + Default,)* #(#params),* }
+            quote! {  where #(#types : ::columnar::Columnar,)* #(#params),* }
         }
         else {
-            quote! { where #(#types : ::columnar::Columnar + Default,)* }
+            quote! { where #(#types : ::columnar::Columnar,)* }
         };
 
 
@@ -796,16 +820,30 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                     (#name::#variant( #( #temp_names1 ),* ), #r_ident::#variant( ( #( #temp_names2 ),* ) )) => {
                         #( ::columnar::Reference::copy_from(#temp_names1, #temp_names2); )*
                     }
-                    (_, #r_ident::#variant( ( #(#temp_names2),* ) )) => {
-                        #( 
-                            let mut #temp_names1 = Default::default(); 
-                            ::columnar::Reference::copy_from(&mut #temp_names1, #temp_names2);
-                        )*
-                        *self = #name::#variant( #( #temp_names1, )*);
-                    }
                 }
             }
         }).collect::<Vec<_>>();
+
+        // For each variant of `other`, the matching and non-matching variant cases.
+        let into_owned = variants.iter().enumerate().map(|(index, (variant, types))| {
+
+            if data_enum.variants[index].fields == syn::Fields::Unit {
+                quote! { #r_ident::#variant(_) => #name::#variant, }
+            }
+            else {
+                let temp_names = &types.iter().enumerate().map(|(index, _)| {
+                    let new_name = format!("t{}", index);
+                    syn::Ident::new(&new_name, variant.span())
+                }).collect::<Vec<_>>();
+
+                quote! {
+                    #r_ident::#variant(( #( #temp_names ),* )) => {
+                        #name::#variant( #( ::columnar::Reference::into_owned(#temp_names) ),* )
+                    },
+                }
+            }
+        }).collect::<Vec<_>>();
+
 
         quote! {
             impl #impl_gen ::columnar::Columnar for #name #ty_gen #where_clause2 {
@@ -817,6 +855,12 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                 fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
                     match (&mut *self, other) {
                         #( #copy_from )*
+                        (_, other) => { *self = Self::into_owned(other); }
+                    }
+                }
+                fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
+                    match other {
+                        #( #into_owned )*
                     }
                 }
             }
@@ -876,8 +920,10 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
     assert!(names.len() <= 256, "Too many variants for enum");
 
     quote! {
+        /// Derived columnar container for all-unit enum.
         #[derive(Copy, Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
         #vis struct #c_ident <CVar = Vec<u8>> {
+            /// Container for variant.
             pub variant: CVar,
         }
 
@@ -950,6 +996,9 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
             type Ref<'a> = #name;
             fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
                 *self = other;
+            }
+            fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
+                other
             }
         }
 
