@@ -67,7 +67,7 @@ impl Op {
                 let mut result = Strings::default();
                 for a in aa.iter() {
                     use columnar::Push;
-                    result.push(format!("{:?}", a));
+                    result.push(&format!("{:?}", a));
                 }
                 Err(result)
             },
