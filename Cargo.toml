@@ -11,6 +11,9 @@ homepage = "http://github.com/frankmcsherry/columnar"
 repository = "https://github.com/frankmcsherry/columnar.git"
 license = "MIT"
 
+[workspace]
+members = ["columnar_derive"]
+
 [dependencies]
 rmp-serde = "1.3.0"
 bincode = "1.3.3"
