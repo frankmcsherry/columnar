@@ -332,7 +332,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
                 type Borrowed<'a> = #c_ident < #(<<#types as ::columnar::Columnar>::Container as ::columnar::Container<#types>>::Borrowed<'a> ),* > where #(#types: 'a,)*;
                 fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
                     #c_ident {
-                        #( #names: self.#names.borrow(), )*
+                        #( #names: <<#types as ::columnar::Columnar>::Container as ::columnar::Container<#types>>::borrow(&self.#names), )*
                     }
                 }
             }
@@ -531,27 +531,32 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         
         let push = variants.iter().enumerate().map(|(index, (variant, types))| {
 
-            if data_enum.variants[index].fields == syn::Fields::Unit {
-                quote! {
-                    #name::#variant => {
-                        self.offset.push(self.#variant.len() as u64);
-                        self.#variant.push(());
-                        self.variant.push(#index as u8);
+            match data_enum.variants[index].fields {
+                syn::Fields::Unit => {
+                    quote! {
+                        #name::#variant => {
+                            self.offset.push(self.#variant.len() as u64);
+                            self.#variant.push(());
+                            self.variant.push(#index as u8);
+                        }
                     }
                 }
-            }
-            else {
-                let temp_names = &types.iter().enumerate().map(|(index, _)| {
-                    let new_name = format!("t{}", index);
-                    syn::Ident::new(&new_name, variant.span())
-                }).collect::<Vec<_>>();
+                syn::Fields::Unnamed(_) => {
+                    let temp_names = &types.iter().enumerate().map(|(index, _)| {
+                        let new_name = format!("t{}", index);
+                        syn::Ident::new(&new_name, variant.span())
+                    }).collect::<Vec<_>>();
 
-                quote! {
-                    #name::#variant( #(#temp_names),* ) => {
-                        self.offset.push(self.#variant.len() as u64);
-                        self.#variant.push((#(#temp_names),*));
-                        self.variant.push(#index as u8);
-                    },
+                    quote! {
+                        #name::#variant( #(#temp_names),* ) => {
+                            self.offset.push(self.#variant.len() as u64);
+                            self.#variant.push((#(#temp_names),*));
+                            self.variant.push(#index as u8);
+                        },
+                    }
+                }
+                syn::Fields::Named(_) => {
+                    unimplemented!("Named fields in enum variants are not supported by Columnar");
                 }
             }
         });
@@ -577,30 +582,35 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
     let push_ref = { 
 
         let (_impl_gen, ty_gen, _where_clause) = generics.split_for_impl();
-        
+
         let push = variants.iter().enumerate().map(|(index, (variant, types))| {
 
-            if data_enum.variants[index].fields == syn::Fields::Unit {
-                quote! {
-                    #name::#variant => {
-                        self.offset.push(self.#variant.len() as u64);
-                        self.#variant.push(());
-                        self.variant.push(#index as u8);
+            match data_enum.variants[index].fields {
+                syn::Fields::Unit => {
+                    quote! {
+                        #name::#variant => {
+                            self.offset.push(self.#variant.len() as u64);
+                            self.#variant.push(());
+                            self.variant.push(#index as u8);
+                        }
                     }
                 }
-            }
-            else {
-                let temp_names = &types.iter().enumerate().map(|(index, _)| {
-                    let new_name = format!("t{}", index);
-                    syn::Ident::new(&new_name, variant.span())
-                }).collect::<Vec<_>>();
+                syn::Fields::Unnamed(_) => {
+                    let temp_names = &types.iter().enumerate().map(|(index, _)| {
+                        let new_name = format!("t{}", index);
+                        syn::Ident::new(&new_name, variant.span())
+                    }).collect::<Vec<_>>();
 
-                quote! {
-                    #name::#variant( #(#temp_names),* ) => {
-                        self.offset.push(self.#variant.len() as u64);
-                        self.#variant.push((#(#temp_names),*));
-                        self.variant.push(#index as u8);
-                    },
+                    quote! {
+                        #name::#variant( #(#temp_names),* ) => {
+                            self.offset.push(self.#variant.len() as u64);
+                            self.#variant.push((#(#temp_names),*));
+                            self.variant.push(#index as u8);
+                        },
+                    }
+                }
+                syn::Fields::Named(_) => {
+                    unimplemented!("Named fields in enum variants are not supported by Columnar");
                 }
             }
         });

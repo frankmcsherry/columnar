@@ -1085,7 +1085,34 @@ pub mod vector {
         type Container = Vecs<T::Container>;
     }
 
+    impl<T: Columnar, const N: usize> Columnar for [T; N] {
+        type Ref<'a> = Slice<<T::Container as crate::Container<T>>::Borrowed<'a>> where T: 'a;
+        fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
+            for (s, o) in self.iter_mut().zip(other.into_iter()) {
+                T::copy_from(s, o);
+            }
+        }
+        fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
+            let vec: Vec<_> = other.into_iter().map(|x| T::into_owned(x)).collect();
+            match vec.try_into() {
+                Ok(array) => array,
+                Err(_) => panic!("wrong length"),
+            }
+        }
+        type Container = Vecs<T::Container>;
+    }
+
     impl<T: Columnar<Container = TC>, BC: crate::Container<u64>, TC: crate::Container<T>> crate::Container<Vec<T>> for Vecs<TC, BC> {
+        type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>> where BC: 'a, TC: 'a, T: 'a;
+        fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
+            Vecs {
+                bounds: self.bounds.borrow(),
+                values: self.values.borrow(),
+            }
+        }
+    }
+
+    impl<T: Columnar<Container = TC>, BC: crate::Container<u64>, TC: crate::Container<T>, const N: usize> crate::Container<[T; N]> for Vecs<TC, BC> {
         type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>> where BC: 'a, TC: 'a, T: 'a;
         fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
             Vecs {
@@ -1157,6 +1184,11 @@ pub mod vector {
     }
     impl<'a, T, TC: Push<&'a T> + Len> Push<&'a Vec<T>> for Vecs<TC> {
         fn push(&mut self, item: &'a Vec<T>) {
+            self.push(&item[..]);
+        }
+    }
+    impl<'a, T, TC: Push<&'a T> + Len, const N: usize> Push<&'a [T; N]> for Vecs<TC> {
+        fn push(&mut self, item: &'a [T; N]) {
             self.push(&item[..]);
         }
     }
@@ -1694,7 +1726,7 @@ pub mod sums {
             pub somes: TC,
         }
 
-        impl<T: Columnar + Default> Columnar for Option<T> {
+        impl<T: Columnar> Columnar for Option<T> {
             type Ref<'a> = Option<T::Ref<'a>> where T: 'a;
             fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
                 match (&mut *self, other) {
@@ -1708,7 +1740,7 @@ pub mod sums {
             type Container = Options<T::Container>;
         }
 
-        impl<T: Columnar + Default, TC: crate::Container<T>> crate::Container<Option<T>> for Options<TC> {
+        impl<T: Columnar, TC: crate::Container<T>> crate::Container<Option<T>> for Options<TC> {
             type Borrowed<'a> = Options<TC::Borrowed<'a>, &'a [u64], &'a [u64], &'a u64> where TC: 'a, T: 'a;
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
                 Options {

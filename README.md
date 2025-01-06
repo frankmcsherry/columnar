@@ -6,7 +6,7 @@ The crate provides containers for types built out of product (`struct`), sum (`e
 The containers represent a sequence of the input types, but are backed by only a small number of Rust allocations (vectors or slices) even though each instance of the type may have many more allocations.
 Each of the container allocations contains only primitive types, and are easily converted to and from (correctly aligned) binary slices `&[u8]`.
 
-The containers supports efficient random access for reads, and limited forms of random access for writes.
+The containers support efficient random access for reads, and limited forms of random access for writes.
 
 ## An example
 
