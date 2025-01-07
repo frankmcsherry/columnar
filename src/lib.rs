@@ -451,7 +451,17 @@ pub mod bytes {
                 assert!(align <= 8);
                 store.push(bytes.len() as u64);
                 let whole_words = 8 * (bytes.len() / 8);
-                store.extend(bytemuck::try_cast_slice(&bytes[.. whole_words]).unwrap());
+                // We want to extend `store` by `bytes`, but `bytes` may not be `u64` aligned.
+                // In the latter case, init `store` and cast and copy onto it as a byte slice.
+                if let Ok(words) = bytemuck::try_cast_slice(&bytes[.. whole_words]) {
+                    store.extend(words);
+                }
+                else {
+                    let store_len = store.len();
+                    store.resize(store_len + whole_words/8, 0);
+                    let slice = bytemuck::try_cast_slice_mut(&mut store[store_len..]).unwrap();
+                    slice.copy_from_slice(&bytes[.. whole_words]);
+                }
                 let remaining_bytes = &bytes[whole_words..];
                 if !remaining_bytes.is_empty() {
                     let mut remainder = [0u8; 8];
