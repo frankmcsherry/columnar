@@ -333,6 +333,15 @@ pub mod common {
         pub fn len(&self) -> usize { self.upper - self.lower }
     }
 
+    impl<S: Index> PartialEq for Slice<S> where S::Ref: PartialEq {
+        fn eq(&self, other: &Self) -> bool {
+            if self.len() != other.len() { return false; }
+            for i in 0 .. self.len() {
+                if self.get(i) != other.get(i) { return false; }
+            }
+            true
+        }
+    }
     impl<S: Index> PartialEq<[S::Ref]> for Slice<S> where S::Ref: PartialEq {
         fn eq(&self, other: &[S::Ref]) -> bool {
             if self.len() != other.len() { return false; }
@@ -349,6 +358,40 @@ pub mod common {
                 if self.get(i) != other[i] { return false; }
             }
             true
+        }
+    }
+
+    impl<S: Index> Eq for Slice<S> where S::Ref: Eq { }
+
+    impl<S: Index> PartialOrd for Slice<S> where S::Ref: PartialOrd {
+        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+            use std::cmp::Ordering;
+            let len = std::cmp::min(self.len(), other.len());
+
+            for i in 0 .. len {
+                match self.get(i).partial_cmp(&other.get(i)) {
+                    Some(Ordering::Equal) => (),
+                    not_equal => return not_equal,
+                }
+            }
+
+            self.len().partial_cmp(&other.len())
+        }
+    }
+
+    impl<S: Index> Ord for Slice<S> where S::Ref: Ord + Eq {
+        fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+            use std::cmp::Ordering;
+            let len = std::cmp::min(self.len(), other.len());
+
+            for i in 0 .. len {
+                match self.get(i).cmp(&other.get(i)) {
+                    Ordering::Equal => (),
+                    not_equal => return not_equal,
+                }
+            }
+
+            self.len().cmp(&other.len())
         }
     }
 
