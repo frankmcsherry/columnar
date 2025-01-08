@@ -81,7 +81,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
 
         quote! {
             /// Derived columnar reference for a struct.
-            #[derive(Copy, Clone, Debug)]
+            #[derive(Copy, Clone, Debug, PartialEq, Eq)]
             #vis struct #r_ident #ty_gen {
                 #(
                     /// Field for #names.
@@ -121,45 +121,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
 
     };
 
-    let eq = {
-
-        let reference_types = &names.iter().enumerate().map(|(index, name)| {
-            let new_name = format!("R{}", index);
-            syn::Ident::new(&new_name, name.span())
-        }).collect::<Vec<_>>();
-
-        let impl_gen = quote! { < #(#reference_types),* > };
-
-        let where_clause = quote! { where #(#reference_types: Eq),* };
-
-        quote! {
-            impl #impl_gen Eq for #r_ident < #(#reference_types),* >  #where_clause { }
-        }
-
-    };
-
-    let partial_eq_self = {
-
-        let reference_types = &names.iter().enumerate().map(|(index, name)| {
-            let new_name = format!("R{}", index);
-            syn::Ident::new(&new_name, name.span())
-        }).collect::<Vec<_>>();
-
-        let impl_gen = quote! { < #(#reference_types),* > };
-
-        let where_clause = quote! { where #(#reference_types: PartialEq),* };
-
-        quote! {
-            impl #impl_gen PartialEq for #r_ident < #(#reference_types),* >  #where_clause {
-                fn eq(&self, other: &Self) -> bool {
-                    #(self.#names == other.#names) &&*
-                }
-            }
-        }
-
-    };
-
-    let push_own = { 
+    let push_own = {
         let (_impl_gen, ty_gen, _where_clause) = generics.split_for_impl();
         let push = names.iter().map(|name| { quote! { self.#name.push(#name); } });
         
@@ -384,9 +346,6 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         #reference_struct
 
         #partial_eq
-        #partial_eq_self
-
-        #eq
 
         #push_own
         #push_ref
@@ -556,7 +515,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
         quote! {
             /// Reference for an enum.
-            #[derive(Copy, Clone, Debug)]
+            #[derive(Copy, Clone, Debug, PartialEq, Eq)]
             #vis enum #r_ident #ty_gen {
                 #(
                     /// Enum variant for #names.
