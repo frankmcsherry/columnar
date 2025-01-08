@@ -1,6 +1,6 @@
 [package]
 name = "columnar"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Frank McSherry <fmcsherry@me.com>"]
 description = "Conversion from arrays of complex structs to simple structs of arrays"
 edition = "2021"
