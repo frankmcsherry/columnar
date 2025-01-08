@@ -832,6 +832,13 @@ pub mod primitive {
             }
         }
 
+        impl<VC: Len + IndexAs<u64>, WC: Copy + CopyAs<u64>> Index for &Bools<VC, WC> {
+            type Ref = bool;
+            #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
+                (*self).get(index)
+            }
+        }
+
         impl<VC: Push<u64>> Push<bool> for Bools<VC> {
             fn push(&mut self, bit: bool) {
                 self.last_word |= (bit as u64) << self.last_bits;
