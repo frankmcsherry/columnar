@@ -81,7 +81,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
 
         quote! {
             /// Derived columnar reference for a struct.
-            #[derive(Copy, Clone, Debug)]
+            #[derive(Copy, Clone, Debug, PartialEq, Eq)]
             #vis struct #r_ident #ty_gen {
                 #(
                     /// Field for #names.
@@ -121,7 +121,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
 
     };
 
-    let push_own = { 
+    let push_own = {
         let (_impl_gen, ty_gen, _where_clause) = generics.split_for_impl();
         let push = names.iter().map(|name| { quote! { self.#name.push(#name); } });
         
@@ -515,7 +515,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
         quote! {
             /// Reference for an enum.
-            #[derive(Copy, Clone, Debug)]
+            #[derive(Copy, Clone, Debug, PartialEq, Eq)]
             #vis enum #r_ident #ty_gen {
                 #(
                     /// Enum variant for #names.
