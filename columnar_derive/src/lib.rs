@@ -2,19 +2,21 @@ extern crate proc_macro;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, DeriveInput};
+use syn::{parse_macro_input, Attribute, DeriveInput};
 
-#[proc_macro_derive(Columnar)]
+#[proc_macro_derive(Columnar, attributes(columnar))]
 pub fn derive(input: TokenStream) -> TokenStream {
 
     let ast = parse_macro_input!(input as DeriveInput);
     let name = &ast.ident;
 
+    let attr = extract_attr(&ast.attrs);
+
     match ast.data {
         syn::Data::Struct(data_struct) => {
             match data_struct.fields {
                 syn::Fields::Unit => derive_unit_struct(name, &ast.generics, ast.vis),
-                _ => derive_struct(name, &ast.generics, data_struct, ast.vis),
+                _ => derive_struct(name, &ast.generics, data_struct, ast.vis, attr),
             }
         }
         syn::Data::Enum(data_enum) => {
@@ -24,7 +26,16 @@ pub fn derive(input: TokenStream) -> TokenStream {
     }
 }
 
-fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::DataStruct, vis: syn::Visibility) -> proc_macro::TokenStream {
+fn extract_attr(attrs: &[Attribute]) -> Option<proc_macro2::TokenStream> {
+    for attr in attrs {
+        if attr.path().is_ident("columnar") {
+            return Some(attr.parse_args().unwrap());
+        }
+    }
+    None
+}
+
+fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::DataStruct, vis: syn::Visibility, attr: Option<proc_macro2::TokenStream>) -> proc_macro::TokenStream {
 
     let c_name = format!("{}Container", name);
     let c_ident = syn::Ident::new(&c_name, name.span());
@@ -79,9 +90,16 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
     
         let ty_gen = quote! { < #(#reference_types),* > };
 
+        let attr = if let Some(attr) = attr {
+            quote! { #[#attr] }
+        } else {
+            quote! {}
+        };
+
         quote! {
             /// Derived columnar reference for a struct.
             #[derive(Copy, Clone, Debug)]
+            #attr
             #vis struct #r_ident #ty_gen {
                 #(
                     /// Field for #names.
