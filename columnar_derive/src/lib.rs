@@ -15,12 +15,12 @@ pub fn derive(input: TokenStream) -> TokenStream {
     match ast.data {
         syn::Data::Struct(data_struct) => {
             match data_struct.fields {
-                syn::Fields::Unit => derive_unit_struct(name, &ast.generics, ast.vis),
+                syn::Fields::Unit => derive_unit_struct(name, &ast.generics, ast.vis, attr),
                 _ => derive_struct(name, &ast.generics, data_struct, ast.vis, attr),
             }
         }
         syn::Data::Enum(data_enum) => {
-            derive_enum(name, &ast.generics, data_enum, ast.vis)
+            derive_enum(name, &ast.generics, data_enum, ast.vis, attr)
         }
         syn::Data::Union(_) => unimplemented!("Unions are unsupported by Columnar"),
     }
@@ -383,10 +383,14 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
 }
 
 // TODO: Do we need to use the generics?
-fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Visibility) -> proc_macro::TokenStream {
+fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Visibility, attr: Option<proc_macro2::TokenStream>) -> proc_macro::TokenStream {
     
     let c_name = format!("{}Container", name);
     let c_ident = syn::Ident::new(&c_name, name.span());
+
+    if attr.is_some() {
+        panic!("Unit structs do not support attributes");
+    }
 
     quote! {
 
@@ -469,7 +473,7 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
 /// The derived container for an `enum` type will be a struct with containers for each field of each variant, plus an offset container and a discriminant container.
 /// Its index `Ref` type will be an enum with parallel variants, each containing the index `Ref` types of the corresponding variant containers.
 #[allow(unused)]
-fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::DataEnum, vis: syn::Visibility) -> proc_macro::TokenStream {
+fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::DataEnum, vis: syn::Visibility, attr: Option<proc_macro2::TokenStream>) -> proc_macro::TokenStream {
 
     if data_enum.variants.iter().all(|variant| variant.fields.is_empty()) {
         return derive_tags(name, generics, data_enum, vis);
@@ -531,9 +535,17 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
     
         let ty_gen = quote! { < #(#reference_types),* > };
 
+        let attr = if let Some(attr) = attr {
+            quote! { #[#attr] }
+        } else {
+            quote! {}
+        };
+
+
         quote! {
             /// Reference for an enum.
             #[derive(Copy, Clone, Debug)]
+            #attr
             #vis enum #r_ident #ty_gen {
                 #(
                     /// Enum variant for #names.

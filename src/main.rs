@@ -224,11 +224,13 @@ mod test {
 
     // Tests derived implementations for a struct with unnamed fields.
     #[derive(Columnar, Debug)]
+    #[columnar(derive(Ord, PartialOrd, PartialEq, Eq))]
     struct Test2<T: Copy> (Vec<T>, i16) where T: Clone;
 
     // Tests derived implementations for an enum with valuable variants,
     // but including unit variants.
     #[derive(Columnar, Debug)]
+    #[columnar(derive(Ord, PartialOrd, PartialEq, Eq))]
     pub enum Test3<T> {
         Foo(Vec<T>, u8),
         Bar(i16),
@@ -258,6 +260,8 @@ mod test {
         fn is_ord_eq<T: Ord + PartialOrd + PartialEq + Eq>() {}
         is_ord_eq::<Test6Reference<i16>>();
         is_ord_eq::<Test6Reference<&i16>>();
+
+        is_ord_eq::<Test3Reference<u8, u8, u8>>();
     }
 
     #[test]
