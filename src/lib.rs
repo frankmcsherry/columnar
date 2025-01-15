@@ -193,7 +193,7 @@ pub mod common {
                     slice: self,
                 }
             }
-            fn into_iter(self) -> IterOwn<Self> where Self: Sized {
+            fn into_iter(self) -> impl Iterator<Item=Self::Ref> where Self: Sized + Len {
                 IterOwn {
                     index: 0,
                     slice: self,
@@ -326,8 +326,8 @@ pub mod common {
             Self { lower, upper, slice: self.slice }
         }
         pub fn new(lower: u64, upper: u64, slice: S) -> Self {
-            let lower: usize = lower.try_into().unwrap();
-            let upper: usize = upper.try_into().unwrap();
+            let lower: usize = lower.try_into().expect("slice bounds must fit in `usize`");
+            let upper: usize = upper.try_into().expect("slice bounds must fit in `usize`");
             Self { lower, upper, slice }
         }
         pub fn len(&self) -> usize { self.upper - self.lower }
@@ -459,16 +459,17 @@ pub mod bytes {
                 else {
                     let store_len = store.len();
                     store.resize(store_len + whole_words/8, 0);
-                    let slice = bytemuck::try_cast_slice_mut(&mut store[store_len..]).unwrap();
+                    let slice = bytemuck::try_cast_slice_mut(&mut store[store_len..]).expect("&[u64] should convert to &[u8]");
                     slice.copy_from_slice(&bytes[.. whole_words]);
                 }
                 let remaining_bytes = &bytes[whole_words..];
                 if !remaining_bytes.is_empty() {
-                    let mut remainder = [0u8; 8];
+                    let mut remainder = 0u64;
+                    let transmute: &mut [u8] = bytemuck::try_cast_slice_mut(std::slice::from_mut(&mut remainder)).expect("&[u64] should convert to &[u8]");
                     for (i, byte) in remaining_bytes.iter().enumerate() {
-                        remainder[i] = *byte;
+                        transmute[i] = *byte;
                     }
-                    store.push(bytemuck::try_cast_slice(&remainder).unwrap()[0]);
+                    store.push(remainder);
                 }
             }
         }
@@ -493,7 +494,7 @@ pub mod bytes {
                     let length = *length as usize;
                     self.store = &self.store[1..];
                     let whole_words = if length % 8 == 0 { length / 8 } else { length / 8 + 1 };
-                    let bytes: &[u8] = bytemuck::try_cast_slice(&self.store[..whole_words]).unwrap();
+                    let bytes: &[u8] = bytemuck::try_cast_slice(&self.store[..whole_words]).expect("&[u64] should convert to &[u8]");
                     self.store = &self.store[whole_words..];
                     Some(&bytes[..length])
                 } else {
@@ -569,7 +570,8 @@ pub mod primitive {
             }
             impl<'a> crate::FromBytes<'a> for &'a [$index_type] {
                 fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-                    bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()
+                    // We use `unwrap()` here in order to panic with the `bytemuck` error, which may be informative.
+                    bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()
                 }
             }
         )* }
@@ -608,17 +610,17 @@ pub mod primitive {
         }
         impl<CV: IndexAs<u64>> Index for Usizes<CV> {
             type Ref = usize;
-            #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().unwrap() }
+            #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().expect("Usizes values should fit in `usize`") }
         }
         impl<'a, CV: IndexAs<u64>> Index for &'a Usizes<CV> {
             type Ref = usize;
-            #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().unwrap() }
+            #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().expect("Usizes values should fit in `usize`") }
         }
         impl Push<usize> for Usizes {
-            fn push(&mut self, item: usize) { self.values.push(item.try_into().unwrap()) }
+            fn push(&mut self, item: usize) { self.values.push(item.try_into().expect("usize must fit in a u64")) }
         }
         impl Push<&usize> for Usizes {
-            fn push(&mut self, item: &usize) { self.values.push((*item).try_into().unwrap()) }
+            fn push(&mut self, item: &usize) { self.values.push((*item).try_into().expect("usize must fit in a u64")) }
         }
         impl<CV: Clear> Clear for Usizes<CV> { fn clear(&mut self) { self.values.clear() }}
 
@@ -664,17 +666,17 @@ pub mod primitive {
         }
         impl<CV: IndexAs<i64>> Index for Isizes<CV> {
             type Ref = isize;
-            #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().unwrap() }
+            #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().expect("Isizes values should fit in `isize`") }
         }
         impl<'a, CV: IndexAs<i64>> Index for &'a Isizes<CV> {
             type Ref = isize;
-            #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().unwrap() }
+            #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().expect("Isizes values should fit in `isize`") }
         }
         impl Push<isize> for Isizes {
-            fn push(&mut self, item: isize) { self.values.push(item.try_into().unwrap()) }
+            fn push(&mut self, item: isize) { self.values.push(item.try_into().expect("isize must fit in a i64")) }
         }
         impl Push<&isize> for Isizes {
-            fn push(&mut self, item: &isize) { self.values.push((*item).try_into().unwrap()) }
+            fn push(&mut self, item: &isize) { self.values.push((*item).try_into().expect("isize must fit in a i64")) }
         }
         impl<CV: Clear> Clear for Isizes<CV> { fn clear(&mut self) { self.values.clear() }}
 
@@ -757,7 +759,7 @@ pub mod primitive {
         }
         impl<'a> crate::FromBytes<'a> for crate::primitive::Empties<&'a u64> {
             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-                Self { count: &bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0], empty: () }
+                Self { count: &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0], empty: () }
             }
         }
     }
@@ -808,8 +810,8 @@ pub mod primitive {
         impl<'a, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for crate::primitive::Bools<VC, &'a u64> {
             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
                 let values = crate::FromBytes::from_bytes(bytes);
-                let last_word = &bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0];
-                let last_bits = &bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0];
+                let last_word = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
+                let last_bits = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
                 Self { values, last_word, last_bits }
             }
         }
@@ -1022,9 +1024,9 @@ pub mod string {
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
             let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
             let upper = self.bounds.index_as(index);
-            let lower: usize = lower.try_into().unwrap();
-            let upper: usize = upper.try_into().unwrap();
-            std::str::from_utf8(&self.values[lower .. upper]).unwrap()
+            let lower: usize = lower.try_into().expect("bounds must fit in `usize`");
+            let upper: usize = upper.try_into().expect("bounds must fit in `usize`");
+            std::str::from_utf8(&self.values[lower .. upper]).expect("&[u8] must be valid utf8")
         }
     }
     impl<'a, BC: Len+IndexAs<u64>> Index for &'a Strings<BC, Vec<u8>> {
@@ -1032,9 +1034,9 @@ pub mod string {
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
             let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
             let upper = self.bounds.index_as(index);
-            let lower: usize = lower.try_into().unwrap();
-            let upper: usize = upper.try_into().unwrap();
-            std::str::from_utf8(&self.values[lower .. upper]).unwrap()
+            let lower: usize = lower.try_into().expect("bounds must fit in `usize`");
+            let upper: usize = upper.try_into().expect("bounds must fit in `usize`");
+            std::str::from_utf8(&self.values[lower .. upper]).expect("&[u8] must be valid utf8")
         }
     }
 
