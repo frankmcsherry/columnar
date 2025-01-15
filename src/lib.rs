@@ -193,7 +193,7 @@ pub mod common {
                     slice: self,
                 }
             }
-            fn into_iter(self) -> impl Iterator<Item=Self::Ref> where Self: Sized + Len {
+            fn into_iter(self) -> IterOwn<Self> where Self: Sized {
                 IterOwn {
                     index: 0,
                     slice: self,
