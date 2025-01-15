@@ -1,7 +1,8 @@
 use bencher::{benchmark_group, benchmark_main, Bencher};
 use columnar::{Columnar, Container, Clear, AsBytes, FromBytes};
+use serde::{Serialize, Deserialize};
 
-fn bench_new(b: &mut Bencher) {
+fn goser_new(b: &mut Bencher) {
     b.iter(|| {
         for _ in 0 .. 1024 {
             Log::new();
@@ -9,7 +10,7 @@ fn bench_new(b: &mut Bencher) {
     });
 }
 
-fn bench_push(b: &mut Bencher) {
+fn goser_push(b: &mut Bencher) {
     use columnar::Push;
     let log = Log::new();
     let mut container = <Log as Columnar>::Container::default();
@@ -28,7 +29,19 @@ fn bench_push(b: &mut Bencher) {
     });
 }
 
-fn bench_encode(b: &mut Bencher) {
+fn goser_clone(b: &mut Bencher) {
+    let log = Log::new();
+    let mut container = Vec::with_capacity(1024);
+    b.iter(|| {
+        container.clear();
+        for _ in 0..1024 {
+            container.push(log.clone());
+        }
+        bencher::black_box(&container);
+    });
+}
+
+fn goser_encode(b: &mut Bencher) {
     use columnar::Push;
     let log = Log::new();
     let mut container = <Log as Columnar>::Container::default();
@@ -45,7 +58,7 @@ fn bench_encode(b: &mut Bencher) {
     });
 }
 
-fn bench_decode(b: &mut Bencher) {
+fn goser_decode(b: &mut Bencher) {
     use columnar::Push;
     let log = Log::new();
     let mut words = vec![];
@@ -62,7 +75,36 @@ fn bench_decode(b: &mut Bencher) {
     });
 }
 
-#[derive(Eq, PartialEq, Columnar)]
+fn goser_encode_bincode(b: &mut Bencher) {
+    let mut container = Vec::with_capacity(1024);
+    for _ in 0..1024 {
+        container.push(Log::new());
+    }
+    let mut bytes = vec![];
+    ::bincode::serialize_into(&mut bytes, &container).unwrap();
+    b.bytes = bytes.len() as u64;
+    b.iter(|| {
+        bytes.clear();
+        ::bincode::serialize_into(&mut bytes, &container).unwrap();
+        bencher::black_box(&bytes);
+    });
+}
+
+fn goser_decode_bincode(b: &mut Bencher) {
+    let mut container = Vec::with_capacity(1024);
+    for _ in 0..1024 {
+        container.push(Log::new());
+    }
+    let mut bytes = vec![];
+    ::bincode::serialize_into(&mut bytes, &container).unwrap();
+    b.bytes = bytes.len() as u64;
+    b.iter(|| {
+        let result: Vec<Log> = ::bincode::deserialize(&bytes).unwrap();
+        bencher::black_box(result);
+    });
+}
+
+#[derive(Clone, Eq, PartialEq, Columnar, Serialize, Deserialize)]
 pub struct Http {
     protocol: HttpProtocol,
     status: u32,
@@ -76,7 +118,7 @@ pub struct Http {
 }
 
 #[allow(non_camel_case_types)]
-#[derive(Eq, PartialEq, Columnar)]
+#[derive(Clone, Eq, PartialEq, Columnar, Serialize, Deserialize)]
 pub enum HttpProtocol {
     HTTP_PROTOCOL_UNKNOWN,
     HTTP10,
@@ -84,7 +126,7 @@ pub enum HttpProtocol {
 }
 
 #[allow(non_camel_case_types)]
-#[derive(Eq, PartialEq, Columnar)]
+#[derive(Clone, Eq, PartialEq, Columnar, Serialize, Deserialize)]
 pub enum HttpMethod {
     METHOD_UNKNOWN,
     GET,
@@ -100,7 +142,7 @@ pub enum HttpMethod {
 }
 
 #[allow(non_camel_case_types)]
-#[derive(Eq, PartialEq, Columnar)]
+#[derive(Clone, Eq, PartialEq, Columnar, Serialize, Deserialize)]
 pub enum CacheStatus {
     CACHESTATUS_UNKNOWN,
     Miss,
@@ -108,7 +150,7 @@ pub enum CacheStatus {
     Hit,
 }
 
-#[derive(Eq, PartialEq, Columnar)]
+#[derive(Clone, Eq, PartialEq, Columnar, Serialize, Deserialize)]
 pub struct Origin {
     ip: String,
     port: u32,
@@ -117,7 +159,7 @@ pub struct Origin {
 }
 
 #[allow(non_camel_case_types)]
-#[derive(Eq, PartialEq, Columnar)]
+#[derive(Clone, Eq, PartialEq, Columnar, Serialize, Deserialize)]
 pub enum OriginProtocol {
     ORIGIN_PROTOCOL_UNKNOWN,
     HTTP,
@@ -125,7 +167,7 @@ pub enum OriginProtocol {
 }
 
 #[allow(non_camel_case_types)]
-#[derive(Eq, PartialEq, Columnar)]
+#[derive(Clone, Eq, PartialEq, Columnar, Serialize, Deserialize)]
 pub enum ZonePlan {
     ZONEPLAN_UNKNOWN,
     FREE,
@@ -134,7 +176,7 @@ pub enum ZonePlan {
     ENT,
 }
 
-#[derive(Eq, PartialEq, Columnar)]
+#[derive(Clone, Eq, PartialEq, Columnar, Serialize, Deserialize)]
 pub enum Country {
     UNKNOWN,
     A1,
@@ -394,7 +436,7 @@ pub enum Country {
     ZW,
 }
 
-#[derive(Eq, PartialEq, Columnar)]
+#[derive(Clone, Eq, PartialEq, Columnar, Serialize, Deserialize)]
 pub struct Log {
     timestamp: i64,
     zone_id: u32,
@@ -445,10 +487,13 @@ impl Log {
 }
 
 benchmark_group!(
-    serde,
-    bench_new,
-    bench_push,
-    bench_encode,
-    bench_decode,
+    goser,
+    goser_new,
+    goser_push,
+    goser_clone,
+    goser_encode,
+    goser_decode,
+    goser_encode_bincode,
+    goser_decode_bincode,
 );
-benchmark_main!(serde);
+benchmark_main!(goser);

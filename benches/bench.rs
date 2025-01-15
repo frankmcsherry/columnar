@@ -45,6 +45,14 @@ fn _bench_copy<T: Columnar+Eq>(bencher: &mut Bencher, record: T) where T::Contai
     // prepare encoded data for bencher.bytes
     let mut arena: T::Container = Default::default();
 
+    // get sizing information for throughput reports.
+    for _ in 0 .. 1024 {
+        arena.push(&record);
+    }
+    use columnar::{AsBytes, Container};
+    bencher.bytes = 8 * arena.borrow().length_in_words() as u64;
+    arena.clear();
+
     bencher.iter(|| {
         arena.clear();
         for _ in 0 .. 1024 {
