@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2](https://github.com/frankmcsherry/columnar/compare/columnar-v0.2.1...columnar-v0.2.2) - 2025-01-15
+
+### Other
+
+- Merge pull request [#22](https://github.com/frankmcsherry/columnar/pull/22) from antiguru/inline_as_bytes
+- Revert a change to into_iter
+
 ## [0.2.1](https://github.com/frankmcsherry/columnar/compare/columnar-v0.2.0...columnar-v0.2.1) - 2025-01-15
 
 ### Other
