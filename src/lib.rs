@@ -607,6 +607,7 @@ pub mod primitive {
             impl crate::HeapSize for $index_type { }
 
             impl<'a> crate::AsBytes<'a> for &'a [$index_type] {
+                #[inline(always)]
                 fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
                     std::iter::once((std::mem::align_of::<$index_type>() as u64, bytemuck::cast_slice(&self[..])))
                 }
@@ -674,6 +675,7 @@ pub mod primitive {
         }
 
         impl<'a, CV: crate::AsBytes<'a>> crate::AsBytes<'a> for crate::primitive::Usizes<CV> {
+            #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
                 self.values.as_bytes()
             }
@@ -730,6 +732,7 @@ pub mod primitive {
         }
 
         impl<'a, CV: crate::AsBytes<'a>> crate::AsBytes<'a> for crate::primitive::Isizes<CV> {
+            #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
                 self.values.as_bytes()
             }
@@ -796,6 +799,7 @@ pub mod primitive {
         }
 
         impl<'a> crate::AsBytes<'a> for crate::primitive::Empties<&'a u64> {
+            #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
                 std::iter::once((8, bytemuck::cast_slice(std::slice::from_ref(self.count))))
             }
@@ -843,6 +847,7 @@ pub mod primitive {
         }
 
         impl<'a, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for crate::primitive::Bools<VC, &'a u64> {
+            #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
                 self.values.as_bytes()
                     .chain(std::iter::once((std::mem::align_of::<u64>() as u64, bytemuck::cast_slice(std::slice::from_ref(self.last_word)))))
@@ -949,6 +954,7 @@ pub mod primitive {
         }
 
         impl<'a, SC: crate::AsBytes<'a>, NC: crate::AsBytes<'a>> crate::AsBytes<'a> for crate::primitive::Durations<SC, NC> {
+            #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
                 self.seconds.as_bytes().chain(self.nanoseconds.as_bytes())
             }
@@ -1052,6 +1058,7 @@ pub mod string {
     }
 
     impl<'a, BC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for Strings<BC, VC> {
+        #[inline(always)]
         fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
             self.bounds.as_bytes().chain(self.values.as_bytes())
         }
@@ -1185,6 +1192,7 @@ pub mod vector {
     }
 
     impl<'a, TC: crate::AsBytes<'a>, BC: crate::AsBytes<'a>> crate::AsBytes<'a> for Vecs<TC, BC> {
+        #[inline(always)]
         fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
             self.bounds.as_bytes().chain(self.values.as_bytes())
         }
@@ -1310,6 +1318,7 @@ pub mod tuple {
 
             #[allow(non_snake_case)]
             impl<'a, $($name: crate::AsBytes<'a>),*> crate::AsBytes<'a> for ($($name,)*) {
+                #[inline(always)]
                 fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
                     let ($($name,)*) = self;
                     let iter = None.into_iter();
@@ -1473,6 +1482,7 @@ pub mod sums {
         }
 
         impl<'a, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for RankSelect<CC, VC, &'a u64> {
+            #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
                 self.counts.as_bytes().chain(self.values.as_bytes())
             }
@@ -1624,6 +1634,7 @@ pub mod sums {
         }
 
         impl<'a, SC: crate::AsBytes<'a>, TC: crate::AsBytes<'a>, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for Results<SC, TC, CC, VC, &'a u64> {
+            #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
                 self.indexes.as_bytes().chain(self.oks.as_bytes()).chain(self.errs.as_bytes())
             }
@@ -1813,6 +1824,7 @@ pub mod sums {
         }
 
         impl<'a, TC: crate::AsBytes<'a>, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for Options<TC, CC, VC, &'a u64> {
+            #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
                 self.indexes.as_bytes().chain(self.somes.as_bytes())
             }

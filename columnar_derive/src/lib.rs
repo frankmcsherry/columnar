@@ -286,6 +286,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         quote! {
             impl #impl_gen ::columnar::AsBytes<'a> for #c_ident #ty_gen #where_clause {
                 // type Borrowed<'columnar> = #c_ident < #(<#container_types as ::columnar::AsBytes>::Borrowed<'columnar>,)*>;
+                #[inline(always)]
                 fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
                     let iter = None.into_iter();
                     #( let iter = iter.chain(self.#names.as_bytes()); )*
@@ -780,6 +781,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         
         quote! {
             impl #impl_gen ::columnar::AsBytes<'a> for #c_ident #ty_gen #where_clause {
+                #[inline(always)]
                 fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
                     let iter = None.into_iter();
                     #( let iter = iter.chain(self.#names.as_bytes()); )*
@@ -1008,6 +1010,7 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
 
         impl<'a, CVar: ::columnar::AsBytes<'a>> ::columnar::AsBytes<'a> for #c_ident <CVar> {
             // type Borrowed<'columnar> = #c_ident < <CVar as ::columnar::AsBytes>::Borrowed<'columnar> >;
+            #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
                 self.variant.as_bytes()
             }
