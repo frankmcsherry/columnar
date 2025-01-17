@@ -155,6 +155,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
 
         quote! {
             impl #impl_gen ::columnar::Push<#name #ty_gen> for #c_ident < #(#container_types),* >  #where_clause2 {
+                #[inline]
                 fn push(&mut self, item: #name #ty_gen) {
                     #destructure_self
                     #(#push)*
@@ -178,6 +179,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
 
         quote! {
             impl #impl_gen ::columnar::Push<&'columnar #name #ty_gen> for #c_ident < #(#container_types),* >  #where_clause2 {
+                #[inline]
                 fn push(&mut self, item: &'columnar #name #ty_gen) {
                     #destructure_self
                     #(#push)*
@@ -205,6 +207,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
 
         quote! {
             impl #impl_gen ::columnar::Push<#index_type> for #c_ident < #(#container_types),* > #where_clause {
+                #[inline]
                 fn push(&mut self, item: #index_type) {
                     #destructure_self
                     #(#push)*
@@ -289,7 +292,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
                 #[inline(always)]
                 fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
                     let iter = None.into_iter();
-                    #( let iter = iter.chain(self.#names.as_bytes()); )*
+                    #( let iter = columnar::chain(iter, self.#names.as_bytes()); )*
                     iter
                 }
             }
@@ -403,12 +406,14 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
         }
 
         impl ::columnar::Push<#name> for #c_ident {
+            #[inline]
             fn push(&mut self, _item: #name) {
                 self.count += 1;
             }
         }
 
         impl<'columnar> ::columnar::Push<&'columnar #name> for #c_ident {
+            #[inline]
             fn push(&mut self, _item: &'columnar #name) {
                 self.count += 1;
             }
@@ -443,6 +448,7 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
 
         impl<'a> ::columnar::AsBytes<'a> for #c_ident <&'a u64> {
             // type Borrowed<'columnar> = #c_ident;
+            #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
                 std::iter::once((8, bytemuck::cast_slice(std::slice::from_ref(self.count))))
             }
@@ -601,6 +607,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
         quote! {
             impl #impl_gen ::columnar::Push<#name #ty_gen> for #c_ident < #(#container_types),* > #where_clause {
+                #[inline]
                 fn push(&mut self, item: #name #ty_gen) {
                     match item {
                         #( #push )*
@@ -655,6 +662,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
         quote! {
             impl #impl_gen ::columnar::Push<&'columnar #name #ty_gen> for #c_ident < #(#container_types),* > #where_clause {
+                #[inline]
                 fn push(&mut self, item: &'columnar #name #ty_gen) {
                     match item {
                         #( #push )*
@@ -681,6 +689,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
         quote! {
             impl #impl_gen ::columnar::Push<#index_type> for #c_ident < #(#container_types),* > #where_clause {
+                #[inline]
                 fn push(&mut self, item: #index_type) {
                     match item {
                         #( 
@@ -784,9 +793,9 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                 #[inline(always)]
                 fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
                     let iter = None.into_iter();
-                    #( let iter = iter.chain(self.#names.as_bytes()); )*
-                    let iter = iter.chain(self.variant.as_bytes());
-                    let iter = iter.chain(self.offset.as_bytes());
+                    #( let iter = columnar::chain(iter,self.#names.as_bytes()); )*
+                    let iter = columnar::chain(iter, self.variant.as_bytes());
+                    let iter = columnar::chain(iter, self.offset.as_bytes());
                     iter
                 }
             }
@@ -961,6 +970,7 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
         }
 
         impl ::columnar::Push<#name> for #c_ident {
+            #[inline]
             fn push(&mut self, item: #name) {
                 match item {
                     #( #name::#names => self.variant.push(#indices), )*
@@ -969,6 +979,7 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
         }
 
         impl<'columnar> ::columnar::Push<&'columnar #name> for #c_ident {
+            #[inline]
             fn push(&mut self, item: &'columnar #name) {
                 match *item {
                     #( #name::#names => self.variant.push(#indices), )*
