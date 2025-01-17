@@ -851,7 +851,7 @@ pub mod primitive {
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
                 self.values.as_bytes()
                     .chain(std::iter::once((std::mem::align_of::<u64>() as u64, bytemuck::cast_slice(std::slice::from_ref(self.last_word)))))
-                    .chain(std::iter::once((1, bytemuck::cast_slice(std::slice::from_ref(self.last_bits)))))
+                    .chain(std::iter::once((std::mem::align_of::<u64>() as u64, bytemuck::cast_slice(std::slice::from_ref(self.last_bits)))))
             }
         }
 
