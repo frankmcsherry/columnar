@@ -702,7 +702,7 @@ pub mod bytes {
         }
 
         pub fn write<'a, A, W>(mut writer: W, iter: &A) -> std::io::Result<()>
-        where 
+        where
             A: AsBytes<'a>,
             W: std::io::Write,
         {
@@ -891,9 +891,11 @@ pub mod primitive {
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().expect("Usizes values should fit in `usize`") }
         }
         impl Push<usize> for Usizes {
+            #[inline]
             fn push(&mut self, item: usize) { self.values.push(item.try_into().expect("usize must fit in a u64")) }
         }
         impl Push<&usize> for Usizes {
+            #[inline]
             fn push(&mut self, item: &usize) { self.values.push((*item).try_into().expect("usize must fit in a u64")) }
         }
         impl<CV: Clear> Clear for Usizes<CV> { fn clear(&mut self) { self.values.clear() }}
@@ -948,9 +950,11 @@ pub mod primitive {
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().expect("Isizes values should fit in `isize`") }
         }
         impl Push<isize> for Isizes {
+            #[inline]
             fn push(&mut self, item: isize) { self.values.push(item.try_into().expect("isize must fit in a i64")) }
         }
         impl Push<&isize> for Isizes {
+            #[inline]
             fn push(&mut self, item: &isize) { self.values.push((*item).try_into().expect("isize must fit in a i64")) }
         }
         impl<CV: Clear> Clear for Isizes<CV> { fn clear(&mut self) { self.values.clear() }}
@@ -1014,10 +1018,12 @@ pub mod primitive {
         }
         impl Push<()> for Empties {
             // TODO: check for overflow?
+            #[inline(always)]
             fn push(&mut self, _item: ()) { self.count += 1; }
         }
         impl Push<&()> for Empties {
             // TODO: check for overflow?
+            #[inline(always)]
             fn push(&mut self, _item: &()) { self.count += 1; }
         }
 
@@ -1079,9 +1085,13 @@ pub mod primitive {
         impl<'a, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for crate::primitive::Bools<VC, &'a u64> {
             #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                self.values.as_bytes()
-                    .chain(std::iter::once((std::mem::align_of::<u64>() as u64, bytemuck::cast_slice(std::slice::from_ref(self.last_word)))))
-                    .chain(std::iter::once((std::mem::align_of::<u64>() as u64, bytemuck::cast_slice(std::slice::from_ref(self.last_bits)))))
+                crate::chain_one(
+                    crate::chain_one(
+                        self.values.as_bytes(),
+                        (align_of::<u64>() as u64, bytemuck::cast_slice(std::slice::from_ref(self.last_word)))
+                    ),
+                    (align_of::<u64>() as u64, bytemuck::cast_slice(std::slice::from_ref(self.last_bits)))
+                )
             }
         }
 
@@ -1120,6 +1130,7 @@ pub mod primitive {
         }
 
         impl<VC: Push<u64>> Push<bool> for Bools<VC> {
+            #[inline]
             fn push(&mut self, bit: bool) {
                 self.last_word |= (bit as u64) << self.last_bits;
                 self.last_bits += 1;
@@ -1132,6 +1143,7 @@ pub mod primitive {
             }
         }
         impl<'a, VC: Push<u64>> Push<&'a bool> for Bools<VC> {
+            #[inline(always)]
             fn push(&mut self, bit: &'a bool) {
                 self.push(*bit)
             }
@@ -1186,7 +1198,10 @@ pub mod primitive {
         impl<'a, SC: crate::AsBytes<'a>, NC: crate::AsBytes<'a>> crate::AsBytes<'a> for crate::primitive::Durations<SC, NC> {
             #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                self.seconds.as_bytes().chain(self.nanoseconds.as_bytes())
+                crate::chain(
+                    self.seconds.as_bytes(),
+                    self.nanoseconds.as_bytes()
+                )
             }
         }
         impl<'a, SC: crate::FromBytes<'a>, NC: crate::FromBytes<'a>> crate::FromBytes<'a> for crate::primitive::Durations<SC, NC> {
@@ -1210,17 +1225,20 @@ pub mod primitive {
         }
 
         impl<SC: Push<u64>, NC: Push<u32>> Push<std::time::Duration> for Durations<SC, NC> {
+            #[inline]
             fn push(&mut self, item: std::time::Duration) {
                 self.seconds.push(item.as_secs());
                 self.nanoseconds.push(item.subsec_nanos());
             }
         }
         impl<'a, SC: Push<u64>, NC: Push<u32>> Push<&'a std::time::Duration> for Durations<SC, NC> {
+            #[inline]
             fn push(&mut self, item: &'a std::time::Duration) {
                 self.push(*item)
             }
         }
         impl<'a, SC: Push<&'a u64>, NC: Push<&'a u32>> Push<(&'a u64, &'a u32)> for Durations<SC, NC> {
+            #[inline]
             fn push(&mut self, item: (&'a u64, &'a u32)) {
                 self.seconds.push(item.0);
                 self.nanoseconds.push(item.1);
@@ -1290,7 +1308,10 @@ pub mod string {
     impl<'a, BC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for Strings<BC, VC> {
         #[inline(always)]
         fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-            self.bounds.as_bytes().chain(self.values.as_bytes())
+            crate::chain(
+                self.bounds.as_bytes(),
+                self.values.as_bytes()
+            )
         }
     }
     impl<'a, BC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for Strings<BC, VC> {
@@ -1334,6 +1355,7 @@ pub mod string {
         }
     }
     impl<BC: Push<u64>> Push<&str> for Strings<BC> {
+        #[inline]
         fn push(&mut self, item: &str) {
             self.values.extend_from_slice(item.as_bytes());
             self.bounds.push(self.values.len() as u64);
@@ -1438,7 +1460,10 @@ pub mod vector {
     impl<'a, TC: crate::AsBytes<'a>, BC: crate::AsBytes<'a>> crate::AsBytes<'a> for Vecs<TC, BC> {
         #[inline(always)]
         fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-            self.bounds.as_bytes().chain(self.values.as_bytes())
+            crate::chain(
+                self.bounds.as_bytes(),
+                self.values.as_bytes()
+            )
         }
     }
     impl<'a, TC: crate::FromBytes<'a>, BC: crate::FromBytes<'a>> crate::FromBytes<'a> for Vecs<TC, BC> {
@@ -1451,6 +1476,7 @@ pub mod vector {
     }
 
     impl<TC: Len> Vecs<TC> {
+        #[inline]
         pub fn push_iter<I>(&mut self, iter: I) where I: IntoIterator, TC: Push<I::Item> {
             self.values.extend(iter);
             self.bounds.push(self.values.len() as u64);
@@ -1491,6 +1517,7 @@ pub mod vector {
     }
 
     impl<I: IntoIterator, TC: Push<I::Item> + Len> Push<I> for Vecs<TC> {
+        #[inline]
         fn push(&mut self, item: I) {
             self.values.extend(item.into_iter());
             self.bounds.push(self.values.len() as u64);
@@ -1551,7 +1578,7 @@ pub mod tuple {
                 fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
                     let ($($name,)*) = self;
                     let iter = None.into_iter();
-                    $( let iter = iter.chain($name.as_bytes()); )*
+                    $( let iter = crate::chain(iter, $name.as_bytes()); )*
                     iter
                 }
             }
@@ -1606,6 +1633,7 @@ pub mod tuple {
                 }
             }
             impl<$($name2, $name: Push<$name2>),*> Push<($($name2,)*)> for ($($name,)*) {
+                #[inline]
                 fn push(&mut self, item: ($($name2,)*)) {
                     let ($($name,)*) = self;
                     let ($($name2,)*) = item;
@@ -1613,6 +1641,7 @@ pub mod tuple {
                 }
             }
             impl<'a, $($name2, $name: Push<&'a $name2>),*> Push<&'a ($($name2,)*)> for ($($name,)*) {
+                #[inline]
                 fn push(&mut self, item: &'a ($($name2,)*)) {
                     let ($($name,)*) = self;
                     let ($($name2,)*) = item;
@@ -1713,7 +1742,10 @@ pub mod sums {
         impl<'a, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for RankSelect<CC, VC, &'a u64> {
             #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                self.counts.as_bytes().chain(self.values.as_bytes())
+                crate::chain(
+                    self.counts.as_bytes(),
+                    self.values.as_bytes()
+                )
             }
         }
         impl<'a, CC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for RankSelect<CC, VC, &'a u64> {
@@ -1865,7 +1897,13 @@ pub mod sums {
         impl<'a, SC: crate::AsBytes<'a>, TC: crate::AsBytes<'a>, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for Results<SC, TC, CC, VC, &'a u64> {
             #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                self.indexes.as_bytes().chain(self.oks.as_bytes()).chain(self.errs.as_bytes())
+                crate::chain(
+                    crate::chain(
+                        self.indexes.as_bytes(),
+                        self.oks.as_bytes()
+                    ),
+                    self.errs.as_bytes()
+                )
             }
         }
         impl<'a, SC: crate::FromBytes<'a>, TC: crate::FromBytes<'a>, CC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for Results<SC, TC, CC, VC, &'a u64> {
@@ -1930,6 +1968,7 @@ pub mod sums {
         }
 
         impl<S, SC: Push<S>, T, TC: Push<T>> Push<Result<S, T>> for Results<SC, TC> {
+            #[inline]
             fn push(&mut self, item: Result<S, T>) {
                 match item {
                     Ok(item) => {
@@ -1944,6 +1983,7 @@ pub mod sums {
             }
         }
         impl<'a, S, SC: Push<&'a S>, T, TC: Push<&'a T>> Push<&'a Result<S, T>> for Results<SC, TC> {
+            #[inline]
             fn push(&mut self, item: &'a Result<S, T>) {
                 match item {
                     Ok(item) => {
@@ -2055,7 +2095,10 @@ pub mod sums {
         impl<'a, TC: crate::AsBytes<'a>, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for Options<TC, CC, VC, &'a u64> {
             #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                self.indexes.as_bytes().chain(self.somes.as_bytes())
+                crate::chain(
+                    self.indexes.as_bytes(),
+                    self.somes.as_bytes()
+                )
             }
         }
 
@@ -2106,6 +2149,7 @@ pub mod sums {
         }
 
         impl<T, TC: Push<T> + Len> Push<Option<T>> for Options<TC> {
+            #[inline]
             fn push(&mut self, item: Option<T>) {
                 match item {
                     Some(item) => {
@@ -2119,6 +2163,7 @@ pub mod sums {
             }
         }
         impl<'a, T, TC: Push<&'a T> + Len> Push<&'a Option<T>> for Options<TC> {
+            #[inline]
             fn push(&mut self, item: &'a Option<T>) {
                 match item {
                     Some(item) => {
@@ -2205,6 +2250,7 @@ pub mod lookback {
         for<'a> &'a TC: Index,
         for<'a> <&'a TC as Index>::Ref : PartialEq<T>,
     {
+        #[inline]
         fn push(&mut self, item: T) {
             // Look at the last `somes` value for a potential match.
             let insert: Option<T> = if (&self.inner.somes).last().map(|x| x.eq(&item)) == Some(true) {
@@ -2250,6 +2296,7 @@ pub mod lookback {
         for<'a> &'a TC: Index,
         for<'a> <&'a TC as Index>::Ref : PartialEq<T>,
     {
+        #[inline]
         fn push(&mut self, item: T) {
             // Look backwards through (0 .. N) to look for a matching value.
             let oks_len = self.inner.oks.len();
@@ -2325,6 +2372,7 @@ mod maps {
     // That might want an associated `Vec<usize>` for each, to order the keys.
     // If they are all identical, it shouldn't take up any space, though.
     impl<K: PartialOrd, V, CV: Push<K>> Push<Vec<(K, V)>> for KeyMaps<Vec<K>, CV> {
+        #[inline]
         fn push(&mut self, _item: Vec<(K, V)>) {
 
         }
@@ -2350,6 +2398,7 @@ mod maps {
     }
 
     impl<'a, V, CV: Push<&'a V> + Len + Default> Push<&'a Vec<V>> for ListMaps<CV> {
+        #[inline]
         fn push(&mut self, item: &'a Vec<V>) {
             let mut item_len = item.len();
             let self_len = if self.vals.is_empty() { 0 } else { self.vals[0].len() };
@@ -2438,6 +2487,7 @@ mod sizes {
     }
 
     impl<C0: Push<u8>, C1: Push<u16>, C2: Push<u32>, C3: Push<u64>> Push<usize> for Sizes<C0, C1, C2, C3> {
+        #[inline]
         fn push(&mut self, item: usize) {
             if let Ok(item) = TryInto::<u8>::try_into(item) {
                 self.inner.push(Ok(Ok(item)))
@@ -2454,6 +2504,7 @@ mod sizes {
     }
 
     impl<C0: Push<i8>, C1: Push<i16>, C2: Push<i32>, C3: Push<i64>> Push<isize> for Sizes<C0, C1, C2, C3> {
+        #[inline]
         fn push(&mut self, item: isize) {
             if let Ok(item) = TryInto::<i8>::try_into(item) {
                 self.inner.push(Ok(Ok(item)))
@@ -2484,5 +2535,109 @@ pub mod roaring {
     /// Additionally, other representations encode runs of set bits.
     pub struct RoaringBits {
         _inner: Results<[u64; 1024], Vec<u16>>,
+    }
+}
+
+pub use chain_mod::{chain, chain_one};
+
+pub mod chain_mod {
+
+    #[inline(always)]
+    pub fn chain<A: IntoIterator, B: IntoIterator<Item=A::Item>>(a: A, b: B) -> Chain<A::IntoIter, B::IntoIter> {
+        Chain { a: Some(a.into_iter()), b: Some(b.into_iter()) }
+    }
+
+    pub struct Chain<A, B> {
+        a: Option<A>,
+        b: Option<B>,
+    }
+
+    impl<A, B> Iterator for Chain<A, B>
+    where
+        A: Iterator,
+        B: Iterator<Item=A::Item>,
+    {
+        type Item = A::Item;
+
+        #[inline(always)]
+        fn next(&mut self) -> Option<Self::Item> {
+            if let Some(a) = self.a.as_mut() {
+                let x = a.next();
+                if x.is_none() {
+                    self.a = None;
+                } else {
+                    return x;
+                }
+            }
+            if let Some(b) = self.b.as_mut() {
+                let x = b.next();
+                if x.is_none() {
+                    self.b = None;
+                } else {
+                    return x;
+                }
+            }
+            None
+        }
+    }
+
+    #[inline(always)]
+    pub fn chain_one<A: IntoIterator>(a: A, b: A::Item) -> ChainOne<A::IntoIter> {
+        ChainOne { a: Some(a.into_iter()), b: Some(b) }
+    }
+
+    pub struct ChainOne<A: Iterator> {
+        a: Option<A>,
+        b: Option<A::Item>,
+    }
+
+    impl<A: Iterator> Iterator for ChainOne<A> {
+        type Item = A::Item;
+
+        #[inline(always)]
+        fn next(&mut self) -> Option<Self::Item> {
+            if let Some(a) = self.a.as_mut() {
+                let x = a.next();
+                if x.is_none() {
+                    self.a = None;
+                    self.b.take()
+                } else {
+                    x
+                }
+            } else {
+                None
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod test {
+        use super::*;
+
+        #[test]
+        fn test_chain() {
+            let a = [1, 2, 3];
+            let b = [4, 5, 6];
+            let mut chain = chain(a, b);
+            assert_eq!(chain.next(), Some(1));
+            assert_eq!(chain.next(), Some(2));
+            assert_eq!(chain.next(), Some(3));
+            assert_eq!(chain.next(), Some(4));
+            assert_eq!(chain.next(), Some(5));
+            assert_eq!(chain.next(), Some(6));
+            assert_eq!(chain.next(), None);
+        }
+
+        #[test]
+        fn test_chain_one() {
+            let a = [1, 2, 3];
+            let b = 4;
+            let mut chain = chain_one(a, b);
+            assert_eq!(chain.next(), Some(1));
+            assert_eq!(chain.next(), Some(2));
+            assert_eq!(chain.next(), Some(3));
+            assert_eq!(chain.next(), Some(4));
+            assert_eq!(chain.next(), None);
+        }
     }
 }
