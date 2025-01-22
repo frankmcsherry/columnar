@@ -97,6 +97,7 @@ fn _bench_clone<T: Columnar+Eq+Clone>(bencher: &mut Bencher, record: T) {
 //         }
 //     });
 // }
+
 benchmark_group!(
     clone,
     empty_clone,

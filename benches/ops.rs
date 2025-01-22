@@ -1,7 +1,5 @@
 use bencher::{benchmark_group, benchmark_main, Bencher};
 
-extern crate columnar;
-
 use columnar::{Columnar, Index, Len};
 use columnar::Strings;
 
@@ -75,7 +73,7 @@ impl Op {
     }
 }
 
-fn bench_ops_rows(bencher: &mut Bencher) {
+fn ops_rows(bencher: &mut Bencher) {
 
     let prog = vec![Op::Add, Op::Neg, Op::Add];
     let mut rows = Vec::with_capacity(1024);
@@ -94,7 +92,7 @@ fn bench_ops_rows(bencher: &mut Bencher) {
     });
 }
 
-fn bench_ops_rows_compiled(bencher: &mut Bencher) {
+fn ops_rows_compiled(bencher: &mut Bencher) {
 
     // let prog = vec![Op::Add, Op::Neg, Op::Add];
     let mut rows = Vec::with_capacity(1024);
@@ -113,7 +111,7 @@ fn bench_ops_rows_compiled(bencher: &mut Bencher) {
     });
 }
 
-fn bench_ops_rows_compiled2(bencher: &mut Bencher) {
+fn ops_rows_compiled2(bencher: &mut Bencher) {
 
     // let prog = vec![Op::Add, Op::Neg, Op::Add];
     let mut rows = Vec::with_capacity(1024);
@@ -132,7 +130,7 @@ fn bench_ops_rows_compiled2(bencher: &mut Bencher) {
     });
 }
 
-fn bench_ops_cols(bencher: &mut Bencher) {
+fn ops_cols(bencher: &mut Bencher) {
 
     let prog = vec![Op::Add, Op::Neg, Op::Add];
     let mut rows = Vec::with_capacity(1024);
@@ -154,14 +152,14 @@ fn bench_ops_cols(bencher: &mut Bencher) {
 
 benchmark_group!(
     cols,
-    bench_ops_cols,
+    ops_cols,
 );
 
 benchmark_group!(
     rows,
-    bench_ops_rows,
-    bench_ops_rows_compiled,
-    bench_ops_rows_compiled2,
+    ops_rows,
+    ops_rows_compiled,
+    ops_rows_compiled2,
 );
 
 benchmark_main!(cols, rows);
