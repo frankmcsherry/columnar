@@ -497,7 +497,7 @@ pub mod bytes {
                 // We want to extend `store` by `bytes`, but `bytes` may not be `u64` aligned.
                 // In the latter case, init `store` and cast and copy onto it as a byte slice.
                 if let Ok(words) = bytemuck::try_cast_slice(&bytes[.. whole_words]) {
-                    store.extend(words);
+                    store.extend_from_slice(words);
                 }
                 else {
                     let store_len = store.len();
@@ -515,6 +515,25 @@ pub mod bytes {
                     store.push(remainder);
                 }
             }
+        }
+
+        /// Writes a sequence of byte slices as their length followed by their bytes, padded to 8 bytes.
+        ///
+        /// Each length will be exactly 8 bytes, and the bytes that follow are padded out to a multiple of 8 bytes.
+        /// When reading the data, the length is in bytes, and one should consume those bytes and advance over padding.
+        pub fn write<'a>(mut writer: impl std::io::Write, bytes: impl Iterator<Item=(u64, &'a [u8])>) -> std::io::Result<()> {
+            // Columnar data is serialized as a sequence of `u64` values, with each `[u8]` slice
+            // serialize as first its length in bytes, and then as many `u64` values as needed.
+            // Padding should be added, but only for alignment; no specific values are required.
+            for (align, bytes) in bytes {
+                assert!(align <= 8);
+                let length = u64::try_from(bytes.len()).unwrap();
+                writer.write_all(bytemuck::cast_slice(std::slice::from_ref(&length)))?;
+                writer.write_all(bytes)?;
+                let padding = usize::try_from((8 - (length % 8)) % 8).unwrap();
+                writer.write_all(&[0; 8][..padding])?;
+            }
+            Ok(())
         }
 
         /// Decodes a sequence of byte slices from their length followed by their bytes.
