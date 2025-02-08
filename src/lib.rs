@@ -478,8 +478,12 @@ pub mod bytes {
 
     /// A coupled encode/decode pair for byte sequences.
     pub trait EncodeDecode {
-        /// Encoded length in number of `u64` required.
-        fn length<'a, I>(bytes: I) -> usize  where I : Iterator<Item=(u64, &'a [u8])>;
+        /// Encoded length in number of `u64` words required.
+        fn length_in_words<'a, I>(bytes: I) -> usize where I : Iterator<Item=(u64, &'a [u8])>;
+        /// Encoded length in number of `u8` bytes required.
+        ///
+        /// This method should always be eight times `Self::length_in_words`, and is provided for convenience and clarity.
+        fn length_in_bytes<'a, I>(bytes: I) -> usize where I : Iterator<Item=(u64, &'a [u8])> { 8 * Self::length_in_words(bytes) }
         /// Encodes `bytes` into a sequence of `u64`.
         fn encode<'a, I>(store: &mut Vec<u64>, bytes: I) where I : Iterator<Item=(u64, &'a [u8])>;
         /// Writes `bytes` in the encoded format to an arbitrary writer.
@@ -498,7 +502,7 @@ pub mod bytes {
         /// Encodes and decodes bytes sequences, by prepending the length and appending the all sequences.
         pub struct Sequence;
         impl super::EncodeDecode for Sequence {
-            fn length<'a, I>(bytes: I) -> usize where I : Iterator<Item=(u64, &'a [u8])> {
+            fn length_in_words<'a, I>(bytes: I) -> usize where I : Iterator<Item=(u64, &'a [u8])> {
                 // Each byte slice has one `u64` for the length, and then as many `u64`s as needed to hold all bytes.
                 bytes.map(|(_align, bytes)| 1 + (bytes.len() + 7)/8).sum()
             }
