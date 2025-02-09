@@ -50,8 +50,8 @@ fn _bench_copy<T: Columnar+Eq>(bencher: &mut Bencher, record: T) where T::Contai
     for _ in 0 .. 1024 {
         arena.push(&record);
     }
-    use columnar::{AsBytes, Container};
-    bencher.bytes = Sequence::length_in_bytes(arena.borrow().as_bytes()) as u64;
+    use columnar::Container;
+    bencher.bytes = Sequence::length_in_bytes(&arena.borrow()) as u64;
     arena.clear();
 
     bencher.iter(|| {
