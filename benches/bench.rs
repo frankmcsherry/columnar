@@ -1,5 +1,6 @@
 use bencher::{benchmark_group, benchmark_main, Bencher};
 use columnar::{Clear, Columnar};
+use columnar::bytes::{EncodeDecode, Sequence};
 
 fn empty_copy(bencher: &mut Bencher) { _bench_copy(bencher, vec![(); 1024]); }
 fn option_copy(bencher: &mut Bencher) { _bench_copy(bencher, vec![Option::<String>::None; 1024]); }
@@ -50,7 +51,7 @@ fn _bench_copy<T: Columnar+Eq>(bencher: &mut Bencher, record: T) where T::Contai
         arena.push(&record);
     }
     use columnar::{AsBytes, Container};
-    bencher.bytes = 8 * arena.borrow().length_in_words() as u64;
+    bencher.bytes = Sequence::length_in_bytes(arena.borrow().as_bytes()) as u64;
     arena.clear();
 
     bencher.iter(|| {

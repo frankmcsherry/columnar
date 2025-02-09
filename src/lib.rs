@@ -455,10 +455,6 @@ pub mod common {
     pub trait AsBytes<'a> {
         /// Presents `self` as a sequence of byte slices, with their required alignment.
         fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])>;
-        /// The number of `u64` words required to record `self` as aligned bytes.
-        fn length_in_words(&self) -> usize {
-            self.as_bytes().map(|(_, x)| 1 + (x.len()/8) + if x.len() % 8 == 0 { 0 } else { 1 }).sum()
-        }
     }
 
     /// A type that can be reconstituted from byte slices with lifetime `'a`.
@@ -479,11 +475,47 @@ pub mod common {
 ///
 /// The methods here line up with the `AsBytes` and `FromBytes` traits.
 pub mod bytes {
+
+    /// A coupled encode/decode pair for byte sequences.
+    pub trait EncodeDecode {
+        /// Encoded length in number of `u64` words required.
+        fn length_in_words<'a, I>(bytes: I) -> usize where I : Iterator<Item=(u64, &'a [u8])>;
+        /// Encoded length in number of `u8` bytes required.
+        ///
+        /// This method should always be eight times `Self::length_in_words`, and is provided for convenience and clarity.
+        fn length_in_bytes<'a, I>(bytes: I) -> usize where I : Iterator<Item=(u64, &'a [u8])> { 8 * Self::length_in_words(bytes) }
+        /// Encodes `bytes` into a sequence of `u64`.
+        fn encode<'a, I>(store: &mut Vec<u64>, bytes: I) where I : Iterator<Item=(u64, &'a [u8])>;
+        /// Writes `bytes` in the encoded format to an arbitrary writer.
+        fn write<'a, I, W: std::io::Write>(writer: W, bytes: I) -> std::io::Result<()> where I : Iterator<Item=(u64, &'a [u8])>;
+        /// Decodes bytes from a sequence of `u64`.
+        fn decode<'a>(store: &'a [u64]) -> impl Iterator<Item=&'a [u8]>;
+    }
+
     /// A sequential byte layout for `AsBytes` and `FromBytes` implementors.
     ///
     /// The layout is aligned like a sequence of `u64`, where we repeatedly announce a length,
     /// and then follow it by that many bytes. We may need to follow this with padding bytes.
-    pub mod serialization {
+    pub use serialization::Sequence;
+    mod serialization {
+
+        /// Encodes and decodes bytes sequences, by prepending the length and appending the all sequences.
+        pub struct Sequence;
+        impl super::EncodeDecode for Sequence {
+            fn length_in_words<'a, I>(bytes: I) -> usize where I : Iterator<Item=(u64, &'a [u8])> {
+                // Each byte slice has one `u64` for the length, and then as many `u64`s as needed to hold all bytes.
+                bytes.map(|(_align, bytes)| 1 + (bytes.len() + 7)/8).sum()
+            }
+            fn encode<'a, I>(store: &mut Vec<u64>, bytes: I) where I : Iterator<Item=(u64, &'a [u8])> {
+                encode(store, bytes)
+            }
+            fn write<'a, I, W: std::io::Write>(writer: W, bytes: I) -> std::io::Result<()> where I : Iterator<Item=(u64, &'a [u8])> {
+                write(writer, bytes)
+            }
+            fn decode<'a>(store: &'a [u64]) -> impl Iterator<Item=&'a [u8]> {
+                decode(store)
+            }
+        }
 
         /// Encodes a sequence of byte slices as their length followed by their bytes, aligned to 8 bytes.
         ///
