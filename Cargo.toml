@@ -4,6 +4,7 @@ version = "0.3.0"
 authors = ["Frank McSherry <fmcsherry@me.com>"]
 description = "Conversion from arrays of complex structs to simple structs of arrays"
 edition = "2021"
+exclude = ["presentation/"]
 
 # These URLs point to more information about the repository
 documentation = "http://github.com/frankmcsherry/columnar"
