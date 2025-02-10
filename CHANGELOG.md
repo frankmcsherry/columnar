@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1](https://github.com/frankmcsherry/columnar/compare/columnar-v0.3.0...columnar-v0.3.1) - 2025-02-10
+
+### Other
+
+- Exclude presentation from package
+
 ## [0.3.0](https://github.com/frankmcsherry/columnar/compare/columnar-v0.2.2...columnar-v0.3.0) - 2025-02-09
 
 ### Other
