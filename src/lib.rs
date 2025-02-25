@@ -190,6 +190,7 @@ pub mod common {
             /// Converts `&self` into an iterator.
             ///
             /// This has an awkward name to avoid collision with `iter()`, which may also be implemented.
+            #[inline(always)]
             fn index_iter(&self) -> IterOwn<&Self> {
                 IterOwn {
                     index: 0,
@@ -199,6 +200,7 @@ pub mod common {
             /// Converts `self` into an iterator.
             ///
             /// This has an awkward name to avoid collision with `into_iter()`, which may also be implemented.
+            #[inline(always)]
             fn into_index_iter(self) -> IterOwn<Self> where Self: Sized {
                 IterOwn {
                     index: 0,
@@ -435,7 +437,7 @@ pub mod common {
         type Item = S::Ref;
         type IntoIter = IterOwn<Slice<S>>;
         fn into_iter(self) -> Self::IntoIter {
-            IterOwn { index: 0, slice: self }
+            self.into_index_iter()
         }
     }
 
