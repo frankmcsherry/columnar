@@ -34,7 +34,7 @@ pub trait Columnar : 'static {
     ///
     /// The container must support pushing both `&Self` and `Self::Ref<'_>`.
     /// In our running example this might be `(Vec<A>, Vecs<Vec<B>>)`.
-    type Container: Len + Clear + Default + for<'a> Push<&'a Self> + for<'a> Push<Self::Ref<'a>> + Container<Self>;
+    type Container: Len + Clear + Default + for<'a> Push<&'a Self> + for<'a> Push<Self::Ref<'a>> + Container<Self> + Clone + Send;
 
     /// Converts a sequence of the references to the type into columnar form.
     fn as_columns<'a, I>(selves: I) -> Self::Container where I: IntoIterator<Item =&'a Self>, Self: 'a {
