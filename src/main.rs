@@ -24,7 +24,7 @@ fn main() {
 
     // Iterated column values should match the original `roster`.
     use columnar::Index;
-    for (col, row) in columns.into_iter().zip(roster) {
+    for (col, row) in columns.into_index_iter().zip(roster) {
         match (col, row) {
             (GroupReference::Solo(p0), Group::Solo(p1)) => {
                 assert_eq!(p0.0, p1.0);
@@ -45,8 +45,8 @@ fn main() {
     use columnar::Push;
     for index in 0 .. 1024 {
         columns.push(&Group::Team(vec![
-            (format!("Brain{}", index), index),
-            (format!("Brawn{}", index), index),
+            (format_args!("Brain{}", index), index),
+            (format_args!("Brawn{}", index), index),
         ]));
     }
 
@@ -274,7 +274,7 @@ mod test {
             Test1 { foo: vec![5, 6, 7], bar: 8 },
         ];
         let test1c = columnar::Columnar::as_columns(test1s.iter());
-        for (a, b) in test1s.into_iter().zip((&test1c).into_iter()) {
+        for (a, b) in test1s.into_iter().zip((&test1c).into_index_iter()) {
             assert_eq!(a.foo.len(), b.foo.len());
             assert_eq!(a.bar, *b.bar);
         }
@@ -287,7 +287,7 @@ mod test {
         
         println!("{:?}", test3c);
 
-        let iterc = (&test3c).into_iter();
+        let iterc = (&test3c).into_index_iter();
 
         for (a, b) in test3s.into_iter().zip(iterc) {
             match (a, &b) {
@@ -301,6 +301,19 @@ mod test {
                 _ => { panic!("Variant mismatch"); }
             }
         }
+
+    }
+
+    #[test]
+    fn iterators_formatters() {
+
+        use columnar::Push;
+
+        let mut columns = <((), Vec<usize>) as Columnar>::Container::default();
+        columns.push(((), 0 .. 10));
+
+        let mut columns = <((), String) as Columnar>::Container::default();
+        columns.push(((), format_args!("{:?}", 10)));
 
     }
 }

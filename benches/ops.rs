@@ -55,7 +55,7 @@ impl Op {
             Op::Len => {
                 let aa = &dataz[dataz.len()-1].as_ref().err().unwrap();
                 let mut result = Vec::with_capacity(aa.len());
-                for a in aa.into_iter() {
+                for a in aa.into_index_iter() {
                     result.push(a.len() as i32);
                 }
                 Ok(result)

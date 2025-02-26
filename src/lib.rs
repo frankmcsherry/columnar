@@ -187,13 +187,21 @@ pub mod common {
                 if self.is_empty() { None }
                 else { Some(self.get(self.len()-1)) }
             }
-            fn iter(&self) -> IterOwn<&Self> {
+            /// Converts `&self` into an iterator.
+            ///
+            /// This has an awkward name to avoid collision with `iter()`, which may also be implemented.
+            #[inline(always)]
+            fn index_iter(&self) -> IterOwn<&Self> {
                 IterOwn {
                     index: 0,
                     slice: self,
                 }
             }
-            fn into_iter(self) -> IterOwn<Self> where Self: Sized {
+            /// Converts `self` into an iterator.
+            ///
+            /// This has an awkward name to avoid collision with `into_iter()`, which may also be implemented.
+            #[inline(always)]
+            fn into_index_iter(self) -> IterOwn<Self> where Self: Sized {
                 IterOwn {
                     index: 0,
                     slice: self,
@@ -422,6 +430,14 @@ pub mod common {
         #[inline(always)] fn get_mut(&mut self, index: usize) -> Self::IndexMut<'_> {
             assert!(index < self.upper - self.lower);
             self.slice.get_mut(self.lower + index)
+        }
+    }
+
+    impl<S: Index + Len> IntoIterator for Slice<S> {
+        type Item = S::Ref;
+        type IntoIter = IterOwn<Slice<S>>;
+        fn into_iter(self) -> Self::IntoIter {
+            self.into_index_iter()
         }
     }
 
@@ -1323,6 +1339,20 @@ pub mod string {
             self.bounds.push(self.values.len() as u64);
         }
     }
+    impl<'a, BC: Push<u64>> Push<std::fmt::Arguments<'a>> for Strings<BC> {
+        fn push(&mut self, item: std::fmt::Arguments<'a>) {
+            use std::io::Write;
+            self.values.write_fmt(item).expect("write_fmt failed");
+            self.bounds.push(self.values.len() as u64);
+        }
+    }
+    impl<'a, 'b, BC: Push<u64>> Push<&'b std::fmt::Arguments<'a>> for Strings<BC> {
+        fn push(&mut self, item: &'b std::fmt::Arguments<'a>) {
+            use std::io::Write;
+            self.values.write_fmt(*item).expect("write_fmt failed");
+            self.bounds.push(self.values.len() as u64);
+        }
+    }
     impl<BC: Clear, VC: Clear> Clear for Strings<BC, VC> {
         fn clear(&mut self) {
             self.bounds.clear();
@@ -1460,28 +1490,13 @@ pub mod vector {
         }
     }
 
-    impl<TC: Push<TC2::Ref> + Len, TC2: Index> Push<Slice<TC2>> for Vecs<TC> {
-        fn push(&mut self, item: Slice<TC2>) {
+    impl<I: IntoIterator, TC: Push<I::Item> + Len> Push<I> for Vecs<TC> {
+        fn push(&mut self, item: I) {
             self.values.extend(item.into_iter());
             self.bounds.push(self.values.len() as u64);
         }
     }
-    impl<'a, T, TC: Push<&'a T> + Len> Push<&'a Vec<T>> for Vecs<TC> {
-        fn push(&mut self, item: &'a Vec<T>) {
-            self.push(&item[..]);
-        }
-    }
-    impl<'a, T, TC: Push<&'a T> + Len, const N: usize> Push<&'a [T; N]> for Vecs<TC> {
-        fn push(&mut self, item: &'a [T; N]) {
-            self.push(&item[..]);
-        }
-    }
-    impl<'a, T, TC: Push<&'a T> + Len> Push<&'a [T]> for Vecs<TC> {
-        fn push(&mut self, item: &'a [T]) {
-            self.values.extend(item.iter());
-            self.bounds.push(self.values.len() as u64);
-        }
-    }
+
     impl<TC: Clear> Clear for Vecs<TC> {
         fn clear(&mut self) {
             self.bounds.clear();
@@ -2144,7 +2159,7 @@ pub mod sums {
                 // Type annotation is important to avoid some inference overflow.
                 let store: Options<Vec<i32>> = Columnar::into_columns((0..100).map(Some));
                 assert_eq!(store.len(), 100);
-                assert!((&store).iter().zip(0..100).all(|(a, b)| a == Some(&b)));
+                assert!((&store).index_iter().zip(0..100).all(|(a, b)| a == Some(&b)));
                 assert_eq!(store.heap_size(), (408, 544));
             }
 
@@ -2153,7 +2168,7 @@ pub mod sums {
                 let store = Columnar::into_columns((0..100).map(|_x| None::<i32>));
                 assert_eq!(store.len(), 100);
                 let foo = &store;
-                assert!(foo.iter().zip(0..100).all(|(a, _b)| a == None));
+                assert!(foo.index_iter().zip(0..100).all(|(a, _b)| a == None));
                 assert_eq!(store.heap_size(), (8, 32));
             }
 
@@ -2162,7 +2177,7 @@ pub mod sums {
                 // Type annotation is important to avoid some inference overflow.
                 let store: Options<Vec<i32>>  = Columnar::into_columns((0..100).map(|x| if x % 2 == 0 { Some(x) } else { None }));
                 assert_eq!(store.len(), 100);
-                assert!((&store).iter().zip(0..100).all(|(a, b)| a == if b % 2 == 0 { Some(&b) } else { None }));
+                assert!((&store).index_iter().zip(0..100).all(|(a, b)| a == if b % 2 == 0 { Some(&b) } else { None }));
                 assert_eq!(store.heap_size(), (208, 288));
             }
         }
