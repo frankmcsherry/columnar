@@ -1086,8 +1086,8 @@ pub mod primitive {
             #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
                 let iter = self.values.as_bytes();
-                let iter = crate::chain_one(iter, (align_of::<u64>() as u64, bytemuck::cast_slice(std::slice::from_ref(self.last_word))));
-                crate::chain_one(iter, (align_of::<u64>() as u64, bytemuck::cast_slice(std::slice::from_ref(self.last_bits))))
+                let iter = crate::chain_one(iter, (std::mem::align_of::<u64>() as u64, bytemuck::cast_slice(std::slice::from_ref(self.last_word))));
+                crate::chain_one(iter, (std::mem::align_of::<u64>() as u64, bytemuck::cast_slice(std::slice::from_ref(self.last_bits))))
             }
         }
 
