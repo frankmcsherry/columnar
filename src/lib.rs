@@ -1085,13 +1085,9 @@ pub mod primitive {
         impl<'a, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for crate::primitive::Bools<VC, &'a u64> {
             #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                crate::chain_one(
-                    crate::chain_one(
-                        self.values.as_bytes(),
-                        (align_of::<u64>() as u64, bytemuck::cast_slice(std::slice::from_ref(self.last_word)))
-                    ),
-                    (align_of::<u64>() as u64, bytemuck::cast_slice(std::slice::from_ref(self.last_bits)))
-                )
+                let iter = self.values.as_bytes();
+                let iter = crate::chain_one(iter, (align_of::<u64>() as u64, bytemuck::cast_slice(std::slice::from_ref(self.last_word))));
+                crate::chain_one(iter, (align_of::<u64>() as u64, bytemuck::cast_slice(std::slice::from_ref(self.last_bits))))
             }
         }
 
@@ -1198,10 +1194,7 @@ pub mod primitive {
         impl<'a, SC: crate::AsBytes<'a>, NC: crate::AsBytes<'a>> crate::AsBytes<'a> for crate::primitive::Durations<SC, NC> {
             #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                crate::chain(
-                    self.seconds.as_bytes(),
-                    self.nanoseconds.as_bytes()
-                )
+                crate::chain(self.seconds.as_bytes(), self.nanoseconds.as_bytes())
             }
         }
         impl<'a, SC: crate::FromBytes<'a>, NC: crate::FromBytes<'a>> crate::FromBytes<'a> for crate::primitive::Durations<SC, NC> {
@@ -1308,10 +1301,7 @@ pub mod string {
     impl<'a, BC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for Strings<BC, VC> {
         #[inline(always)]
         fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-            crate::chain(
-                self.bounds.as_bytes(),
-                self.values.as_bytes()
-            )
+            crate::chain(self.bounds.as_bytes(), self.values.as_bytes())
         }
     }
     impl<'a, BC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for Strings<BC, VC> {
@@ -1460,10 +1450,7 @@ pub mod vector {
     impl<'a, TC: crate::AsBytes<'a>, BC: crate::AsBytes<'a>> crate::AsBytes<'a> for Vecs<TC, BC> {
         #[inline(always)]
         fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-            crate::chain(
-                self.bounds.as_bytes(),
-                self.values.as_bytes()
-            )
+            crate::chain(self.bounds.as_bytes(), self.values.as_bytes())
         }
     }
     impl<'a, TC: crate::FromBytes<'a>, BC: crate::FromBytes<'a>> crate::FromBytes<'a> for Vecs<TC, BC> {
@@ -1742,10 +1729,7 @@ pub mod sums {
         impl<'a, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for RankSelect<CC, VC, &'a u64> {
             #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                crate::chain(
-                    self.counts.as_bytes(),
-                    self.values.as_bytes()
-                )
+                crate::chain(self.counts.as_bytes(), self.values.as_bytes())
             }
         }
         impl<'a, CC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for RankSelect<CC, VC, &'a u64> {
@@ -1897,13 +1881,9 @@ pub mod sums {
         impl<'a, SC: crate::AsBytes<'a>, TC: crate::AsBytes<'a>, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for Results<SC, TC, CC, VC, &'a u64> {
             #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                crate::chain(
-                    crate::chain(
-                        self.indexes.as_bytes(),
-                        self.oks.as_bytes()
-                    ),
-                    self.errs.as_bytes()
-                )
+                let iter = self.indexes.as_bytes();
+                let iter = crate::chain(iter, self.oks.as_bytes());
+                crate::chain(iter, self.errs.as_bytes())
             }
         }
         impl<'a, SC: crate::FromBytes<'a>, TC: crate::FromBytes<'a>, CC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for Results<SC, TC, CC, VC, &'a u64> {
@@ -2095,10 +2075,7 @@ pub mod sums {
         impl<'a, TC: crate::AsBytes<'a>, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for Options<TC, CC, VC, &'a u64> {
             #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                crate::chain(
-                    self.indexes.as_bytes(),
-                    self.somes.as_bytes()
-                )
+                crate::chain(self.indexes.as_bytes(), self.somes.as_bytes())
             }
         }
 
@@ -2541,7 +2518,15 @@ pub mod roaring {
 pub use chain_mod::{chain, chain_one};
 
 pub mod chain_mod {
+    //! Chain iterators, or iterators and an item. Iterators that might improve inlining, at the
+    //! expense of not providing iterator maker traits.
 
+    /// Chain two iterators together. The result first iterates over `a`, then `b`, until both are
+    /// exhausted.
+    ///
+    /// This addresses a quirk where deep iterators would not be optimized to their full potential.
+    /// Here, functions are marked with `#[inline(always)]` to indicate that the compiler should
+    /// try hard to inline the iterators.
     #[inline(always)]
     pub fn chain<A: IntoIterator, B: IntoIterator<Item=A::Item>>(a: A, b: B) -> Chain<A::IntoIter, B::IntoIter> {
         Chain { a: Some(a.into_iter()), b: Some(b.into_iter()) }
@@ -2581,6 +2566,9 @@ pub mod chain_mod {
         }
     }
 
+    /// Chain a single item to an iterator. The resulting iterator first iterates over `a`,
+    /// then `b`. The resulting iterator is marked as `#[inline(always)]`, which in some situations
+    /// causes better inlining behavior with current Rust versions.
     #[inline(always)]
     pub fn chain_one<A: IntoIterator>(a: A, b: A::Item) -> ChainOne<A::IntoIter> {
         ChainOne { a: Some(a.into_iter()), b: Some(b) }
