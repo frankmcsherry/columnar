@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/frankmcsherry/columnar/compare/columnar-v0.3.0...columnar-v0.4.0) - 2025-03-24
+
+### Other
+
+- Documentation, better formatting
+- Custom chains to force inlining
+- Extend Container trait bounds
+- Merge pull request #29 from frankmcsherry/iterators_formatters
+- Respond to PR feedback
+- Add support for iterators and formatters
+
 ## [0.3.0](https://github.com/frankmcsherry/columnar/compare/columnar-v0.2.2...columnar-v0.3.0) - 2025-02-09
 
 ### Other
