@@ -82,19 +82,16 @@ pub mod common {
             self.len() == 0
         }
     }
-    impl<L: Len> Len for &L {
+    impl<L: Len + ?Sized> Len for &L {
         #[inline(always)] fn len(&self) -> usize { L::len(*self) }
     }
-    impl<L: Len> Len for &mut L {
+    impl<L: Len + ?Sized> Len for &mut L {
         #[inline(always)] fn len(&self) -> usize { L::len(*self) }
     }
     impl<T> Len for Vec<T> {
         #[inline(always)] fn len(&self) -> usize { self.len() }
     }
     impl<T> Len for [T] {
-        #[inline(always)] fn len(&self) -> usize { <[T]>::len(self) }
-    }
-    impl<T> Len for &[T] {
         #[inline(always)] fn len(&self) -> usize { <[T]>::len(self) }
     }
 
@@ -276,7 +273,7 @@ pub mod common {
         /// This should not include the size of `self` itself.
         fn heap_size(&self) -> (usize, usize) { (0, 0) }
     }
-    impl HeapSize for serde_json::Number { }
+
     impl HeapSize for String {
         fn heap_size(&self) -> (usize, usize) {
             (self.len(), self.capacity())
@@ -1995,6 +1992,18 @@ pub mod sums {
             }
         }
 
+        impl<SC, TC, CC, VC, WC> Results<SC, TC, CC, VC, WC> {
+            /// Returns ok values if no errors exist.
+            pub fn unwrap(self) -> SC where TC: Len {
+                assert!(self.errs.is_empty());
+                self.oks
+            }
+            /// Returns error values if no oks exist.
+            pub fn unwrap_err(self) -> TC where SC: Len {
+                assert!(self.oks.is_empty());
+                self.errs
+            }
+        }
         #[cfg(test)]
         mod test {
             #[test]
