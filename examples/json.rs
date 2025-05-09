@@ -1,14 +1,14 @@
 use serde_json::Value as JsonJson;
 
-use crate::{Push, Len, Index, HeapSize};
-use crate::{Vecs, Strings, Lookbacks};
+use columnar::{Push, Len, Index, HeapSize};
+use columnar::{Vecs, Strings, Lookbacks};
 
 /// Stand in for JSON, from `serde_json`.
 #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Json {
     Null,
     Bool(bool),
-    Number(serde_json::Number),
+    Number(Number),
     String(String),
     Array(Vec<Json>),
     Object(Vec<(String, Json)>),
@@ -32,7 +32,7 @@ impl Json {
         match json {
             JsonJson::Null => { Json::Null },
             JsonJson::Bool(b) => { Json::Bool(b) },
-            JsonJson::Number(n) => { Json::Number(n) },
+            JsonJson::Number(n) => { Json::Number(Number(n)) },
             JsonJson::String(s) => { Json::String(s) },
             JsonJson::Array(a) => { Json::Array(a.into_iter().map(Json::from_json).collect()) },
             JsonJson::Object(o) => {
@@ -58,6 +58,18 @@ pub enum JsonIdx {
 impl HeapSize for JsonIdx {
     fn heap_size(&self) -> (usize, usize) { (0, 0) }
 }
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Number (serde_json::Number);
+
+impl std::ops::Deref for Number {
+    type Target = serde_json::Number;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl HeapSize for Number { }
 
 /// Stand-in for `Vec<Json>`.
 ///
@@ -85,7 +97,7 @@ pub struct Jsons {
     pub roots: Vec<JsonIdx>,               // Any `JsonIdx` container.
     // pub nulls: Vec<()>,                  // No need to store null Jsons.
     // pub bools: Vec<bool>,                // No need to store bool Jsons.
-    pub numbers: Vec<serde_json::Number>,   // Any `Number` container.
+    pub numbers: Vec<Number>,   // Any `Number` container.
     pub strings: Lookbacks<Strings>,
     pub arrays: Vecs<Vec<JsonIdx>>,
     pub objects: Vecs<(Lookbacks<Strings>, Vec<JsonIdx>)>,
@@ -107,7 +119,7 @@ impl HeapSize for Jsons {
 pub enum JsonsRef<'a> {
     Null,
     Bool(bool),
-    Number(&'a serde_json::Number),
+    Number(&'a Number),
     String(&'a str),
     Array(ArrRef<'a>),
     Object(ObjRef<'a>),
@@ -137,11 +149,11 @@ impl<'a> PartialEq<Json> for JsonsRef<'a> {
             (JsonsRef::Number(n0), Json::Number(n1)) => { *n0 == n1 },
             (JsonsRef::String(s0), Json::String(s1)) => { *s0 == s1 },
             (JsonsRef::Array(a0), Json::Array(a1)) => {
-                let slice: crate::Slice<&Vec<JsonIdx>> = (&a0.store.arrays).get(a0.index);
+                let slice: columnar::Slice<&Vec<JsonIdx>> = (&a0.store.arrays).get(a0.index);
                 slice.len() == a1.len() && slice.into_iter().zip(a1).all(|(a,b)| a0.store.dereference(*a).eq(b))
             },
             (JsonsRef::Object(o0), Json::Object(o1)) => {
-                let slice: crate::Slice<&(_, _)> = (&o0.store.objects).get(o0.index);
+                let slice: columnar::Slice<&(_, _)> = (&o0.store.objects).get(o0.index);
                 slice.len() == o1.len() && slice.into_iter().zip(o1).all(|((xs, xv),(ys, yv))| xs == ys && o0.store.dereference(*xv).eq(yv))
             },
             _ => { false }
@@ -278,4 +290,89 @@ impl<'a> JsonQueues<'a> {
             }
         }
     }
+}
+
+fn main() {
+
+    use columnar::{Push, Len, Index, HeapSize};
+
+    use std::fs::File;
+    use serde_json::Value as JsonValue;
+
+    let timer = std::time::Instant::now();
+    // let f = File::open("cities.json.txt").unwrap();
+    let f = File::open("true.txt").unwrap();
+    let records: Vec<JsonValue> = serde_json::from_reader(f).unwrap();
+    let time = timer.elapsed();
+    println!("{:?}\tread {} json records", time, records.len());
+
+    let timer = std::time::Instant::now();
+    let _ = records.clone();
+    let time = timer.elapsed();
+    println!("{:?}\tjson_vals cloned", time);
+
+    let values = records.clone().into_iter().map(Json::from_json).collect::<Vec<_>>();
+    println!("\t\tjson_vals heapsize: {:?}", values.heap_size().0);
+
+    let timer = std::time::Instant::now();
+    let mut json_cols = Jsons::default();
+    json_cols.extend(values.iter());
+    let time = timer.elapsed();
+    println!("{:?}\tjson_cols formed", time);
+    println!("\t\tjson_cols heapsize: {:?}", json_cols.heap_size().0);
+    println!("\t\tjson_cols.roots:    {:?}", json_cols.roots.heap_size().0);
+    println!("\t\tjson_cols.numbers:  {:?}", json_cols.numbers.heap_size().0);
+    println!("\t\tjson_cols.strings:  {:?}", json_cols.strings.heap_size().0);
+    println!("\t\tjson_cols.arrays:   {:?}", json_cols.arrays.heap_size().0);
+    println!("\t\tjson_cols.objects:  {:?}", json_cols.objects.heap_size().0);
+    println!("\t\tjson_cols.objects.values.0:  {:?}", json_cols.objects.values.0.heap_size().0);
+    println!("\t\tjson_cols.objects.values.1:  {:?}", json_cols.objects.values.1.heap_size().0);
+
+    println!("\t\tjson_cols.arrays.len: {:?}", json_cols.arrays.len());
+
+    let timer = std::time::Instant::now();
+    for (index, value) in values.iter().enumerate() {
+        if (&json_cols).get(index) != *value {
+            println!("Mismatch: {:?}: {:?}", index, value);
+        }
+    }
+    let time = timer.elapsed();
+    println!("{:?}\tcompared", time);
+
+    let timer = std::time::Instant::now();
+    let _ = json_cols.clone();
+    let time = timer.elapsed();
+    println!("{:?}\tjson_cols cloned", time);
+
+    let timer = std::time::Instant::now();
+    use serde::ser::Serialize;
+    let mut encoded0 = Vec::new();
+    let mut serializer = rmp_serde::Serializer::new(&mut encoded0).with_bytes(rmp_serde::config::BytesMode::ForceAll);
+    values.serialize(&mut serializer).unwrap();
+    let time = timer.elapsed();
+    println!("{:?}\tjson_vals encode ({} bytes; msgpack)", time, encoded0.len());
+    let timer = std::time::Instant::now();
+    let decoded0: Vec<Json> = rmp_serde::from_slice(&encoded0[..]).unwrap();
+    let time = timer.elapsed();
+    println!("{:?}\tjson_vals decode", time);
+
+    let timer = std::time::Instant::now();
+    let mut encoded1 = Vec::new();
+    let mut serializer = rmp_serde::Serializer::new(&mut encoded1).with_bytes(rmp_serde::config::BytesMode::ForceAll);
+    json_cols.serialize(&mut serializer).unwrap();
+    let time = timer.elapsed();
+    println!("{:?}\tjson_cols encode ({} bytes; msgpack)", time, encoded1.len());
+    let timer = std::time::Instant::now();
+    let decoded1: Jsons = rmp_serde::from_slice(&encoded1[..]).unwrap();
+    let time = timer.elapsed();
+    println!("{:?}\tjson_cols decode", time);
+
+    let timer = std::time::Instant::now();
+    let encoded2: Vec<u8> = bincode::serialize(&json_cols).unwrap();
+    let time = timer.elapsed();
+    println!("{:?}\tjson_cols encode ({} bytes; bincode)", time, encoded2.len());
+
+    assert_eq!(values, decoded0);
+    assert_eq!(json_cols, decoded1);
+
 }
