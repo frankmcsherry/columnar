@@ -1424,6 +1424,24 @@ pub mod vector {
         type Container = Vecs<T::Container>;
     }
 
+    impl<T: Columnar, const N: usize> Columnar for smallvec::SmallVec<[T; N]> {
+        type Ref<'a> = Slice<<T::Container as crate::Container<T>>::Borrowed<'a>> where T: 'a;
+        fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
+            self.truncate(other.len());
+            let mut other_iter = other.into_iter();
+            for (s, o) in self.iter_mut().zip(&mut other_iter) {
+                T::copy_from(s, o);
+            }
+            for o in other_iter {
+                self.push(T::into_owned(o));
+            }
+        }
+        fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
+            other.into_iter().map(|x| T::into_owned(x)).collect()
+        }
+        type Container = Vecs<T::Container>;
+    }
+
     impl<T: Columnar<Container = TC>, BC: crate::Container<u64>, TC: crate::Container<T>> crate::Container<Vec<T>> for Vecs<TC, BC> {
         type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>> where BC: 'a, TC: 'a, T: 'a;
         fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -1435,6 +1453,16 @@ pub mod vector {
     }
 
     impl<T: Columnar<Container = TC>, BC: crate::Container<u64>, TC: crate::Container<T>, const N: usize> crate::Container<[T; N]> for Vecs<TC, BC> {
+        type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>> where BC: 'a, TC: 'a, T: 'a;
+        fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
+            Vecs {
+                bounds: self.bounds.borrow(),
+                values: self.values.borrow(),
+            }
+        }
+    }
+
+    impl<T: Columnar<Container = TC>, BC: crate::Container<u64>, TC: crate::Container<T>, const N: usize> crate::Container<smallvec::SmallVec<[T; N]>> for Vecs<TC, BC> {
         type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>> where BC: 'a, TC: 'a, T: 'a;
         fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
             Vecs {
