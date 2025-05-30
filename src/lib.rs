@@ -460,7 +460,13 @@ pub mod common {
                 None
             }
         }
+        #[inline(always)]
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            (self.slice.len() - self.index, Some(self.slice.len() - self.index))
+        }
     }
+
+    impl<S: Index + Len> ExactSizeIterator for IterOwn<S> { }
 
     /// A type that can be viewed as byte slices with lifetime `'a`.
     ///
