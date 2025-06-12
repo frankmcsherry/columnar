@@ -130,6 +130,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
 
         quote! {
             impl #impl_gen PartialEq<#name #ty_gen> for #r_ident < #(#reference_types),* >  #where_clause {
+                #[inline(always)]
                 fn eq(&self, other: &#name #ty_gen) -> bool {
                     #destructure_self
                     #(self.#names == *#names) &&*
@@ -226,6 +227,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         quote! {
             impl #impl_gen ::columnar::Index for #c_ident #ty_gen #where_clause {
                 type Ref = #index_type;
+                #[inline(always)]
                 fn get(&self, index: usize) -> Self::Ref {
                     #r_ident { #(#names: self.#names.get(index),)* }
                 }
@@ -243,6 +245,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         quote! {
             impl #impl_gen ::columnar::Index for &'columnar #c_ident #ty_gen #where_clause {
                 type Ref = #index_type;
+                #[inline(always)]
                 fn get(&self, index: usize) -> Self::Ref {
                     #r_ident { #(#names: (&self.#names).get(index),)* }
                 }
@@ -258,6 +261,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
 
         quote! {
             impl #impl_gen ::columnar::Clear for #c_ident #ty_gen #where_clause {
+                #[inline(always)]
                 fn clear(&mut self) { #(self.#names.clear());* }
             }
         }
@@ -273,6 +277,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         
         quote! {
             impl #impl_gen ::columnar::Len for #c_ident #ty_gen #where_clause {
+                #[inline(always)]
                 fn len(&self) -> usize {
                     self.#first_name.len()
                 }
@@ -307,6 +312,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         
         quote! {
             impl #impl_gen ::columnar::FromBytes<'columnar> for #c_ident #ty_gen #where_clause {
+                #[inline(always)]
                 fn from_bytes(bytes: &mut impl Iterator<Item=&'columnar [u8]>) -> Self {
                     #(let #names = ::columnar::FromBytes::from_bytes(bytes);)*
                     Self { #(#names,)* }
@@ -340,10 +346,12 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         quote! {
             impl #impl_gen ::columnar::Columnar for #name #ty_gen #where_clause2 {
                 type Ref<'a> = #r_ident < #(<#types as ::columnar::Columnar>::Ref<'a>,)* > where #(#types: 'a,)*;
+                #[inline(always)]
                 fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
                     #destructure_self
                     #( ::columnar::Columnar::copy_from(#names, other.#names); )*
                 }
+                #[inline(always)]
                 fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
                     #into_self
                 }
@@ -352,6 +360,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
 
             impl #impl_gen ::columnar::Container<#name #ty_gen> for #c_ident < #(<#types as ::columnar::Columnar>::Container ),* > #where_clause2 {
                 type Borrowed<'a> = #c_ident < #(<<#types as ::columnar::Columnar>::Container as ::columnar::Container<#types>>::Borrowed<'a> ),* > where #(#types: 'a,)*;
+                #[inline(always)]
                 fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
                     #c_ident {
                         #( #names: <<#types as ::columnar::Columnar>::Container as ::columnar::Container<#types>>::borrow(&self.#names), )*
@@ -421,6 +430,7 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
 
         impl<CW> ::columnar::Index for #c_ident<CW> {
             type Ref = #name;
+            #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref {
                 #name
             }
@@ -428,18 +438,21 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
 
         impl<'columnar, CW> ::columnar::Index for &'columnar #c_ident<CW> {
             type Ref = #name;
+            #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref {
                 #name
             }
         }
 
         impl ::columnar::Clear for #c_ident {
+            #[inline(always)]
             fn clear(&mut self) {
                 self.count = 0;
             }
         }
 
         impl<CW: Copy+::columnar::common::index::CopyAs<u64>> ::columnar::Len for #c_ident<CW> {
+            #[inline(always)]
             fn len(&self) -> usize {
                 use columnar::common::index::CopyAs;
                 self.count.copy_as() as usize
@@ -455,6 +468,7 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
         }
 
         impl<'columnar> ::columnar::FromBytes<'columnar> for #c_ident <&'columnar u64> {
+            #[inline(always)]
             fn from_bytes(bytes: &mut impl Iterator<Item=&'columnar [u8]>) -> Self {
                 Self { count: &bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0] }
             }
@@ -462,13 +476,16 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
 
         impl ::columnar::Columnar for #name {
             type Ref<'a> = #name;
+            #[inline(always)]
             fn copy_from<'a>(&mut self, other: Self::Ref<'a>) { *self = other; }
+            #[inline(always)]
             fn into_owned<'a>(other: Self::Ref<'a>) -> Self { other }
             type Container = #c_ident;
         }
 
         impl ::columnar::Container<#name> for #c_ident {
             type Borrowed<'a> = #c_ident < &'a u64 >;
+            #[inline(always)]
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
                 #c_ident { count: &self.count }
             }
@@ -718,6 +735,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         quote! {
             impl #impl_gen ::columnar::Index for #c_ident #ty_gen #where_clause {
                 type Ref = #index_type;
+                #[inline(always)]
                 fn get(&self, index: usize) -> Self::Ref {
                     match self.variant.index_as(index) as usize {
                         #( #numbers => #r_ident::#names(self.#names.get(self.offset.index_as(index) as usize)), )*
@@ -741,6 +759,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         quote! {
             impl #impl_gen ::columnar::Index for &'columnar #c_ident #ty_gen #where_clause {
                 type Ref = #index_type;
+                #[inline(always)]
                 fn get(&self, index: usize) -> Self::Ref {
                     match self.variant.index_as(index) as usize {
                         #( #numbers => #r_ident::#names((&self.#names).get(self.offset.index_as(index) as usize)), )*
@@ -759,6 +778,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
         quote! {
             impl #impl_gen ::columnar::Clear for #c_ident #ty_gen #where_clause {
+                #[inline(always)]
                 fn clear(&mut self) { 
                     #(self.#names.clear();)* 
                     self.variant.clear();
@@ -775,6 +795,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
         quote! {
             impl #impl_gen ::columnar::Len for #c_ident #ty_gen where CVar: ::columnar::Len {
+                #[inline(always)]
                 fn len(&self) -> usize {
                     self.variant.len()
                 }
@@ -811,6 +832,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         quote! {
             #[allow(non_snake_case)]
             impl #impl_gen ::columnar::FromBytes<'columnar> for #c_ident #ty_gen #where_clause {
+                #[inline(always)]
                 fn from_bytes(bytes: &mut impl Iterator<Item=&'columnar [u8]>) -> Self {
                     #(let #names = ::columnar::FromBytes::from_bytes(bytes);)*
                     let variant = ::columnar::FromBytes::from_bytes(bytes);
@@ -893,12 +915,14 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         quote! {
             impl #impl_gen ::columnar::Columnar for #name #ty_gen #where_clause2 {
                 type Ref<'a> = #r_ident < #(#reference_args,)* > where Self: 'a, #(#variant_types: 'a,)*;
+                #[inline(always)]
                 fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
                     match (&mut *self, other) {
                         #( #copy_from )*
                         (_, other) => { *self = Self::into_owned(other); }
                     }
                 }
+                #[inline(always)]
                 fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
                     match other {
                         #( #into_owned )*
@@ -909,6 +933,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
             impl #impl_gen ::columnar::Container<#name #ty_gen> for #c_ident < #(#container_types),* > #where_clause2 {
                 type Borrowed<'a> = #c_ident < #( < #container_types as ::columnar::Container<#variant_types> >::Borrowed<'a>, )* &'a [u8], &'a [u64] > where #(#variant_types: 'a,)*;
+                #[inline(always)]
                 fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
                     #c_ident {
                         #(#names: self.#names.borrow(),)*
@@ -989,6 +1014,7 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
 
         impl<CVar: ::columnar::Len + ::columnar::IndexAs<u8>> ::columnar::Index for #c_ident <CVar> {
             type Ref = #name;
+            #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref {
                 match self.variant.index_as(index) {
                     #( #indices => #name::#names, )*
@@ -999,6 +1025,7 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
 
         impl<'columnar, CVar: ::columnar::Len + ::columnar::IndexAs<u8>> ::columnar::Index for &'columnar #c_ident <CVar> {
             type Ref = #name;
+            #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref {
                 match self.variant.index_as(index) {
                     #( #indices => #name::#names, )*
@@ -1008,12 +1035,14 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
         }
 
         impl<CVar: ::columnar::Clear> ::columnar::Clear for #c_ident <CVar> {
+            #[inline(always)]
             fn clear(&mut self) {
                 self.variant.clear();
             }
         }
 
         impl<CVar: ::columnar::Len> ::columnar::Len for #c_ident <CVar> {
+            #[inline(always)]
             fn len(&self) -> usize {
                 self.variant.len()
             }
@@ -1028,6 +1057,7 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
         }
 
         impl<'columnar, CVar: ::columnar::FromBytes<'columnar>> ::columnar::FromBytes<'columnar> for #c_ident <CVar> {
+            #[inline(always)]
             fn from_bytes(bytes: &mut impl Iterator<Item=&'columnar [u8]>) -> Self {
                 Self { variant: ::columnar::FromBytes::from_bytes(bytes) }
             }
@@ -1035,13 +1065,16 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
 
         impl ::columnar::Columnar for #name {
             type Ref<'a> = #name;
+            #[inline(always)]
             fn copy_from<'a>(&mut self, other: Self::Ref<'a>) { *self = other; }
+            #[inline(always)]
             fn into_owned<'a>(other: Self::Ref<'a>) -> Self { other }
             type Container = #c_ident;
         }
 
         impl<CV: ::columnar::Container<u8>> ::columnar::Container<#name> for #c_ident <CV> {
             type Borrowed<'a> = #c_ident < CV::Borrowed<'a> > where CV: 'a;
+            #[inline(always)]
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
                 #c_ident {
                     variant: self.variant.borrow()

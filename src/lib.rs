@@ -485,6 +485,13 @@ pub mod common {
         ///
         /// The implementation is expected to consume the right number of items from the iterator,
         /// which may go on to be used by other implementations of `FromBytes`.
+        ///
+        /// The implementation should aim for only doing trivial work, as it backs calls like
+        /// `borrow` for serialized containers.
+        ///
+        /// Implementations should almost always be marked as `#[inline(always)]` to ensure that
+        /// they are inlined. A single non-inlined function on a tree of `from_bytes` calls
+        /// can cause the performance to drop significantly.
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self;
     }
 
@@ -822,18 +829,21 @@ pub mod bytes {
 
 /// Types that prefer to be represented by `Vec<T>`.
 pub mod primitive {
+    use std::num::Wrapping;
 
     /// An implementation of opinions for types that want to use `Vec<T>`.
     macro_rules! implement_columnable {
         ($($index_type:ty),*) => { $(
             impl crate::Columnar for $index_type {
                 type Ref<'a> = &'a $index_type;
+                #[inline(always)]
                 fn into_owned<'a>(other: Self::Ref<'a>) -> Self { *other }
 
                 type Container = Vec<$index_type>;
             }
             impl crate::Container<$index_type> for Vec<$index_type> {
                 type Borrowed<'a> = &'a [$index_type];
+                #[inline(always)]
                 fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { &self[..] }
             }
 
@@ -846,6 +856,7 @@ pub mod primitive {
                 }
             }
             impl<'a> crate::FromBytes<'a> for &'a [$index_type] {
+                #[inline(always)]
                 fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
                     // We use `unwrap()` here in order to panic with the `bytemuck` error, which may be informative.
                     bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()
@@ -857,6 +868,8 @@ pub mod primitive {
     implement_columnable!(u8, u16, u32, u64, u128);
     implement_columnable!(i8, i16, i32, i64, i128);
     implement_columnable!(f32, f64);
+    implement_columnable!(Wrapping<u8>, Wrapping<u16>, Wrapping<u32>, Wrapping<u64>, Wrapping<u128>);
+    implement_columnable!(Wrapping<i8>, Wrapping<i16>, Wrapping<i32>, Wrapping<i64>, Wrapping<i128>);
 
     pub use sizes::{Usizes, Isizes};
     /// Columnar stores for `usize` and `isize`, stored as 64 bits.
@@ -917,6 +930,7 @@ pub mod primitive {
         }
 
         impl<'a, CV: crate::FromBytes<'a>> crate::FromBytes<'a> for crate::primitive::Usizes<CV> {
+            #[inline(always)]
             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
                 Self { values: CV::from_bytes(bytes) }
             }
@@ -976,6 +990,7 @@ pub mod primitive {
         }
 
         impl<'a, CV: crate::FromBytes<'a>> crate::FromBytes<'a> for crate::primitive::Isizes<CV> {
+            #[inline(always)]
             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
                 Self { values: CV::from_bytes(bytes) }
             }
@@ -994,17 +1009,19 @@ pub mod primitive {
 
         impl Columnar for () {
             type Ref<'a> = ();
+            #[inline(always)]
             fn into_owned<'a>(_other: Self::Ref<'a>) -> Self { () }
             type Container = Empties;
         }
 
         impl crate::Container<()> for Empties {
             type Borrowed<'a> = Empties<&'a u64>;
+            #[inline(always)]
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { Empties { count: &self.count, empty: () } }
         }
 
         impl<CC: CopyAs<u64> + Copy> Len for Empties<CC> {
-            fn len(&self) -> usize { self.count.copy_as() as usize }
+            #[inline(always)] fn len(&self) -> usize { self.count.copy_as() as usize }
         }
         impl<CC> IndexMut for Empties<CC> {
             type IndexMut<'a> = &'a mut () where CC: 'a;
@@ -1013,27 +1030,39 @@ pub mod primitive {
         }
         impl<CC> Index for Empties<CC> {
             type Ref = ();
+            #[inline(always)]
             fn get(&self, _index: usize) -> Self::Ref { () }
         }
         impl<'a, CC> Index for &'a Empties<CC> {
             type Ref = &'a ();
+            #[inline(always)]
             fn get(&self, _index: usize) -> Self::Ref { &() }
         }
         impl Push<()> for Empties {
             // TODO: check for overflow?
             #[inline(always)]
             fn push(&mut self, _item: ()) { self.count += 1; }
+            #[inline(always)]
+            fn extend(&mut self, iter: impl IntoIterator<Item=()>) {
+                self.count += iter.into_iter().count() as u64;
+            }
         }
-        impl Push<&()> for Empties {
+        impl<'a> Push<&'a ()> for Empties {
             // TODO: check for overflow?
             #[inline(always)]
             fn push(&mut self, _item: &()) { self.count += 1; }
+            #[inline(always)]
+            fn extend(&mut self, iter: impl IntoIterator<Item=&'a ()>) {
+                self.count += iter.into_iter().count() as u64;
+            }
         }
 
         impl HeapSize for Empties {
+            #[inline(always)]
             fn heap_size(&self) -> (usize, usize) { (0, 0) }
         }
         impl Clear for Empties {
+            #[inline(always)]
             fn clear(&mut self) { self.count = 0; }
         }
 
@@ -1044,6 +1073,7 @@ pub mod primitive {
             }
         }
         impl<'a> crate::FromBytes<'a> for crate::primitive::Empties<&'a u64> {
+            #[inline(always)]
             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
                 Self { count: &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0], empty: () }
             }
@@ -1070,12 +1100,14 @@ pub mod primitive {
 
         impl crate::Columnar for bool {
             type Ref<'a> = bool;
+            #[inline(always)]
             fn into_owned<'a>(other: Self::Ref<'a>) -> Self { other }
             type Container = Bools;
         }
 
         impl<VC: crate::Container<u64>> crate::Container<bool> for Bools<VC> {
             type Borrowed<'a> = Bools<VC::Borrowed<'a>, &'a u64> where VC: 'a;
+            #[inline(always)]
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
                 Bools {
                     values: self.values.borrow(),
@@ -1095,6 +1127,7 @@ pub mod primitive {
         }
 
         impl<'a, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for crate::primitive::Bools<VC, &'a u64> {
+            #[inline(always)]
             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
                 let values = crate::FromBytes::from_bytes(bytes);
                 let last_word = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
@@ -1150,6 +1183,7 @@ pub mod primitive {
 
 
         impl<VC: Clear> Clear for Bools<VC> {
+            #[inline(always)]
             fn clear(&mut self) {
                 self.values.clear();
                 self.last_word = 0;
@@ -1158,6 +1192,7 @@ pub mod primitive {
         }
 
         impl<VC: HeapSize> HeapSize for Bools<VC> {
+            #[inline(always)]
             fn heap_size(&self) -> (usize, usize) {
                 self.values.heap_size()
             }
@@ -1180,12 +1215,14 @@ pub mod primitive {
 
         impl crate::Columnar for Duration {
             type Ref<'a> = Duration;
+            #[inline(always)]
             fn into_owned<'a>(other: Self::Ref<'a>) -> Self { other }
             type Container = Durations;
         }
 
         impl<SC: crate::Container<u64>, NC: crate::Container<u32>> crate::Container<Duration> for Durations<SC, NC> {
             type Borrowed<'a> = Durations<SC::Borrowed<'a>, NC::Borrowed<'a>> where SC: 'a, NC: 'a;
+            #[inline(always)]
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
                 Durations {
                     seconds: self.seconds.borrow(),
@@ -1201,6 +1238,7 @@ pub mod primitive {
             }
         }
         impl<'a, SC: crate::FromBytes<'a>, NC: crate::FromBytes<'a>> crate::FromBytes<'a> for crate::primitive::Durations<SC, NC> {
+            #[inline(always)]
             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
                 Self {
                     seconds: crate::FromBytes::from_bytes(bytes),
@@ -1242,6 +1280,7 @@ pub mod primitive {
         }
 
         impl<SC: Clear, NC: Clear> Clear for Durations<SC, NC> {
+            #[inline(always)]
             fn clear(&mut self) {
                 self.seconds.clear();
                 self.nanoseconds.clear();
@@ -1249,6 +1288,7 @@ pub mod primitive {
         }
 
         impl<SC: HeapSize, NC: HeapSize> HeapSize for Durations<SC, NC> {
+            #[inline(always)]
             fn heap_size(&self) -> (usize, usize) {
                 let (l0, c0) = self.seconds.heap_size();
                 let (l1, c1) = self.nanoseconds.heap_size();
@@ -1274,16 +1314,19 @@ pub mod string {
 
     impl Columnar for String {
         type Ref<'a> = &'a str;
+        #[inline(always)]
         fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
             self.clear();
             self.push_str(other);
         }
+        #[inline(always)]
         fn into_owned<'a>(other: Self::Ref<'a>) -> Self { other.to_string() }
         type Container = Strings;
     }
 
     impl<'b, BC: crate::Container<u64>> crate::Container<String> for Strings<BC, &'b [u8]> {
         type Borrowed<'a> = Strings<BC::Borrowed<'a>, &'a [u8]> where BC: 'a, 'b: 'a;
+        #[inline(always)]
         fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
             Strings {
                 bounds: self.bounds.borrow(),
@@ -1293,6 +1336,7 @@ pub mod string {
     }
     impl<BC: crate::Container<u64>> crate::Container<String> for Strings<BC, Vec<u8>> {
         type Borrowed<'a> = Strings<BC::Borrowed<'a>, &'a [u8]> where BC: 'a;
+        #[inline(always)]
         fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
             Strings {
                 bounds: self.bounds.borrow(),
@@ -1308,6 +1352,7 @@ pub mod string {
         }
     }
     impl<'a, BC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for Strings<BC, VC> {
+        #[inline(always)]
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
             Self {
                 bounds: crate::FromBytes::from_bytes(bytes),
@@ -1355,6 +1400,7 @@ pub mod string {
         }
     }
     impl<'a, BC: Push<u64>> Push<std::fmt::Arguments<'a>> for Strings<BC> {
+        #[inline]
         fn push(&mut self, item: std::fmt::Arguments<'a>) {
             use std::io::Write;
             self.values.write_fmt(item).expect("write_fmt failed");
@@ -1362,6 +1408,7 @@ pub mod string {
         }
     }
     impl<'a, 'b, BC: Push<u64>> Push<&'b std::fmt::Arguments<'a>> for Strings<BC> {
+        #[inline]
         fn push(&mut self, item: &'b std::fmt::Arguments<'a>) {
             use std::io::Write;
             self.values.write_fmt(*item).expect("write_fmt failed");
@@ -1369,12 +1416,14 @@ pub mod string {
         }
     }
     impl<BC: Clear, VC: Clear> Clear for Strings<BC, VC> {
+        #[inline(always)]
         fn clear(&mut self) {
             self.bounds.clear();
             self.values.clear();
         }
     }
     impl<BC: HeapSize, VC: HeapSize> HeapSize for Strings<BC, VC> {
+        #[inline(always)]
         fn heap_size(&self) -> (usize, usize) {
             let (l0, c0) = self.bounds.heap_size();
             let (l1, c1) = self.values.heap_size();
@@ -1397,6 +1446,7 @@ pub mod vector {
 
     impl<T: Columnar> Columnar for Vec<T> {
         type Ref<'a> = Slice<<T::Container as crate::Container<T>>::Borrowed<'a>> where T: 'a;
+        #[inline(always)]
         fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
             self.truncate(other.len());
             let mut other_iter = other.into_iter();
@@ -1407,6 +1457,7 @@ pub mod vector {
                 self.push(T::into_owned(o));
             }
         }
+        #[inline(always)]
         fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
             other.into_iter().map(|x| T::into_owned(x)).collect()
         }
@@ -1415,11 +1466,13 @@ pub mod vector {
 
     impl<T: Columnar, const N: usize> Columnar for [T; N] {
         type Ref<'a> = Slice<<T::Container as crate::Container<T>>::Borrowed<'a>> where T: 'a;
+        #[inline(always)]
         fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
             for (s, o) in self.iter_mut().zip(other.into_iter()) {
                 T::copy_from(s, o);
             }
         }
+        #[inline(always)]
         fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
             let vec: Vec<_> = other.into_iter().map(|x| T::into_owned(x)).collect();
             match vec.try_into() {
@@ -1432,6 +1485,7 @@ pub mod vector {
 
     impl<T: Columnar, const N: usize> Columnar for smallvec::SmallVec<[T; N]> {
         type Ref<'a> = Slice<<T::Container as crate::Container<T>>::Borrowed<'a>> where T: 'a;
+        #[inline(always)]
         fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
             self.truncate(other.len());
             let mut other_iter = other.into_iter();
@@ -1442,6 +1496,7 @@ pub mod vector {
                 self.push(T::into_owned(o));
             }
         }
+        #[inline(always)]
         fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
             other.into_iter().map(|x| T::into_owned(x)).collect()
         }
@@ -1450,6 +1505,7 @@ pub mod vector {
 
     impl<T: Columnar<Container = TC>, BC: crate::Container<u64>, TC: crate::Container<T>> crate::Container<Vec<T>> for Vecs<TC, BC> {
         type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>> where BC: 'a, TC: 'a, T: 'a;
+        #[inline(always)]
         fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
             Vecs {
                 bounds: self.bounds.borrow(),
@@ -1460,6 +1516,7 @@ pub mod vector {
 
     impl<T: Columnar<Container = TC>, BC: crate::Container<u64>, TC: crate::Container<T>, const N: usize> crate::Container<[T; N]> for Vecs<TC, BC> {
         type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>> where BC: 'a, TC: 'a, T: 'a;
+        #[inline(always)]
         fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
             Vecs {
                 bounds: self.bounds.borrow(),
@@ -1470,6 +1527,7 @@ pub mod vector {
 
     impl<T: Columnar<Container = TC>, BC: crate::Container<u64>, TC: crate::Container<T>, const N: usize> crate::Container<smallvec::SmallVec<[T; N]>> for Vecs<TC, BC> {
         type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>> where BC: 'a, TC: 'a, T: 'a;
+        #[inline(always)]
         fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
             Vecs {
                 bounds: self.bounds.borrow(),
@@ -1485,6 +1543,7 @@ pub mod vector {
         }
     }
     impl<'a, TC: crate::FromBytes<'a>, BC: crate::FromBytes<'a>> crate::FromBytes<'a> for Vecs<TC, BC> {
+        #[inline(always)]
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
             Self {
                 bounds: crate::FromBytes::from_bytes(bytes),
@@ -1543,6 +1602,7 @@ pub mod vector {
     }
 
     impl<TC: Clear> Clear for Vecs<TC> {
+        #[inline(always)]
         fn clear(&mut self) {
             self.bounds.clear();
             self.values.clear();
@@ -1571,11 +1631,13 @@ pub mod tuple {
 
             impl<$($name: Columnar),*> Columnar for ($($name,)*) {
                 type Ref<'a> = ($($name::Ref<'a>,)*) where $($name: 'a,)*;
+                #[inline(always)]
                 fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
                     let ($($name,)*) = self;
                     let ($($name2,)*) = other;
                     $(crate::Columnar::copy_from($name, $name2);)*
                 }
+                #[inline(always)]
                 fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
                     let ($($name2,)*) = other;
                     ($($name::into_owned($name2),)*)
@@ -1584,6 +1646,7 @@ pub mod tuple {
             }
             impl<$($name: crate::Columnar, $name2: crate::Container<$name>,)*> crate::Container<($($name,)*)> for ($($name2,)*) {
                 type Borrowed<'a> = ($($name2::Borrowed<'a>,)*) where $($name: 'a, $name2: 'a,)*;
+                #[inline(always)]
                 fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
                     let ($($name,)*) = self;
                     ($($name.borrow(),)*)
@@ -1601,6 +1664,7 @@ pub mod tuple {
                 }
             }
             impl<'a, $($name: crate::FromBytes<'a>),*> crate::FromBytes<'a> for ($($name,)*) {
+                #[inline(always)]
                 #[allow(non_snake_case)]
                 fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
                     $(let $name = crate::FromBytes::from_bytes(bytes);)*
@@ -1609,17 +1673,20 @@ pub mod tuple {
             }
 
             impl<$($name: Len),*> Len for ($($name,)*) {
+                #[inline(always)]
                 fn len(&self) -> usize {
                     self.0.len()
                 }
             }
             impl<$($name: Clear),*> Clear for ($($name,)*) {
+                #[inline(always)]
                 fn clear(&mut self) {
                     let ($($name,)*) = self;
                     $($name.clear();)*
                 }
             }
             impl<$($name: HeapSize),*> HeapSize for ($($name,)*) {
+                #[inline(always)]
                 fn heap_size(&self) -> (usize, usize) {
                     let ($($name,)*) = self;
                     let mut l = 0;
@@ -1630,6 +1697,7 @@ pub mod tuple {
             }
             impl<$($name: Index),*> Index for ($($name,)*) {
                 type Ref = ($($name::Ref,)*);
+                #[inline(always)]
                 fn get(&self, index: usize) -> Self::Ref {
                     let ($($name,)*) = self;
                     ($($name.get(index),)*)
@@ -1637,6 +1705,7 @@ pub mod tuple {
             }
             impl<'a, $($name),*> Index for &'a ($($name,)*) where $( &'a $name: Index),* {
                 type Ref = ($(<&'a $name as Index>::Ref,)*);
+                #[inline(always)]
                 fn get(&self, index: usize) -> Self::Ref {
                     let ($($name,)*) = self;
                     ($($name.get(index),)*)
@@ -1645,6 +1714,7 @@ pub mod tuple {
 
             impl<$($name: IndexMut),*> IndexMut for ($($name,)*) {
                 type IndexMut<'a> = ($($name::IndexMut<'a>,)*) where $($name: 'a),*;
+                #[inline(always)]
                 fn get_mut(&mut self, index: usize) -> Self::IndexMut<'_> {
                     let ($($name,)*) = self;
                     ($($name.get_mut(index),)*)
@@ -1764,6 +1834,7 @@ pub mod sums {
             }
         }
         impl<'a, CC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for RankSelect<CC, VC, &'a u64> {
+            #[inline(always)]
             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
                 Self {
                     counts: crate::FromBytes::from_bytes(bytes),
@@ -1918,6 +1989,7 @@ pub mod sums {
             }
         }
         impl<'a, SC: crate::FromBytes<'a>, TC: crate::FromBytes<'a>, CC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for Results<SC, TC, CC, VC, &'a u64> {
+            #[inline(always)]
             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
                 Self {
                     indexes: crate::FromBytes::from_bytes(bytes),
@@ -2123,6 +2195,7 @@ pub mod sums {
         }
 
         impl <'a, TC: crate::FromBytes<'a>, CC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for Options<TC, CC, VC, &'a u64> {
+            #[inline(always)]
             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
                 Self {
                     indexes: crate::FromBytes::from_bytes(bytes),
@@ -2606,6 +2679,20 @@ pub mod chain_mod {
                 }
             }
             None
+        }
+
+        #[inline]
+        fn fold<Acc, F>(self, mut acc: Acc, mut f: F) -> Acc
+        where
+            F: FnMut(Acc, Self::Item) -> Acc,
+        {
+            if let Some(a) = self.a {
+                acc = a.fold(acc, &mut f);
+            }
+            if let Some(b) = self.b {
+                acc = b.fold(acc, f);
+            }
+            acc
         }
     }
 
