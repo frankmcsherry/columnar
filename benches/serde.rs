@@ -119,7 +119,7 @@ pub struct Http {
 }
 
 #[allow(non_camel_case_types)]
-#[derive(Clone, Eq, PartialEq, Columnar, Serialize, Deserialize)]
+#[derive(Copy, Clone, Eq, PartialEq, Columnar, Serialize, Deserialize)]
 pub enum HttpProtocol {
     HTTP_PROTOCOL_UNKNOWN,
     HTTP10,
@@ -127,7 +127,7 @@ pub enum HttpProtocol {
 }
 
 #[allow(non_camel_case_types)]
-#[derive(Clone, Eq, PartialEq, Columnar, Serialize, Deserialize)]
+#[derive(Copy, Clone, Eq, PartialEq, Columnar, Serialize, Deserialize)]
 pub enum HttpMethod {
     METHOD_UNKNOWN,
     GET,
@@ -143,7 +143,7 @@ pub enum HttpMethod {
 }
 
 #[allow(non_camel_case_types)]
-#[derive(Clone, Eq, PartialEq, Columnar, Serialize, Deserialize)]
+#[derive(Copy, Clone, Eq, PartialEq, Columnar, Serialize, Deserialize)]
 pub enum CacheStatus {
     CACHESTATUS_UNKNOWN,
     Miss,
@@ -160,7 +160,7 @@ pub struct Origin {
 }
 
 #[allow(non_camel_case_types)]
-#[derive(Clone, Eq, PartialEq, Columnar, Serialize, Deserialize)]
+#[derive(Copy, Clone, Eq, PartialEq, Columnar, Serialize, Deserialize)]
 pub enum OriginProtocol {
     ORIGIN_PROTOCOL_UNKNOWN,
     HTTP,
@@ -168,7 +168,7 @@ pub enum OriginProtocol {
 }
 
 #[allow(non_camel_case_types)]
-#[derive(Clone, Eq, PartialEq, Columnar, Serialize, Deserialize)]
+#[derive(Copy, Clone, Eq, PartialEq, Columnar, Serialize, Deserialize)]
 pub enum ZonePlan {
     ZONEPLAN_UNKNOWN,
     FREE,
@@ -177,7 +177,7 @@ pub enum ZonePlan {
     ENT,
 }
 
-#[derive(Clone, Eq, PartialEq, Columnar, Serialize, Deserialize)]
+#[derive(Copy, Clone, Eq, PartialEq, Columnar, Serialize, Deserialize)]
 pub enum Country {
     UNKNOWN,
     A1,

@@ -20,7 +20,7 @@ pub trait Columnar : 'static {
     /// For each lifetime, a reference with that lifetime.
     ///
     /// As an example, `(&'a A, &'a [B])`.
-    type Ref<'a>;
+    type Ref<'a> : Copy;
     /// Repopulates `self` from a reference.
     ///
     /// By default this just calls `into_owned()`, but it can be overridden.
@@ -435,6 +435,12 @@ pub mod common {
         type IntoIter = IterOwn<Slice<S>>;
         fn into_iter(self) -> Self::IntoIter {
             self.into_index_iter()
+        }
+    }
+
+    impl<'a, T> Slice<&'a [T]> {
+        pub fn as_slice(&self) -> &'a [T] {
+            &self.slice[self.lower .. self.upper]
         }
     }
 

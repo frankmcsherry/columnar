@@ -104,14 +104,14 @@ mod test {
     }
 
     // Tests derived implementations for a struct with all unit variants.
-    #[derive(Columnar, Debug)]
+    #[derive(Columnar, Debug, Copy, Clone)]
     pub enum Test4 {
         Foo,
         Bar,
     }
     
     // Tests derived implementations for a unit struct.
-    #[derive(Columnar, Debug)]
+    #[derive(Columnar, Debug, Copy, Clone)]
     struct Test5;
 
     // Test derived implementations for the reference type.
