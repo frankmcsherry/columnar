@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1](https://github.com/frankmcsherry/columnar/compare/columnar-v0.5.0...columnar-v0.5.1) - 2025-06-13
+
+### Other
+
+- Make Ref Copy, add as_slice
+- Optimization to help Rust do the right thing
+- Add iterator slice hint and implement ExactSizeIterator
+- Support for smallvec
+
 ## [0.5.0](https://github.com/frankmcsherry/columnar/compare/columnar-v0.4.1...columnar-v0.5.0) - 2025-05-09
 
 ### Other

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4](https://github.com/frankmcsherry/columnar/compare/columnar_derive-v0.2.3...columnar_derive-v0.2.4) - 2025-06-13
+
+### Other
+
+- Optimization to help Rust do the right thing
+
 ## [0.2.3](https://github.com/frankmcsherry/columnar/compare/columnar_derive-v0.2.2...columnar_derive-v0.2.3) - 2025-03-24
 
 ### Other
