@@ -271,36 +271,42 @@ pub mod common {
     pub trait HeapSize {
         /// Active (len) and allocated (cap) heap sizes in bytes.
         /// This should not include the size of `self` itself.
-        fn heap_size(&self) -> (usize, usize) { (0, 0) }
+        #[inline(always)]
+        fn heap_size<F: FnMut(usize, usize)>(&self, callback: &mut F) { let _ = callback; }
+
+        fn summed(this: &Self) -> (usize, usize) {
+            let mut len = 0;
+            let mut cap = 0;
+            this.heap_size(&mut |l: usize, c: usize| { len += l; cap += c; });
+            (len, cap)
+        }
+
+        fn heap_size_len(&self) -> usize {
+            Self::summed(self).0
+        }
     }
 
     impl HeapSize for String {
-        fn heap_size(&self) -> (usize, usize) {
-            (self.len(), self.capacity())
+        fn heap_size<F: FnMut(usize, usize)>(&self, callback: &mut F) {
+            callback(self.len(), self.capacity())
         }
     }
     impl<T: HeapSize> HeapSize for [T] {
-        fn heap_size(&self) -> (usize, usize) {
-            let mut l = std::mem::size_of_val(self);
-            let mut c = std::mem::size_of_val(self);
+        fn heap_size<F: FnMut(usize, usize)>(&self, callback: &mut F) {
+            callback(std::mem::size_of_val(self), std::mem::size_of_val(self));
             for item in self.iter() {
-                let (il, ic) = item.heap_size();
-                l += il;
-                c += ic;
+                item.heap_size(callback);
             }
-            (l, c)
         }
     }
     impl<T: HeapSize> HeapSize for Vec<T> {
-        fn heap_size(&self) -> (usize, usize) {
-            let mut l = std::mem::size_of::<T>() * self.len();
-            let mut c = std::mem::size_of::<T>() * self.capacity();
-            for item in (self[..]).iter() {
-                let (il, ic) = item.heap_size();
-                l += il;
-                c += ic;
+        fn heap_size<F: FnMut(usize, usize)>(&self, callback: &mut F) {
+            let l = std::mem::size_of::<T>() * self.len();
+            let c = std::mem::size_of::<T>() * self.capacity();
+            callback(l, c);
+            for item in self {
+                item.heap_size(callback);
             }
-            (l, c)
         }
     }
 
@@ -811,7 +817,7 @@ pub mod bytes {
             }
 
             assert_eq!(column.len(), 200);
-            assert_eq!(column.heap_size(), (1624, 2080));
+            assert_eq!(HeapSize::summed(&column), (1624, 2080));
 
             for i in 0..100 {
                 assert_eq!(column.get(2*i+0), Ok(i as u64));
@@ -923,8 +929,8 @@ pub mod primitive {
         impl<CV: Clear> Clear for Usizes<CV> { fn clear(&mut self) { self.values.clear() }}
 
         impl<CV: HeapSize> HeapSize for Usizes<CV> {
-            fn heap_size(&self) -> (usize, usize) {
-                self.values.heap_size()
+            fn heap_size<F: FnMut(usize, usize)>(&self, callback: &mut F) {
+                self.values.heap_size(callback)
             }
         }
 
@@ -983,8 +989,8 @@ pub mod primitive {
         impl<CV: Clear> Clear for Isizes<CV> { fn clear(&mut self) { self.values.clear() }}
 
         impl<CV: HeapSize> HeapSize for Isizes<CV> {
-            fn heap_size(&self) -> (usize, usize) {
-                self.values.heap_size()
+            fn heap_size<F: FnMut(usize, usize)>(&self, callback: &mut F) {
+                self.values.heap_size(callback)
             }
         }
 
@@ -1063,10 +1069,8 @@ pub mod primitive {
             }
         }
 
-        impl HeapSize for Empties {
-            #[inline(always)]
-            fn heap_size(&self) -> (usize, usize) { (0, 0) }
-        }
+        // Does not contain heap allocations.
+        impl HeapSize for Empties { }
         impl Clear for Empties {
             #[inline(always)]
             fn clear(&mut self) { self.count = 0; }
@@ -1199,8 +1203,8 @@ pub mod primitive {
 
         impl<VC: HeapSize> HeapSize for Bools<VC> {
             #[inline(always)]
-            fn heap_size(&self) -> (usize, usize) {
-                self.values.heap_size()
+            fn heap_size<F: FnMut(usize, usize)>(&self, callback: &mut F) {
+                self.values.heap_size(callback)
             }
         }
     }
@@ -1295,10 +1299,9 @@ pub mod primitive {
 
         impl<SC: HeapSize, NC: HeapSize> HeapSize for Durations<SC, NC> {
             #[inline(always)]
-            fn heap_size(&self) -> (usize, usize) {
-                let (l0, c0) = self.seconds.heap_size();
-                let (l1, c1) = self.nanoseconds.heap_size();
-                (l0 + l1, c0 + c1)
+            fn heap_size<F: FnMut(usize, usize)>(&self, callback: &mut F) {
+                self.seconds.heap_size(callback);
+                self.nanoseconds.heap_size(callback);
             }
         }
     }
@@ -1430,10 +1433,9 @@ pub mod string {
     }
     impl<BC: HeapSize, VC: HeapSize> HeapSize for Strings<BC, VC> {
         #[inline(always)]
-        fn heap_size(&self) -> (usize, usize) {
-            let (l0, c0) = self.bounds.heap_size();
-            let (l1, c1) = self.values.heap_size();
-            (l0 + l1, c0 + c1)
+        fn heap_size<F: FnMut(usize, usize)>(&self, callback: &mut F) {
+            self.bounds.heap_size(callback);
+            self.values.heap_size(callback);
         }
     }
 }
@@ -1616,10 +1618,10 @@ pub mod vector {
     }
 
     impl<TC: HeapSize, BC: HeapSize> HeapSize for Vecs<TC, BC> {
-        fn heap_size(&self) -> (usize, usize) {
-            let (l0, c0) = self.bounds.heap_size();
-            let (l1, c1) = self.values.heap_size();
-            (l0 + l1, c0 + c1)
+        #[inline(always)]
+        fn heap_size<F: FnMut(usize, usize)>(&self, callback: &mut F) {
+            self.bounds.heap_size(callback);
+            self.values.heap_size(callback);
         }
     }
 }
@@ -1693,12 +1695,9 @@ pub mod tuple {
             }
             impl<$($name: HeapSize),*> HeapSize for ($($name,)*) {
                 #[inline(always)]
-                fn heap_size(&self) -> (usize, usize) {
+                fn heap_size<Func: FnMut(usize, usize)>(&self, callback: &mut Func) {
                     let ($($name,)*) = self;
-                    let mut l = 0;
-                    let mut c = 0;
-                    $(let (l0, c0) = $name.heap_size(); l += l0; c += c0;)*
-                    (l, c)
+                    $($name.heap_size(callback);)*
                 }
             }
             impl<$($name: Index),*> Index for ($($name,)*) {
@@ -1771,7 +1770,7 @@ pub mod tuple {
             }
 
             assert_eq!(column.len(), 200);
-            assert_eq!(column.heap_size(), (3590, 4608));
+            assert_eq!(HeapSize::summed(&column), (3590, 4608));
 
             for i in 0..100u64 {
                 assert_eq!((&column).get((2*i+0) as usize), (&i, &(i as u8), i.to_string().as_str()));
@@ -1784,7 +1783,7 @@ pub mod tuple {
                 column.push((i, i as u8, i.to_string()));
                 column.push((i, i as u8, "".to_string()));
             }
-            assert_eq!(column.heap_size(), (8190, 11040));
+            assert_eq!(HeapSize::summed(&column), (8190, 11040));
 
         }
     }
@@ -1935,10 +1934,10 @@ pub mod sums {
             }
         }
         impl<CC: HeapSize, VC: HeapSize> HeapSize for RankSelect<CC, VC> {
-            fn heap_size(&self) -> (usize, usize) {
-                let (l0, c0) = self.counts.heap_size();
-                let (l1, c1) = self.values.heap_size();
-                (l0 + l1, c0 + c1)
+            #[inline(always)]
+            fn heap_size<F: FnMut(usize, usize)>(&self, callback: &mut F) {
+                self.counts.heap_size(callback);
+                self.values.heap_size(callback);
             }
         }
     }
@@ -2088,6 +2087,7 @@ pub mod sums {
         }
 
         impl<SC: Clear, TC: Clear> Clear for Results<SC, TC> {
+            #[inline(always)]
             fn clear(&mut self) {
                 self.indexes.clear();
                 self.oks.clear();
@@ -2096,11 +2096,11 @@ pub mod sums {
         }
 
         impl<SC: HeapSize, TC: HeapSize> HeapSize for Results<SC, TC> {
-            fn heap_size(&self) -> (usize, usize) {
-                let (l0, c0) = self.oks.heap_size();
-                let (l1, c1) = self.errs.heap_size();
-                let (li, ci) = self.indexes.heap_size();
-                (l0 + l1 + li, c0 + c1 + ci)
+            #[inline(always)]
+            fn heap_size<F: FnMut(usize, usize)>(&self, callback: &mut F) {
+                self.oks.heap_size(callback);
+                self.errs.heap_size(callback);
+                self.indexes.heap_size(callback);
             }
         }
 
@@ -2131,7 +2131,7 @@ pub mod sums {
                 }
 
                 assert_eq!(column.len(), 200);
-                assert_eq!(column.heap_size(), (1624, 2080));
+                assert_eq!(HeapSize::summed(&column), (1624, 2080));
 
                 for i in 0..100 {
                     assert_eq!(column.get(2*i+0), Ok(i as u64));
@@ -2145,7 +2145,7 @@ pub mod sums {
                 }
 
                 assert_eq!(column.len(), 200);
-                assert_eq!(column.heap_size(), (924, 1184));
+                assert_eq!(HeapSize::summed(&column), (924, 1184));
 
                 for i in 0..100 {
                     assert_eq!(column.get(2*i+0), Ok(i as u64));
@@ -2284,10 +2284,9 @@ pub mod sums {
         }
 
         impl<TC: HeapSize> HeapSize for Options<TC> {
-            fn heap_size(&self) -> (usize, usize) {
-                let (l0, c0) = self.somes.heap_size();
-                let (li, ci) = self.indexes.heap_size();
-                (l0 + li, c0 + ci)
+            fn heap_size<F: FnMut(usize, usize)>(&self, callback: &mut F) {
+                self.somes.heap_size(callback);
+                self.indexes.heap_size(callback);
             }
         }
 
@@ -2304,7 +2303,7 @@ pub mod sums {
                 let store: Options<Vec<i32>> = Columnar::into_columns((0..100).map(Some));
                 assert_eq!(store.len(), 100);
                 assert!((&store).index_iter().zip(0..100).all(|(a, b)| a == Some(&b)));
-                assert_eq!(store.heap_size(), (408, 544));
+                assert_eq!(HeapSize::summed(&store), (408, 544));
             }
 
             #[test]
@@ -2313,7 +2312,7 @@ pub mod sums {
                 assert_eq!(store.len(), 100);
                 let foo = &store;
                 assert!(foo.index_iter().zip(0..100).all(|(a, _b)| a == None));
-                assert_eq!(store.heap_size(), (8, 32));
+                assert_eq!(HeapSize::summed(&store), (8, 32));
             }
 
             #[test]
@@ -2322,7 +2321,7 @@ pub mod sums {
                 let store: Options<Vec<i32>>  = Columnar::into_columns((0..100).map(|x| if x % 2 == 0 { Some(x) } else { None }));
                 assert_eq!(store.len(), 100);
                 assert!((&store).index_iter().zip(0..100).all(|(a, b)| a == if b % 2 == 0 { Some(&b) } else { None }));
-                assert_eq!(store.heap_size(), (208, 288));
+                assert_eq!(HeapSize::summed(&store), (208, 288));
             }
         }
     }
@@ -2379,8 +2378,9 @@ pub mod lookback {
     }
 
     impl<TC: HeapSize, const N: u8> HeapSize for Repeats<TC, N> {
-        fn heap_size(&self) -> (usize, usize) {
-            self.inner.heap_size()
+        #[inline(always)]
+        fn heap_size<F: FnMut(usize, usize)>(&self, callback: &mut F) {
+            self.inner.heap_size(callback)
         }
     }
 
@@ -2438,8 +2438,8 @@ pub mod lookback {
     }
 
     impl<TC: HeapSize, VC: HeapSize, const N: u8> HeapSize for Lookbacks<TC, VC, N> {
-        fn heap_size(&self) -> (usize, usize) {
-            self.inner.heap_size()
+        fn heap_size<F: FnMut(usize, usize)>(&self, callback: &mut F) {
+            self.inner.heap_size(callback)
         }
     }
 }
