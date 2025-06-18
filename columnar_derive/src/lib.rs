@@ -494,9 +494,7 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
             fn into_owned<'a>(other: Self::Ref<'a>) -> Self { other }
             type Container = #c_ident;
             #[inline(always)]
-            fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> {
-                thing
-            }
+            fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> { thing }
         }
 
         impl ::columnar::Container<#name> for #c_ident {
@@ -1124,9 +1122,7 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
             fn into_owned<'a>(other: Self::Ref<'a>) -> Self { other }
             type Container = #c_ident;
             #[inline(always)]
-            fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> {
-                thing
-            }
+            fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> { thing }
         }
 
         impl<CV: ::columnar::Container<u8>> ::columnar::Container<#name> for #c_ident <CV> {
