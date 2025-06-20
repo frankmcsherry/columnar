@@ -15,14 +15,14 @@ pub enum Json {
 }
 
 impl HeapSize for Json {
-    fn heap_size(&self) -> (usize, usize) {
+    fn heap_size<F: FnMut(usize, usize)>(&self, callback: &mut F) {
         match self {
-            Json::Null => (0, 0),
-            Json::Bool(_) => (0, 0),
-            Json::Number(_) => (0, 0),
-            Json::String(s) => (0, s.len()),
-            Json::Array(a) => a.heap_size(),
-            Json::Object(o) => o.heap_size(),
+            Json::Null => {},
+            Json::Bool(_) => {},
+            Json::Number(_) => {},
+            Json::String(s) => s.heap_size(callback),
+            Json::Array(a) => a.heap_size(callback),
+            Json::Object(o) => o.heap_size(callback),
         }
     }
 }
@@ -55,9 +55,8 @@ pub enum JsonIdx {
     Object(usize),
 }
 
-impl HeapSize for JsonIdx {
-    fn heap_size(&self) -> (usize, usize) { (0, 0) }
-}
+// Does not contain heap allocations.
+impl HeapSize for JsonIdx { }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Number (serde_json::Number);
@@ -104,13 +103,12 @@ pub struct Jsons {
 }
 
 impl HeapSize for Jsons {
-    fn heap_size(&self) -> (usize, usize) {
-        let (l0, c0) = self.roots.heap_size();
-        let (l1, c1) = self.numbers.heap_size();
-        let (l2, c2) = self.strings.heap_size();
-        let (l3, c3) = self.arrays.heap_size();
-        let (l4, c4) = self.objects.heap_size();
-        (l0 + l1 + l2 + l3 + l4, c0 + c1 + c2 + c3 + c4)
+    fn heap_size<F: FnMut(usize, usize)>(&self, callback: &mut F) {
+        self.roots.heap_size(callback);
+        self.numbers.heap_size(callback);
+        self.strings.heap_size(callback);
+        self.arrays.heap_size(callback);
+        self.objects.heap_size(callback);
     }
 }
 
@@ -312,21 +310,21 @@ fn main() {
     println!("{:?}\tjson_vals cloned", time);
 
     let values = records.clone().into_iter().map(Json::from_json).collect::<Vec<_>>();
-    println!("\t\tjson_vals heapsize: {:?}", values.heap_size().0);
+    println!("\t\tjson_vals heapsize: {:?}", HeapSize::heap_size_len(&values));
 
     let timer = std::time::Instant::now();
     let mut json_cols = Jsons::default();
     json_cols.extend(values.iter());
     let time = timer.elapsed();
     println!("{:?}\tjson_cols formed", time);
-    println!("\t\tjson_cols heapsize: {:?}", json_cols.heap_size().0);
-    println!("\t\tjson_cols.roots:    {:?}", json_cols.roots.heap_size().0);
-    println!("\t\tjson_cols.numbers:  {:?}", json_cols.numbers.heap_size().0);
-    println!("\t\tjson_cols.strings:  {:?}", json_cols.strings.heap_size().0);
-    println!("\t\tjson_cols.arrays:   {:?}", json_cols.arrays.heap_size().0);
-    println!("\t\tjson_cols.objects:  {:?}", json_cols.objects.heap_size().0);
-    println!("\t\tjson_cols.objects.values.0:  {:?}", json_cols.objects.values.0.heap_size().0);
-    println!("\t\tjson_cols.objects.values.1:  {:?}", json_cols.objects.values.1.heap_size().0);
+    println!("\t\tjson_cols heapsize: {:?}", HeapSize::heap_size_len(&json_cols));
+    println!("\t\tjson_cols.roots:    {:?}", HeapSize::heap_size_len(&json_cols));
+    println!("\t\tjson_cols.numbers:  {:?}", HeapSize::heap_size_len(&json_cols));
+    println!("\t\tjson_cols.strings:  {:?}", HeapSize::heap_size_len(&json_cols));
+    println!("\t\tjson_cols.arrays:   {:?}", HeapSize::heap_size_len(&json_cols));
+    println!("\t\tjson_cols.objects:  {:?}", HeapSize::heap_size_len(&json_cols));
+    println!("\t\tjson_cols.objects.values.0:  {:?}", HeapSize::heap_size_len(&json_cols.objects.values.0));
+    println!("\t\tjson_cols.objects.values.1:  {:?}", HeapSize::heap_size_len(&json_cols.objects.values.1));
 
     println!("\t\tjson_cols.arrays.len: {:?}", json_cols.arrays.len());
 

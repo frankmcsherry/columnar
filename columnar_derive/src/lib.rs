@@ -267,19 +267,34 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         }
     };
 
-    let length = { 
+    let length = {
 
         let impl_gen = quote! { < #(#container_types),* > };
         let ty_gen = quote! { < #(#container_types),* > };
         let where_clause = quote! { where #(#container_types: ::columnar::Len),* };
 
         let first_name = &names[0];
-        
+
         quote! {
             impl #impl_gen ::columnar::Len for #c_ident #ty_gen #where_clause {
                 #[inline(always)]
                 fn len(&self) -> usize {
                     self.#first_name.len()
+                }
+            }
+        }
+    };
+
+    let heap_size = {
+
+        let impl_gen = quote! { < #(#container_types),* > };
+        let ty_gen = quote! { < #(#container_types),* > };
+        let where_clause = quote! { where #(#container_types: ::columnar::HeapSize),* };
+
+        quote! {
+            impl #impl_gen ::columnar::HeapSize for #c_ident #ty_gen #where_clause {
+                fn heap_size<F: FnMut(usize, usize)>(&self, callback: &mut F) {
+                    #(self.#names.heap_size(callback);)*
                 }
             }
         }
@@ -397,6 +412,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         #index_own
         #index_ref
         #length
+        #heap_size
         #clear
 
         #as_bytes
@@ -463,6 +479,8 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
             }
         }
 
+        impl ::columnar::HeapSize for #c_ident { }
+
         impl<CW: Copy+::columnar::common::index::CopyAs<u64>> ::columnar::Len for #c_ident<CW> {
             #[inline(always)]
             fn len(&self) -> usize {
@@ -514,7 +532,6 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
 
 /// The derived container for an `enum` type will be a struct with containers for each field of each variant, plus an offset container and a discriminant container.
 /// Its index `Ref` type will be an enum with parallel variants, each containing the index `Ref` types of the corresponding variant containers.
-#[allow(unused)]
 fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::DataEnum, vis: syn::Visibility, attr: Option<proc_macro2::TokenStream>) -> proc_macro::TokenStream {
 
     if data_enum.variants.iter().all(|variant| variant.fields.is_empty()) {
@@ -720,7 +737,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         let where_clause = quote! { where #(#container_types: ::columnar::Len + ::columnar::Push<#reference_types>),* };
 
         let index_type = quote! { #r_ident < #(#reference_types,)* > };
-        let numbers = (0 .. variants.len());
+        let numbers = 0 .. variants.len();
 
         quote! {
             impl #impl_gen ::columnar::Push<#index_type> for #c_ident < #(#container_types),* > #where_clause {
@@ -748,7 +765,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         let index_type = quote! { #r_ident < #(<#container_types as ::columnar::Index>::Ref,)* > };
 
         // These numbers must match those in the `Push` implementations.
-        let numbers = (0 .. variants.len());
+        let numbers = 0 .. variants.len();
 
         quote! {
             impl #impl_gen ::columnar::Index for #c_ident #ty_gen #where_clause {
@@ -772,7 +789,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         let index_type = quote! { #r_ident < #(<&'columnar #container_types as ::columnar::Index>::Ref,)* > };
 
         // These numbers must match those in the `Push` implementations.
-        let numbers = (0 .. variants.len());
+        let numbers = 0 .. variants.len();
 
         quote! {
             impl #impl_gen ::columnar::Index for &'columnar #c_ident #ty_gen #where_clause {
@@ -806,7 +823,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         }
     };
 
-    let length = { 
+    let length = {
 
         let impl_gen = quote! { < #(#container_types,)* CVar, COff> };
         let ty_gen = quote! { < #(#container_types,)* CVar, COff > };
@@ -816,6 +833,27 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                 #[inline(always)]
                 fn len(&self) -> usize {
                     self.variant.len()
+                }
+            }
+        }
+    };
+
+    let heap_size = {
+
+        let impl_gen = quote! { < #(#container_types,)* CVar, COff> };
+        let ty_gen = quote! { < #(#container_types,)* CVar, COff > };
+        let where_clause = quote! { #(#container_types: ::columnar::HeapSize),* };
+
+        quote! {
+            impl #impl_gen ::columnar::HeapSize for #c_ident #ty_gen where
+                #where_clause,
+                CVar: ::columnar::HeapSize,
+                COff: ::columnar::HeapSize,
+            {
+                fn heap_size<F: FnMut(usize, usize)>(&self, callback: &mut F) {
+                    #(self.#names.heap_size(callback);)*
+                    self.variant.heap_size(callback);
+                    self.offset.heap_size(callback);
                 }
             }
         }
@@ -1008,6 +1046,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         #index_own
         #index_ref
         #length
+        #heap_size
         #clear
 
         #as_bytes
@@ -1019,7 +1058,6 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 }
 
 /// A derivation for an enum type with no fields in any of its variants.
-#[allow(unused)]
 fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::DataEnum, vis: syn::Visibility) -> proc_macro::TokenStream {
 
     let c_name = format!("{}Container", name);
@@ -1096,6 +1134,13 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
             #[inline(always)]
             fn len(&self) -> usize {
                 self.variant.len()
+            }
+        }
+
+        impl<CVar: ::columnar::HeapSize> ::columnar::HeapSize for #c_ident <CVar> {
+            #[inline(always)]
+            fn heap_size<F: FnMut(usize, usize)>(&self, callback: &mut F) {
+                self.variant.heap_size(callback);
             }
         }
 
