@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0](https://github.com/frankmcsherry/columnar/compare/columnar-v0.5.1...columnar-v0.6.0) - 2025-06-20
+
+### Other
+
+- Polishing
+- Reborrow for containers and references
+
 ## [0.5.1](https://github.com/frankmcsherry/columnar/compare/columnar-v0.5.0...columnar-v0.5.1) - 2025-06-13
 
 ### Other
