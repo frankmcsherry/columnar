@@ -22,6 +22,8 @@ fn main() {
     // even though `roster` contains many small allocations.
     let mut columns = Columnar::as_columns(roster.iter());
 
+    println!("Heap size: {}", columnar::HeapSize::summed(&columns).0);
+
     // Iterated column values should match the original `roster`.
     use columnar::Index;
     for (col, row) in columns.into_index_iter().zip(roster) {
@@ -56,6 +58,7 @@ fn main() {
     for (align, bytes) in columns.borrow().as_bytes() {
         println!("align: {:?}, bytes.len(): {:?}", align, bytes.len());
     }
+    println!("Heap size: {}", columnar::HeapSize::summed(&columns).0);
 
     // Borrow raw bytes from `columns`, and reconstruct a borrowed `columns`.
     // In practice, we would use serialized bytes from somewhere else.
@@ -109,7 +112,7 @@ mod test {
         Foo,
         Bar,
     }
-    
+
     // Tests derived implementations for a unit struct.
     #[derive(Columnar, Debug, Copy, Clone)]
     struct Test5;
@@ -150,7 +153,7 @@ mod test {
             Test3::Bar(4),
         ];
         let test3c = columnar::Columnar::as_columns(test3s.iter());
-        
+
         println!("{:?}", test3c);
 
         let iterc = (&test3c).into_index_iter();
