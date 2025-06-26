@@ -38,18 +38,12 @@ impl Op {
             Op::Add => { 
                 let aa: &Vec<i32> = &dataz[dataz.len()-2].as_ref().ok().unwrap();
                 let bb: &Vec<i32> = &dataz[dataz.len()-1].as_ref().ok().unwrap();
-                let mut result = Vec::with_capacity(aa.len());
-                for (a, b) in aa.iter().zip(bb.iter()) {
-                    result.push(a + b);
-                }
+                let result = aa.iter().zip(bb.iter()).map(|(a,b)| a + b).collect();
                 Ok(result)
             },
             Op::Neg => {
                 let aa: &Vec<i32> = &dataz[dataz.len()-1].as_ref().ok().unwrap();
-                let mut result = Vec::with_capacity(aa.len());
-                for a in aa.iter() {
-                    result.push(-a);
-                }
+                let result = aa.iter().map(|a| -a).collect();
                 Ok(result)
             },
             Op::Len => {
@@ -65,7 +59,7 @@ impl Op {
                 let mut result = Strings::default();
                 for a in aa.iter() {
                     use columnar::Push;
-                    result.push(&format!("{:?}", a));
+                    result.push(&format_args!("{:?}", a));
                 }
                 Err(result)
             },
@@ -73,17 +67,26 @@ impl Op {
     }
 }
 
-fn ops_rows(bencher: &mut Bencher) {
+fn add_rows(bencher: &mut Bencher) { _bench_rows(bencher, &[Op::Add]); }
+fn add_cols(bencher: &mut Bencher) { _bench_cols(bencher, &[Op::Add]); }
+fn neg_rows(bencher: &mut Bencher) { _bench_rows(bencher, &[Op::Neg]); }
+fn neg_cols(bencher: &mut Bencher) { _bench_cols(bencher, &[Op::Neg]); }
+fn fmt_rows(bencher: &mut Bencher) { _bench_rows(bencher, &[Op::Fmt]); }
+fn fmt_cols(bencher: &mut Bencher) { _bench_cols(bencher, &[Op::Fmt]); }
+fn anf_rows(bencher: &mut Bencher) { _bench_rows(bencher, &[Op::Add, Op::Neg, Op::Fmt]); }
+fn anf_cols(bencher: &mut Bencher) { _bench_cols(bencher, &[Op::Add, Op::Neg, Op::Fmt]); }
 
-    let prog = vec![Op::Add, Op::Neg, Op::Add];
+fn _bench_rows(bencher: &mut Bencher, prog: &[Op]) {
+
     let mut rows = Vec::with_capacity(1024);
     for i in 0 .. (rows.capacity() as i32) {
         rows.push(vec![Err("hello".to_string()), Ok(i), Ok(i), Ok(i)]);
     }
+    let len = 4;
 
     bencher.iter(|| {
         for row in rows.iter_mut() {
-            row.truncate(4);
+            row.truncate(len);
             for op in prog.iter() {
                 row.push(op.eval(&row[..]));
             }
@@ -92,47 +95,8 @@ fn ops_rows(bencher: &mut Bencher) {
     });
 }
 
-fn ops_rows_compiled(bencher: &mut Bencher) {
+fn _bench_cols(bencher: &mut Bencher, prog: &[Op]) {
 
-    // let prog = vec![Op::Add, Op::Neg, Op::Add];
-    let mut rows = Vec::with_capacity(1024);
-    for i in 0 .. (rows.capacity() as i32) {
-        rows.push(vec![Err("hello".to_string()), Ok(i), Ok(i), Ok(i)]);
-    }
-
-    bencher.iter(|| {
-        for row in rows.iter_mut() {
-            row.truncate(4);
-            row.push(Ok(*row[row.len()-2].as_ref().unwrap() + *row[row.len()-1].as_ref().unwrap()));
-            row.push(Ok(- *row[row.len()-1].as_ref().unwrap()));
-            row.push(Ok(*row[row.len()-2].as_ref().unwrap() + *row[row.len()-1].as_ref().unwrap()));
-        }
-        bencher::black_box(&rows);
-    });
-}
-
-fn ops_rows_compiled2(bencher: &mut Bencher) {
-
-    // let prog = vec![Op::Add, Op::Neg, Op::Add];
-    let mut rows = Vec::with_capacity(1024);
-    for i in 0 .. (rows.capacity() as i32) {
-        rows.push(vec![i, i, i]);
-    }
-
-    bencher.iter(|| {
-        for row in rows.iter_mut() {
-            row.truncate(4);
-            row.push(row[row.len()-2] + row[row.len()-1]);
-            row.push(- row[row.len()-1]);
-            row.push(row[row.len()-2] + row[row.len()-1]);
-        }
-        bencher::black_box(&rows);
-    });
-}
-
-fn ops_cols(bencher: &mut Bencher) {
-
-    let prog = vec![Op::Add, Op::Neg, Op::Add];
     let mut rows = Vec::with_capacity(1024);
     for i in 0 .. (rows.capacity() as i32) {
         rows.push((Err::<i32, String>("hello".to_string()), Ok::<i32, String>(i), Ok::<i32, String>(i), Ok::<i32, String>(i)));
@@ -140,26 +104,31 @@ fn ops_cols(bencher: &mut Bencher) {
     
     let cols = Columnar::into_columns(rows.into_iter());
     let mut cols = vec![Err(cols.0.errs), Ok(cols.1.oks), Ok(cols.2.oks), Ok(cols.3.oks)];
+    let len = cols.len();
 
     bencher.iter(|| {
         for op in prog.iter() {
             cols.push(op.eval_vec(&cols));
         }
         bencher::black_box(&cols);
-        cols.truncate(4);
+        cols.truncate(len);
     });
 }
 
 benchmark_group!(
     cols,
-    ops_cols,
+    add_cols,
+    neg_cols,
+    fmt_cols,
+    anf_cols,
 );
 
 benchmark_group!(
     rows,
-    ops_rows,
-    ops_rows_compiled,
-    ops_rows_compiled2,
+    add_rows,
+    neg_rows,
+    fmt_rows,
+    anf_rows,
 );
 
 benchmark_main!(cols, rows);
