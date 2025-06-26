@@ -1469,15 +1469,47 @@ pub mod string {
         }
     }
 
-    impl<BC: Push<u64>, D: std::fmt::Display> Push<D> for Strings<BC> {
-        #[inline]
-        fn push(&mut self, item: D) {
-            use std::io::Write;
-            write!(self.values, "{}", item).unwrap();
+    // This is a simpler implementation, but it leads to a performance regression
+    // for Strings and str because it loses access to `Vec::extend_from_slice`.
+    // 
+    // impl<BC: Push<u64>, D: std::fmt::Display> Push<D> for Strings<BC> {
+    //     #[inline(always)]
+    //     fn push(&mut self, item: D) {
+    //         use std::io::Write;
+    //         write!(self.values, "{}", item).unwrap();
+    //         self.bounds.push(self.values.len() as u64);
+    //     }
+    // }
+
+    impl<BC: Push<u64>> Push<&String> for Strings<BC> {
+        #[inline(always)] fn push(&mut self, item: &String) {
+            self.values.extend_from_slice(item.as_bytes());
             self.bounds.push(self.values.len() as u64);
         }
     }
-
+    impl<BC: Push<u64>> Push<&str> for Strings<BC> {
+        #[inline]
+        fn push(&mut self, item: &str) {
+            self.values.extend_from_slice(item.as_bytes());
+            self.bounds.push(self.values.len() as u64);
+        }
+    }
+    impl<'a, BC: Push<u64>> Push<std::fmt::Arguments<'a>> for Strings<BC> {
+        #[inline]
+        fn push(&mut self, item: std::fmt::Arguments<'a>) {
+            use std::io::Write;
+            self.values.write_fmt(item).expect("write_fmt failed");
+            self.bounds.push(self.values.len() as u64);
+        }
+    }
+    impl<'a, 'b, BC: Push<u64>> Push<&'b std::fmt::Arguments<'a>> for Strings<BC> {
+        #[inline]
+        fn push(&mut self, item: &'b std::fmt::Arguments<'a>) {
+            use std::io::Write;
+            self.values.write_fmt(*item).expect("write_fmt failed");
+            self.bounds.push(self.values.len() as u64);
+        }
+    }
     impl<BC: Clear, VC: Clear> Clear for Strings<BC, VC> {
         #[inline(always)]
         fn clear(&mut self) {
