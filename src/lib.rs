@@ -162,7 +162,7 @@ pub mod common {
             }
         }
 
-        impl<'t, T: IndexMut + ?Sized> IndexMut for &'t mut T {
+        impl<T: IndexMut + ?Sized> IndexMut for &mut T {
             type IndexMut<'a> = T::IndexMut<'a> where Self: 'a;
             #[inline(always)] fn get_mut(&mut self, index: usize) -> Self::IndexMut<'_> {
                 T::get_mut(*self, index)
@@ -276,7 +276,7 @@ pub mod common {
         #[inline(always)] fn clear(&mut self) { self.clear() }
     }
     // Slice references can be cleared.
-    impl<'a, T> Clear for &'a [T] {
+    impl<T> Clear for &[T] {
         #[inline(always)] fn clear(&mut self) { *self = &[]; }
     }
 
@@ -543,7 +543,7 @@ pub mod bytes {
         /// Writes `bytes` in the encoded format to an arbitrary writer.
         fn write<'a, A, W: std::io::Write>(writer: W, bytes: &A) -> std::io::Result<()> where A : AsBytes<'a>;
         /// Decodes bytes from a sequence of `u64`.
-        fn decode<'a>(store: &'a [u64]) -> impl Iterator<Item=&'a [u8]>;
+        fn decode(store: &[u64]) -> impl Iterator<Item=&[u8]>;
     }
 
     /// A sequential byte layout for `AsBytes` and `FromBytes` implementors.
@@ -560,7 +560,7 @@ pub mod bytes {
         impl super::EncodeDecode for Sequence {
             fn length_in_words<'a, A>(bytes: &A) -> usize where A : AsBytes<'a> {
                 // Each byte slice has one `u64` for the length, and then as many `u64`s as needed to hold all bytes.
-                bytes.as_bytes().map(|(_align, bytes)| 1 + (bytes.len() + 7)/8).sum()
+                bytes.as_bytes().map(|(_align, bytes)| 1 + bytes.len().div_ceil(8)).sum()
             }
             fn encode<'a, A>(store: &mut Vec<u64>, bytes: &A) where A : AsBytes<'a> {
                 encode(store, bytes.as_bytes())
@@ -568,7 +568,7 @@ pub mod bytes {
             fn write<'a, A, W: std::io::Write>(writer: W, bytes: &A) -> std::io::Result<()> where A : AsBytes<'a> {
                 write(writer, bytes.as_bytes())
             }
-            fn decode<'a>(store: &'a [u64]) -> impl Iterator<Item=&'a [u8]> {
+            fn decode(store: &[u64]) -> impl Iterator<Item=&[u8]> {
                 decode(store)
             }
         }
@@ -668,7 +668,7 @@ pub mod bytes {
         pub struct Indexed;
         impl super::EncodeDecode for Indexed {
             fn length_in_words<'a, A>(bytes: &A) -> usize where A : AsBytes<'a> {
-                1 + bytes.as_bytes().map(|(_align, bytes)| 1 + (bytes.len() + 7)/8).sum::<usize>()
+                1 + bytes.as_bytes().map(|(_align, bytes)| 1 + bytes.len().div_ceil(8)).sum::<usize>()
             }
             fn encode<'a, A>(store: &mut Vec<u64>, bytes: &A) where A : AsBytes<'a> {
                 encode(store, bytes)
@@ -676,7 +676,7 @@ pub mod bytes {
             fn write<'a, A, W: std::io::Write>(writer: W, bytes: &A) -> std::io::Result<()> where A : AsBytes<'a> {
                 write(writer, bytes)
             }
-            fn decode<'a>(store: &'a [u64]) -> impl Iterator<Item=&'a [u8]> {
+            fn decode(store: &[u64]) -> impl Iterator<Item=&[u8]> {
                 decode(store)
             }
         }
@@ -938,7 +938,7 @@ pub mod primitive {
             type Ref = usize;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().expect("Usizes values should fit in `usize`") }
         }
-        impl<'a, CV: IndexAs<u64>> Index for &'a Usizes<CV> {
+        impl<CV: IndexAs<u64>> Index for &Usizes<CV> {
             type Ref = usize;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().expect("Usizes values should fit in `usize`") }
         }
@@ -1004,7 +1004,7 @@ pub mod primitive {
             type Ref = isize;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().expect("Isizes values should fit in `isize`") }
         }
-        impl<'a, CV: IndexAs<i64>> Index for &'a Isizes<CV> {
+        impl<CV: IndexAs<i64>> Index for &Isizes<CV> {
             type Ref = isize;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().expect("Isizes values should fit in `isize`") }
         }
@@ -1724,7 +1724,7 @@ pub mod vector {
     impl<I: IntoIterator, TC: Push<I::Item> + Len> Push<I> for Vecs<TC> {
         #[inline]
         fn push(&mut self, item: I) {
-            self.values.extend(item.into_iter());
+            self.values.extend(item);
             self.bounds.push(self.values.len() as u64);
         }
     }
@@ -2338,10 +2338,7 @@ pub mod sums {
             type Container = Options<T::Container>;
             #[inline(always)]
             fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a {
-                match thing {
-                    Some(y) => Some(T::reborrow(y)),
-                    None => None,
-                }
+                thing.map(T::reborrow)
             }
         }
 
