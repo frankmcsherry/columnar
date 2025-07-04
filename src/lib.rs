@@ -931,7 +931,7 @@ pub mod primitive {
             }
             #[inline(always)]
             fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> where CV: 'a {
-                Usizes { values: <CV as Container>::reborrow(thing.values) }
+                Usizes { values: CV::reborrow(thing.values) }
             }
         }
 
@@ -998,7 +998,7 @@ pub mod primitive {
             }
             #[inline(always)]
             fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> where CV: 'a {
-                Isizes { values: <CV as Container>::reborrow(thing.values) }
+                Isizes { values: CV::reborrow(thing.values) }
             }
         }
 
@@ -1177,7 +1177,7 @@ pub mod primitive {
             #[inline(always)]
             fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> where VC: 'a {
                 Bools {
-                    values: <VC as Container>::reborrow(thing.values),
+                    values: VC::reborrow(thing.values),
                     last_word: thing.last_word,
                     last_bits: thing.last_bits,
                 }
@@ -1302,8 +1302,8 @@ pub mod primitive {
             #[inline(always)]
             fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> where SC: 'a, NC: 'a {
                 Durations {
-                    seconds: <SC as Container>::reborrow(thing.seconds),
-                    nanoseconds: <NC as Container>::reborrow(thing.nanoseconds),
+                    seconds: SC::reborrow(thing.seconds),
+                    nanoseconds: NC::reborrow(thing.nanoseconds),
                 }
             }
         }
@@ -1416,7 +1416,7 @@ pub mod string {
         #[inline(always)]
         fn reborrow<'c, 'a: 'c>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'c> where BC: 'a {
             Strings {
-                bounds: <BC as Container>::reborrow(thing.bounds),
+                bounds: BC::reborrow(thing.bounds),
                 values: thing.values,
             }
         }
@@ -1553,7 +1553,7 @@ pub mod vector {
         type Container = Vecs<T::Container>;
         #[inline(always)]
         fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a {
-            thing.map(|x| <T::Container as Container>::reborrow(x))
+            thing.map(|x| T::Container::reborrow(x))
         }
     }
 
@@ -1576,7 +1576,7 @@ pub mod vector {
         type Container = Vecs<T::Container>;
         #[inline(always)]
         fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a {
-            thing.map(|x| <T::Container as Container>::reborrow(x))
+            thing.map(|x| T::Container::reborrow(x))
         }
     }
 
@@ -1600,7 +1600,7 @@ pub mod vector {
         type Container = Vecs<T::Container>;
         #[inline(always)]
         fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a {
-            thing.map(|x| <T::Container as Container>::reborrow(x))
+            thing.map(|x| T::Container::reborrow(x))
         }
     }
 
@@ -1617,7 +1617,7 @@ pub mod vector {
         #[inline(always)]
         fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> where BC: 'a, TC: 'a {
             Vecs {
-                bounds: <BC as Container>::reborrow(thing.bounds),
+                bounds: BC::reborrow(thing.bounds),
                 values: TC::reborrow(thing.values),
             }
         }
@@ -1925,8 +1925,8 @@ pub mod sums {
             #[inline(always)]
             pub fn reborrow<'b, 'a: 'b>(thing: RankSelect<CC::Borrowed<'a>, VC::Borrowed<'a>, &'a u64>) -> RankSelect<CC::Borrowed<'b>, VC::Borrowed<'b>, &'b u64> {
                 RankSelect {
-                    counts: <CC as Container>::reborrow(thing.counts),
-                    values: <Bools::<VC, u64> as Container>::reborrow(thing.values),
+                    counts: CC::reborrow(thing.counts),
+                    values: Bools::<VC, u64>::reborrow(thing.values),
                 }
             }
         }
