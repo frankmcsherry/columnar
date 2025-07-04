@@ -34,7 +34,7 @@ pub trait Columnar : 'static {
     ///
     /// The container must support pushing both `&Self` and `Self::Ref<'_>`.
     /// In our running example this might be `(Vec<A>, Vecs<Vec<B>>)`.
-    type Container: for<'a> Push<&'a Self> + for<'a> Push<Self::Ref<'a>> + Container<Self>;
+    type Container: for<'a> Push<&'a Self> + Container<Self>;
 
     /// Converts a sequence of the references to the type into columnar form.
     fn as_columns<'a, I>(selves: I) -> Self::Container where I: IntoIterator<Item =&'a Self>, Self: 'a {
@@ -70,7 +70,7 @@ pub trait Columnar : 'static {
 /// A container that can hold `C`, and provide its preferred references.
 ///
 /// As an example, `(Vec<A>, Vecs<Vec<B>>)`.
-pub trait Container<C: Columnar + ?Sized> : Len + Clear + Clone + Default + Send {
+pub trait Container<C: Columnar + ?Sized> : Len + Clear + for<'a> Push<C::Ref<'a>> + Clone + Default + Send + 'static {
     /// The type of a borrowed container.
     ///
     /// Corresponding to our example, `(&'a [A], Vecs<&'a [B], &'a [u64]>)`.
@@ -905,7 +905,7 @@ pub mod primitive {
     /// Columnar stores for `usize` and `isize`, stored as 64 bits.
     mod sizes {
 
-        use crate::{Clear, Columnar, Len, IndexMut, Index, IndexAs, Push, HeapSize};
+        use crate::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, HeapSize};
 
         #[derive(Copy, Clone, Default)]
         pub struct Usizes<CV = Vec<u64>> { pub values: CV }
@@ -918,14 +918,14 @@ pub mod primitive {
             fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
         }
 
-        impl<CV: crate::Container<u64>> crate::Container<usize> for Usizes<CV> {
+        impl<CV: Container<u64>> Container<usize> for Usizes<CV> {
             type Borrowed<'a> = Usizes<CV::Borrowed<'a>> where CV: 'a;
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
                 Usizes { values: self.values.borrow() }
             }
             #[inline(always)]
             fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> where CV: 'a {
-                Usizes { values: CV::reborrow(thing.values) }
+                Usizes { values: <CV as Container<u64>>::reborrow(thing.values) }
             }
         }
 
@@ -942,9 +942,9 @@ pub mod primitive {
             type Ref = usize;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().expect("Usizes values should fit in `usize`") }
         }
-        impl Push<usize> for Usizes {
+        impl<CV: for<'a> Push<&'a u64>> Push<usize> for Usizes<CV> {
             #[inline]
-            fn push(&mut self, item: usize) { self.values.push(item.try_into().expect("usize must fit in a u64")) }
+            fn push(&mut self, item: usize) { self.values.push(&item.try_into().expect("usize must fit in a u64")) }
         }
         impl Push<&usize> for Usizes {
             #[inline]
@@ -984,14 +984,14 @@ pub mod primitive {
             fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
         }
 
-        impl<CV: crate::Container<i64>> crate::Container<isize> for Isizes<CV> {
+        impl<CV: Container<i64>> Container<isize> for Isizes<CV> {
             type Borrowed<'a> = Isizes<CV::Borrowed<'a>> where CV: 'a;
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
                 Isizes { values: self.values.borrow() }
             }
             #[inline(always)]
             fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> where CV: 'a {
-                Isizes { values: CV::reborrow(thing.values) }
+                Isizes { values: <CV as Container<i64>>::reborrow(thing.values) }
             }
         }
 
@@ -1008,9 +1008,9 @@ pub mod primitive {
             type Ref = isize;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().expect("Isizes values should fit in `isize`") }
         }
-        impl Push<isize> for Isizes {
+        impl<CV: for<'a> Push<&'a i64>> Push<isize> for Isizes<CV> {
             #[inline]
-            fn push(&mut self, item: isize) { self.values.push(item.try_into().expect("isize must fit in a i64")) }
+            fn push(&mut self, item: isize) { self.values.push(&item.try_into().expect("isize must fit in a i64")) }
         }
         impl Push<&isize> for Isizes {
             #[inline]
@@ -1044,7 +1044,7 @@ pub mod primitive {
     mod empty {
 
         use crate::common::index::CopyAs;
-        use crate::{Clear, Columnar, Len, IndexMut, Index, Push, HeapSize};
+        use crate::{Clear, Columnar, Container, Len, IndexMut, Index, Push, HeapSize};
 
         #[derive(Copy, Clone, Debug, Default)]
         pub struct Empties<CC = u64> { pub count: CC, pub empty: () }
@@ -1058,7 +1058,7 @@ pub mod primitive {
             fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
         }
 
-        impl crate::Container<()> for Empties {
+        impl Container<()> for Empties {
             type Borrowed<'a> = Empties<&'a u64>;
             #[inline(always)]
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { Empties { count: &self.count, empty: () } }
@@ -1133,7 +1133,7 @@ pub mod primitive {
     mod boolean {
 
         use crate::common::index::CopyAs;
-        use crate::{Clear, Len, Index, IndexAs, Push, HeapSize};
+        use crate::{Container, Clear, Len, Index, IndexAs, Push, HeapSize};
 
         /// A store for maintaining `Vec<bool>`.
         #[derive(Copy, Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -1155,7 +1155,7 @@ pub mod primitive {
             fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
         }
 
-        impl<VC: crate::Container<u64>> crate::Container<bool> for Bools<VC> {
+        impl<VC: Container<u64>> Container<bool> for Bools<VC> {
             type Borrowed<'a> = Bools<VC::Borrowed<'a>, &'a u64> where VC: 'a;
             #[inline(always)]
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -1168,7 +1168,7 @@ pub mod primitive {
             #[inline(always)]
             fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> where VC: 'a {
                 Bools {
-                    values: VC::reborrow(thing.values),
+                    values: <VC as Container<u64>>::reborrow(thing.values),
                     last_word: thing.last_word,
                     last_bits: thing.last_bits,
                 }
@@ -1219,20 +1219,20 @@ pub mod primitive {
             }
         }
 
-        impl<VC: Push<u64>> Push<bool> for Bools<VC> {
+        impl<VC: for<'a> Push<&'a u64>> Push<bool> for Bools<VC> {
             #[inline]
             fn push(&mut self, bit: bool) {
                 self.last_word |= (bit as u64) << self.last_bits;
                 self.last_bits += 1;
                 // If we have a fully formed word, commit it to `self.values`.
                 if self.last_bits == 64 {
-                    self.values.push(self.last_word);
+                    self.values.push(&self.last_word);
                     self.last_word = 0;
                     self.last_bits = 0;
                 }
             }
         }
-        impl<'a, VC: Push<u64>> Push<&'a bool> for Bools<VC> {
+        impl<'a, VC: for<'b> Push<&'b u64>> Push<&'a bool> for Bools<VC> {
             #[inline(always)]
             fn push(&mut self, bit: &'a bool) {
                 self.push(*bit)
@@ -1262,7 +1262,7 @@ pub mod primitive {
     mod duration {
 
         use std::time::Duration;
-        use crate::{Len, Index, IndexAs, Push, Clear, HeapSize};
+        use crate::{Container, Len, Index, IndexAs, Push, Clear, HeapSize};
 
         // `std::time::Duration` is equivalent to `(u64, u32)`, corresponding to seconds and nanoseconds.
         #[derive(Copy, Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -1280,7 +1280,7 @@ pub mod primitive {
             fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
         }
 
-        impl<SC: crate::Container<u64>, NC: crate::Container<u32>> crate::Container<Duration> for Durations<SC, NC> {
+        impl<SC: Container<u64>, NC: Container<u32>> Container<Duration> for Durations<SC, NC> {
             type Borrowed<'a> = Durations<SC::Borrowed<'a>, NC::Borrowed<'a>> where SC: 'a, NC: 'a;
             #[inline(always)]
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -1292,8 +1292,8 @@ pub mod primitive {
             #[inline(always)]
             fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> where SC: 'a, NC: 'a {
                 Durations {
-                    seconds: SC::reborrow(thing.seconds),
-                    nanoseconds: NC::reborrow(thing.nanoseconds),
+                    seconds: <SC as Container<u64>>::reborrow(thing.seconds),
+                    nanoseconds: <NC as Container<u32>>::reborrow(thing.nanoseconds),
                 }
             }
         }
@@ -1325,14 +1325,14 @@ pub mod primitive {
             }
         }
 
-        impl<SC: Push<u64>, NC: Push<u32>> Push<std::time::Duration> for Durations<SC, NC> {
+        impl<SC: for<'a> Push<&'a u64>, NC: for<'a> Push<&'a u32>> Push<std::time::Duration> for Durations<SC, NC> {
             #[inline]
             fn push(&mut self, item: std::time::Duration) {
-                self.seconds.push(item.as_secs());
-                self.nanoseconds.push(item.subsec_nanos());
+                self.seconds.push(&item.as_secs());
+                self.nanoseconds.push(&item.subsec_nanos());
             }
         }
-        impl<'a, SC: Push<u64>, NC: Push<u32>> Push<&'a std::time::Duration> for Durations<SC, NC> {
+        impl<'a, SC: for<'b> Push<&'b u64>, NC: for<'b> Push<&'b u32>> Push<&'a std::time::Duration> for Durations<SC, NC> {
             #[inline]
             fn push(&mut self, item: &'a std::time::Duration) {
                 self.push(*item)
@@ -1368,7 +1368,7 @@ pub mod primitive {
 pub use string::Strings;
 pub mod string {
 
-    use super::{Clear, Columnar, Len, Index, IndexAs, Push, HeapSize};
+    use super::{Clear, Columnar, Container, Len, Index, IndexAs, Push, HeapSize};
 
     /// A stand-in for `Vec<String>`.
     #[derive(Copy, Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -1393,24 +1393,7 @@ pub mod string {
         fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
     }
 
-    impl<'b, BC: crate::Container<u64>> crate::Container<String> for Strings<BC, &'b [u8]> {
-        type Borrowed<'a> = Strings<BC::Borrowed<'a>, &'a [u8]> where BC: 'a, 'b: 'a;
-        #[inline(always)]
-        fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
-            Strings {
-                bounds: self.bounds.borrow(),
-                values: self.values,
-            }
-        }
-        #[inline(always)]
-        fn reborrow<'c, 'a: 'c>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'c> where BC: 'a, 'b: 'a {
-            Strings {
-                bounds: BC::reborrow(thing.bounds),
-                values: thing.values,
-            }
-        }
-    }
-    impl<BC: crate::Container<u64>> crate::Container<String> for Strings<BC, Vec<u8>> {
+    impl<BC: Container<u64>> Container<String> for Strings<BC, Vec<u8>> {
         type Borrowed<'a> = Strings<BC::Borrowed<'a>, &'a [u8]> where BC: 'a;
         #[inline(always)]
         fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -1422,7 +1405,7 @@ pub mod string {
         #[inline(always)]
         fn reborrow<'c, 'a: 'c>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'c> where BC: 'a {
             Strings {
-                bounds: BC::reborrow(thing.bounds),
+                bounds: <BC as Container<u64>>::reborrow(thing.bounds),
                 values: thing.values,
             }
         }
@@ -1481,33 +1464,33 @@ pub mod string {
     //     }
     // }
 
-    impl<BC: Push<u64>> Push<&String> for Strings<BC> {
+    impl<BC: for<'a> Push<&'a u64>> Push<&String> for Strings<BC> {
         #[inline(always)] fn push(&mut self, item: &String) {
             self.values.extend_from_slice(item.as_bytes());
-            self.bounds.push(self.values.len() as u64);
+            self.bounds.push(&(self.values.len() as u64));
         }
     }
-    impl<BC: Push<u64>> Push<&str> for Strings<BC> {
+    impl<BC: for<'a> Push<&'a u64>> Push<&str> for Strings<BC> {
         #[inline]
         fn push(&mut self, item: &str) {
             self.values.extend_from_slice(item.as_bytes());
-            self.bounds.push(self.values.len() as u64);
+            self.bounds.push(&(self.values.len() as u64));
         }
     }
-    impl<'a, BC: Push<u64>> Push<std::fmt::Arguments<'a>> for Strings<BC> {
+    impl<'a, BC: for<'b> Push<&'b u64>> Push<std::fmt::Arguments<'a>> for Strings<BC> {
         #[inline]
         fn push(&mut self, item: std::fmt::Arguments<'a>) {
             use std::io::Write;
             self.values.write_fmt(item).expect("write_fmt failed");
-            self.bounds.push(self.values.len() as u64);
+            self.bounds.push(&(self.values.len() as u64));
         }
     }
-    impl<'a, 'b, BC: Push<u64>> Push<&'b std::fmt::Arguments<'a>> for Strings<BC> {
+    impl<'a, 'b, BC: for<'c> Push<&'c u64>> Push<&'b std::fmt::Arguments<'a>> for Strings<BC> {
         #[inline]
         fn push(&mut self, item: &'b std::fmt::Arguments<'a>) {
             use std::io::Write;
             self.values.write_fmt(*item).expect("write_fmt failed");
-            self.bounds.push(self.values.len() as u64);
+            self.bounds.push(&(self.values.len() as u64));
         }
     }
     impl<BC: Clear, VC: Clear> Clear for Strings<BC, VC> {
@@ -1530,7 +1513,7 @@ pub mod string {
 pub use vector::Vecs;
 pub mod vector {
 
-    use super::{Clear, Columnar, Len, IndexMut, Index, IndexAs, Push, HeapSize, Slice};
+    use super::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, HeapSize, Slice};
 
     /// A stand-in for `Vec<Vec<T>>` for complex `T`.
     #[derive(Debug, Default, Copy, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -1540,7 +1523,7 @@ pub mod vector {
     }
 
     impl<T: Columnar> Columnar for Vec<T> {
-        type Ref<'a> = Slice<<T::Container as crate::Container<T>>::Borrowed<'a>> where T: 'a;
+        type Ref<'a> = Slice<<T::Container as Container<T>>::Borrowed<'a>> where T: 'a;
         #[inline(always)]
         fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
             self.truncate(other.len());
@@ -1559,12 +1542,12 @@ pub mod vector {
         type Container = Vecs<T::Container>;
         #[inline(always)]
         fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a {
-            thing.map(|x| <T::Container as crate::Container<T>>::reborrow(x))
+            thing.map(|x| <T::Container as Container<T>>::reborrow(x))
         }
     }
 
     impl<T: Columnar, const N: usize> Columnar for [T; N] {
-        type Ref<'a> = Slice<<T::Container as crate::Container<T>>::Borrowed<'a>> where T: 'a;
+        type Ref<'a> = Slice<<T::Container as Container<T>>::Borrowed<'a>> where T: 'a;
         #[inline(always)]
         fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
             for (s, o) in self.iter_mut().zip(other.into_iter()) {
@@ -1582,12 +1565,12 @@ pub mod vector {
         type Container = Vecs<T::Container>;
         #[inline(always)]
         fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a {
-            thing.map(|x| <T::Container as crate::Container<T>>::reborrow(x))
+            thing.map(|x| <T::Container as Container<T>>::reborrow(x))
         }
     }
 
     impl<T: Columnar, const N: usize> Columnar for smallvec::SmallVec<[T; N]> {
-        type Ref<'a> = Slice<<T::Container as crate::Container<T>>::Borrowed<'a>> where T: 'a;
+        type Ref<'a> = Slice<<T::Container as Container<T>>::Borrowed<'a>> where T: 'a;
         #[inline(always)]
         fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
             self.truncate(other.len());
@@ -1606,11 +1589,11 @@ pub mod vector {
         type Container = Vecs<T::Container>;
         #[inline(always)]
         fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a {
-            thing.map(|x| <T::Container as crate::Container<T>>::reborrow(x))
+            thing.map(|x| <T::Container as Container<T>>::reborrow(x))
         }
     }
 
-    impl<T: Columnar<Container = TC>, BC: crate::Container<u64>, TC: crate::Container<T>> crate::Container<Vec<T>> for Vecs<TC, BC> {
+    impl<T: Columnar<Container = TC>, BC: Container<u64>, TC: Container<T>> Container<Vec<T>> for Vecs<TC, BC> {
         type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>> where BC: 'a, TC: 'a, T: 'a;
         #[inline(always)]
         fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -1622,13 +1605,13 @@ pub mod vector {
         #[inline(always)]
         fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> where BC: 'a, TC: 'a {
             Vecs {
-                bounds: BC::reborrow(thing.bounds),
+                bounds: <BC as Container<u64>>::reborrow(thing.bounds),
                 values: TC::reborrow(thing.values),
             }
         }
     }
 
-    impl<T: Columnar<Container = TC>, BC: crate::Container<u64>, TC: crate::Container<T>, const N: usize> crate::Container<[T; N]> for Vecs<TC, BC> {
+    impl<T: Columnar<Container = TC>, BC: Container<u64>, TC: Container<T>, const N: usize> Container<[T; N]> for Vecs<TC, BC> {
         type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>> where BC: 'a, TC: 'a, T: 'a;
         #[inline(always)]
         fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -1640,13 +1623,13 @@ pub mod vector {
         #[inline(always)]
         fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> where BC: 'a, TC: 'a {
             Vecs {
-                bounds: BC::reborrow(thing.bounds),
+                bounds: <BC as Container<u64>>::reborrow(thing.bounds),
                 values: TC::reborrow(thing.values),
             }
         }
     }
 
-    impl<T: Columnar<Container = TC>, BC: crate::Container<u64>, TC: crate::Container<T>, const N: usize> crate::Container<smallvec::SmallVec<[T; N]>> for Vecs<TC, BC> {
+    impl<T: Columnar<Container = TC>, BC: Container<u64>, TC: Container<T>, const N: usize> Container<smallvec::SmallVec<[T; N]>> for Vecs<TC, BC> {
         type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>> where BC: 'a, TC: 'a, T: 'a;
         #[inline(always)]
         fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -1658,7 +1641,7 @@ pub mod vector {
         #[inline(always)]
         fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> where BC: 'a, TC: 'a {
             Vecs {
-                bounds: BC::reborrow(thing.bounds),
+                bounds: <BC as Container<u64>>::reborrow(thing.bounds),
                 values: TC::reborrow(thing.values),
             }
         }
@@ -1721,11 +1704,11 @@ pub mod vector {
         }
     }
 
-    impl<I: IntoIterator, TC: Push<I::Item> + Len> Push<I> for Vecs<TC> {
+    impl<I: IntoIterator, TC: Push<I::Item> + Len, BC: for<'a> Push<&'a u64>> Push<I> for Vecs<TC, BC> {
         #[inline]
         fn push(&mut self, item: I) {
             self.values.extend(item);
-            self.bounds.push(self.values.len() as u64);
+            self.bounds.push(&(self.values.len() as u64));
         }
     }
 
@@ -1749,7 +1732,7 @@ pub mod vector {
 #[allow(non_snake_case)]
 pub mod tuple {
 
-    use super::{Clear, Columnar, Len, IndexMut, Index, Push, HeapSize};
+    use super::{Clear, Columnar, Container, Len, IndexMut, Index, Push, HeapSize};
 
     // Implementations for tuple types.
     // These are all macro based, because the implementations are very similar.
@@ -1777,7 +1760,7 @@ pub mod tuple {
                     ($($name::reborrow($name),)*)
                 }
             }
-            impl<$($name: crate::Columnar, $name2: crate::Container<$name>,)*> crate::Container<($($name,)*)> for ($($name2,)*) {
+            impl<$($name: crate::Columnar, $name2: Container<$name>,)*> Container<($($name,)*)> for ($($name2,)*) {
                 type Borrowed<'a> = ($($name2::Borrowed<'a>,)*) where $($name: 'a, $name2: 'a,)*;
                 #[inline(always)]
                 fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -1940,7 +1923,7 @@ pub mod sums {
 
         use crate::primitive::Bools;
         use crate::common::index::CopyAs;
-        use crate::{Len, Index, IndexAs, Push, Clear, HeapSize};
+        use crate::{Container, Len, Index, IndexAs, Push, Clear, HeapSize};
 
         /// A store for maintaining `Vec<bool>` with fast `rank` and `select` access.
         ///
@@ -1955,9 +1938,8 @@ pub mod sums {
             pub values: Bools<VC, WC>,
         }
 
-        impl<CC: crate::Container<u64>, VC: crate::Container<u64>> RankSelect<CC, VC> {
+        impl<CC: Container<u64>, VC: Container<u64>> RankSelect<CC, VC> {
             pub fn borrow<'a>(&'a self) -> RankSelect<CC::Borrowed<'a>, VC::Borrowed<'a>, &'a u64> {
-                use crate::Container;
                 RankSelect {
                     counts: self.counts.borrow(),
                     values: self.values.borrow(),
@@ -1965,10 +1947,9 @@ pub mod sums {
             }
             #[inline(always)]
             pub fn reborrow<'b, 'a: 'b>(thing: RankSelect<CC::Borrowed<'a>, VC::Borrowed<'a>, &'a u64>) -> RankSelect<CC::Borrowed<'b>, VC::Borrowed<'b>, &'b u64> {
-                use crate::Container;
                 RankSelect {
-                    counts: CC::reborrow(thing.counts),
-                    values: Bools::<VC, u64>::reborrow(thing.values),
+                    counts: <CC as Container<u64>>::reborrow(thing.counts),
+                    values: <Bools::<VC, u64> as Container<bool>>::reborrow(thing.values),
                 }
             }
         }
@@ -2053,10 +2034,10 @@ pub mod sums {
 
         // This implementation probably only works for `Vec<u64>` and `Vec<u64>`, but we could fix that.
         // Partly, it's hard to name the `Index` flavor that allows one to get back a `u64`.
-        impl<CC: Push<u64> + Len + IndexAs<u64>, VC: Push<u64> + Len + IndexAs<u64>> RankSelect<CC, VC> {
+        impl<CC: for<'a> Push<&'a u64> + Len + IndexAs<u64>, VC: for<'a> Push<&'a u64> + Len + IndexAs<u64>> RankSelect<CC, VC> {
             #[inline]
             pub fn push(&mut self, bit: bool) {
-                self.values.push(bit);
+                self.values.push(&bit);
                 while self.counts.len() < self.values.len() / 1024 {
                     let mut count = self.counts.last().unwrap_or(0);
                     let lower = 16 * self.counts.len();
@@ -2064,7 +2045,7 @@ pub mod sums {
                     for i in lower .. upper {
                         count += self.values.values.index_as(i).count_ones() as u64;
                     }
-                    self.counts.push(count);
+                    self.counts.push(&count);
                 }
             }
         }
@@ -2086,7 +2067,7 @@ pub mod sums {
     pub mod result {
 
         use crate::common::index::CopyAs;
-        use crate::{Clear, Columnar, Len, IndexMut, Index, IndexAs, Push, HeapSize};
+        use crate::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, HeapSize};
         use crate::RankSelect;
 
         #[derive(Copy, Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -2122,7 +2103,7 @@ pub mod sums {
             }
         }
 
-        impl<S: Columnar, T: Columnar, SC: crate::Container<S>, TC: crate::Container<T>> crate::Container<Result<S, T>> for Results<SC, TC> {
+        impl<S: Columnar, T: Columnar, SC: Container<S>, TC: Container<T>> Container<Result<S, T>> for Results<SC, TC> {
             type Borrowed<'a> = Results<SC::Borrowed<'a>, TC::Borrowed<'a>, &'a [u64], &'a [u64], &'a u64> where SC: 'a, TC: 'a, S:'a, T: 'a;
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
                 Results {
@@ -2313,7 +2294,7 @@ pub mod sums {
     pub mod option {
 
         use crate::common::index::CopyAs;
-        use crate::{Clear, Columnar, Len, IndexMut, Index, IndexAs, Push, HeapSize};
+        use crate::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, HeapSize};
         use crate::RankSelect;
 
         #[derive(Copy, Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -2342,7 +2323,7 @@ pub mod sums {
             }
         }
 
-        impl<T: Columnar, TC: crate::Container<T>> crate::Container<Option<T>> for Options<TC> {
+        impl<T: Columnar, TC: Container<T>> Container<Option<T>> for Options<TC> {
             type Borrowed<'a> = Options<TC::Borrowed<'a>, &'a [u64], &'a [u64], &'a u64> where TC: 'a, T: 'a;
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
                 Options {

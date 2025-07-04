@@ -1045,11 +1045,11 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
             pub variant: CVar,
         }
 
-        impl ::columnar::Push<#name> for #c_ident {
+        impl<CV: ::columnar::Container<u8>> ::columnar::Push<#name> for #c_ident<CV> {
             #[inline]
             fn push(&mut self, item: #name) {
                 match item {
-                    #( #name::#names => self.variant.push(#indices), )*
+                    #( #name::#names => self.variant.push(&#indices), )*
                 }
             }
         }
