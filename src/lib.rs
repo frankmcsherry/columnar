@@ -34,7 +34,7 @@ pub trait Columnar : 'static {
     ///
     /// The container must support pushing both `&Self` and `Self::Ref<'_>`.
     /// In our running example this might be `(Vec<A>, Vecs<Vec<B>>)`.
-    type Container: Clear + for<'a> Push<&'a Self> + for<'a> Push<Self::Ref<'a>> + Container<Self>;
+    type Container: for<'a> Push<&'a Self> + for<'a> Push<Self::Ref<'a>> + Container<Self>;
 
     /// Converts a sequence of the references to the type into columnar form.
     fn as_columns<'a, I>(selves: I) -> Self::Container where I: IntoIterator<Item =&'a Self>, Self: 'a {
@@ -70,7 +70,7 @@ pub trait Columnar : 'static {
 /// A container that can hold `C`, and provide its preferred references.
 ///
 /// As an example, `(Vec<A>, Vecs<Vec<B>>)`.
-pub trait Container<C: Columnar + ?Sized> : Len + Clone + Default + Send {
+pub trait Container<C: Columnar + ?Sized> : Len + Clear + Clone + Default + Send {
     /// The type of a borrowed container.
     ///
     /// Corresponding to our example, `(&'a [A], Vecs<&'a [B], &'a [u64]>)`.
@@ -1729,7 +1729,7 @@ pub mod vector {
         }
     }
 
-    impl<TC: Clear> Clear for Vecs<TC> {
+    impl<TC: Clear, BC: Clear> Clear for Vecs<TC, BC> {
         #[inline(always)]
         fn clear(&mut self) {
             self.bounds.clear();
