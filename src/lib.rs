@@ -266,7 +266,16 @@ pub mod common {
         impl<T: Index, S> IndexAs<S> for T where T::Ref: CopyAs<S> {
             fn index_as(&self, index: usize) -> S { self.get(index).copy_as() }
         }
+
     }
+
+    use crate::Container;
+    use crate::common::index::CopyAs;
+    /// A composite trait which captures the ability `Push<&T>` and `Index<Ref = T>`.
+    ///
+    /// Implement `CopyAs<T>` for the reference type, and `Push<&'a T>` for the container.
+    pub trait PushIndexAs<T> : for<'a> Container<Ref<'a>: CopyAs<T>> + for<'a> Push<&'a T> { }
+    impl<T, C: for<'a> Container<Ref<'a>: CopyAs<T>> + for<'a> Push<&'a T>> PushIndexAs<T> for C { }
 
     /// A type that can remove its contents and return to an empty state.
     ///
@@ -911,6 +920,7 @@ pub mod primitive {
     mod sizes {
 
         use crate::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, HeapSize};
+        use crate::common::PushIndexAs;
 
         #[derive(Copy, Clone, Default)]
         pub struct Usizes<CV = Vec<u64>> { pub values: CV }
@@ -923,7 +933,7 @@ pub mod primitive {
             fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
         }
 
-        impl<CV: for<'a> Container<Ref<'a> = &'a u64>> Container for Usizes<CV> {
+        impl<CV: PushIndexAs<u64>> Container for Usizes<CV> {
             type Ref<'a> = usize;
             type Borrowed<'a> = Usizes<CV::Borrowed<'a>> where CV: 'a;
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -990,7 +1000,7 @@ pub mod primitive {
             fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
         }
 
-        impl<CV: for<'a> Container<Ref<'a> = &'a i64>> Container for Isizes<CV> {
+        impl<CV: PushIndexAs<i64>> Container for Isizes<CV> {
             type Ref<'a> = isize;
             type Borrowed<'a> = Isizes<CV::Borrowed<'a>> where CV: 'a;
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -1163,7 +1173,7 @@ pub mod primitive {
             fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
         }
 
-        impl<VC: for<'a> Container<Ref<'a> = &'a u64>> Container for Bools<VC> {
+        impl<VC: crate::common::PushIndexAs<u64>> Container for Bools<VC> {
             type Ref<'a> = bool;
             type Borrowed<'a> = Bools<VC::Borrowed<'a>, &'a u64> where VC: 'a;
             #[inline(always)]
@@ -1289,7 +1299,7 @@ pub mod primitive {
             fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
         }
 
-        impl<SC: for<'a> Container<Ref<'a> = &'a u64>, NC: for<'a> Container<Ref<'a> = &'a u32>> Container for Durations<SC, NC> {
+        impl<SC: crate::common::PushIndexAs<u64>, NC: crate::common::PushIndexAs<u32>> Container for Durations<SC, NC> {
             type Ref<'a> = Duration;
             type Borrowed<'a> = Durations<SC::Borrowed<'a>, NC::Borrowed<'a>> where SC: 'a, NC: 'a;
             #[inline(always)]
@@ -1403,7 +1413,7 @@ pub mod string {
         fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
     }
 
-    impl<BC: for<'a> Container<Ref<'a> = &'a u64>> Container for Strings<BC, Vec<u8>> {
+    impl<BC: crate::common::PushIndexAs<u64>> Container for Strings<BC, Vec<u8>> {
         type Ref<'a> = &'a str;
         type Borrowed<'a> = Strings<BC::Borrowed<'a>, &'a [u8]> where BC: 'a;
         #[inline(always)]
@@ -1604,7 +1614,7 @@ pub mod vector {
         }
     }
 
-    impl<BC: for<'a> Container<Ref<'a> = &'a u64>, TC: Container> Container for Vecs<TC, BC> {
+    impl<BC: crate::common::PushIndexAs<u64>, TC: Container> Container for Vecs<TC, BC> {
         type Ref<'a> = Slice<TC::Borrowed<'a>> where TC: 'a;
         type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>> where BC: 'a, TC: 'a;
         #[inline(always)]
@@ -1915,7 +1925,7 @@ pub mod sums {
             pub values: Bools<VC, WC>,
         }
 
-        impl<CC: for<'a> Container<Ref<'a> = &'a u64>, VC: for<'a> Container<Ref<'a> = &'a u64>> RankSelect<CC, VC> {
+        impl<CC: crate::common::PushIndexAs<u64>, VC: crate::common::PushIndexAs<u64>> RankSelect<CC, VC> {
             pub fn borrow<'a>(&'a self) -> RankSelect<CC::Borrowed<'a>, VC::Borrowed<'a>, &'a u64> {
                 RankSelect {
                     counts: self.counts.borrow(),

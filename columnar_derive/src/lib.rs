@@ -1054,7 +1054,7 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
             pub variant: CVar,
         }
 
-        impl<CV: for<'a> ::columnar::Container<Ref<'a> = &'a u8>> ::columnar::Push<#name> for #c_ident<CV> {
+        impl<CV: ::columnar::common::PushIndexAs<u8>> ::columnar::Push<#name> for #c_ident<CV> {
             #[inline]
             fn push(&mut self, item: #name) {
                 match item {
@@ -1134,7 +1134,7 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
             fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> { thing }
         }
 
-        impl<CV: for<'a> ::columnar::Container<Ref<'a> = &'a u8>> ::columnar::Container for #c_ident <CV> {
+        impl<CV: ::columnar::common::PushIndexAs<u8>> ::columnar::Container for #c_ident <CV> {
             type Ref<'a> = #name;
             type Borrowed<'a> = #c_ident < CV::Borrowed<'a> > where CV: 'a;
             #[inline(always)]
