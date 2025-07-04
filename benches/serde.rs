@@ -71,7 +71,7 @@ fn goser_decode(b: &mut Bencher) {
     b.bytes = 8 * words.len() as u64;
     b.iter(|| {
         let mut slices = Sequence::decode(&mut words);
-        let foo = <<Log as Columnar>::Container as Container<Log>>::Borrowed::from_bytes(&mut slices);
+        let foo = <<Log as Columnar>::Container as Container>::Borrowed::from_bytes(&mut slices);
         bencher::black_box(foo);
     });
 }

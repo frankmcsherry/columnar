@@ -34,7 +34,7 @@ pub trait Columnar : 'static {
     ///
     /// The container must support pushing both `&Self` and `Self::Ref<'_>`.
     /// In our running example this might be `(Vec<A>, Vecs<Vec<B>>)`.
-    type Container: for<'a> Push<&'a Self> + Container<Self>;
+    type Container: for<'a> Push<&'a Self> + for<'a> Container<Ref<'a> = Self::Ref<'a>>;
 
     /// Converts a sequence of the references to the type into columnar form.
     fn as_columns<'a, I>(selves: I) -> Self::Container where I: IntoIterator<Item =&'a Self>, Self: 'a {
@@ -70,7 +70,7 @@ pub trait Columnar : 'static {
 /// A container that can hold `C`, and provide its preferred references.
 ///
 /// As an example, `(Vec<A>, Vecs<Vec<B>>)`.
-pub trait Container<C: Columnar + ?Sized> : Len + Clear + for<'a> Push<C::Ref<'a>> + Clone + Default + Send + 'static {
+pub trait Container : Len + Clear + for<'a> Push<Self::Ref<'a>> + Clone + Default + Send + 'static {
     /// For each lifetime, a reference with that lifetime.
     ///
     /// As an example, `(&'a A, &'a [B])`.
@@ -78,7 +78,7 @@ pub trait Container<C: Columnar + ?Sized> : Len + Clear + for<'a> Push<C::Ref<'a
     /// The type of a borrowed container.
     ///
     /// Corresponding to our example, `(&'a [A], Vecs<&'a [B], &'a [u64]>)`.
-    type Borrowed<'a>: Copy + Len + AsBytes<'a> + FromBytes<'a> + Index<Ref = C::Ref<'a>> where Self: 'a;
+    type Borrowed<'a>: Copy + Len + AsBytes<'a> + FromBytes<'a> + Index<Ref = Self::Ref<'a>> where Self: 'a;
     /// Converts a reference to the type to a borrowed variant.
     fn borrow<'a>(&'a self) -> Self::Borrowed<'a>;
     /// Reborrows the borrowed type to a shorter lifetime. See [`Columnar::reborrow`] for details.
@@ -873,7 +873,7 @@ pub mod primitive {
                 #[inline(always)]
                 fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
             }
-            impl crate::Container<$index_type> for Vec<$index_type> {
+            impl crate::Container for Vec<$index_type> {
                 type Ref<'a> = &'a $index_type;
                 type Borrowed<'a> = &'a [$index_type];
                 #[inline(always)]
@@ -923,7 +923,7 @@ pub mod primitive {
             fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
         }
 
-        impl<CV: Container<u64>> Container<usize> for Usizes<CV> {
+        impl<CV: for<'a> Container<Ref<'a> = &'a u64>> Container for Usizes<CV> {
             type Ref<'a> = usize;
             type Borrowed<'a> = Usizes<CV::Borrowed<'a>> where CV: 'a;
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -931,7 +931,7 @@ pub mod primitive {
             }
             #[inline(always)]
             fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> where CV: 'a {
-                Usizes { values: <CV as Container<u64>>::reborrow(thing.values) }
+                Usizes { values: <CV as Container>::reborrow(thing.values) }
             }
         }
 
@@ -990,7 +990,7 @@ pub mod primitive {
             fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
         }
 
-        impl<CV: Container<i64>> Container<isize> for Isizes<CV> {
+        impl<CV: for<'a> Container<Ref<'a> = &'a i64>> Container for Isizes<CV> {
             type Ref<'a> = isize;
             type Borrowed<'a> = Isizes<CV::Borrowed<'a>> where CV: 'a;
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -998,7 +998,7 @@ pub mod primitive {
             }
             #[inline(always)]
             fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> where CV: 'a {
-                Isizes { values: <CV as Container<i64>>::reborrow(thing.values) }
+                Isizes { values: <CV as Container>::reborrow(thing.values) }
             }
         }
 
@@ -1065,7 +1065,7 @@ pub mod primitive {
             fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
         }
 
-        impl Container<()> for Empties {
+        impl Container for Empties {
             type Ref<'a> = ();
             type Borrowed<'a> = Empties<&'a u64>;
             #[inline(always)]
@@ -1163,7 +1163,7 @@ pub mod primitive {
             fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
         }
 
-        impl<VC: Container<u64>> Container<bool> for Bools<VC> {
+        impl<VC: for<'a> Container<Ref<'a> = &'a u64>> Container for Bools<VC> {
             type Ref<'a> = bool;
             type Borrowed<'a> = Bools<VC::Borrowed<'a>, &'a u64> where VC: 'a;
             #[inline(always)]
@@ -1177,7 +1177,7 @@ pub mod primitive {
             #[inline(always)]
             fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> where VC: 'a {
                 Bools {
-                    values: <VC as Container<u64>>::reborrow(thing.values),
+                    values: <VC as Container>::reborrow(thing.values),
                     last_word: thing.last_word,
                     last_bits: thing.last_bits,
                 }
@@ -1289,7 +1289,7 @@ pub mod primitive {
             fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
         }
 
-        impl<SC: Container<u64>, NC: Container<u32>> Container<Duration> for Durations<SC, NC> {
+        impl<SC: for<'a> Container<Ref<'a> = &'a u64>, NC: for<'a> Container<Ref<'a> = &'a u32>> Container for Durations<SC, NC> {
             type Ref<'a> = Duration;
             type Borrowed<'a> = Durations<SC::Borrowed<'a>, NC::Borrowed<'a>> where SC: 'a, NC: 'a;
             #[inline(always)]
@@ -1302,8 +1302,8 @@ pub mod primitive {
             #[inline(always)]
             fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> where SC: 'a, NC: 'a {
                 Durations {
-                    seconds: <SC as Container<u64>>::reborrow(thing.seconds),
-                    nanoseconds: <NC as Container<u32>>::reborrow(thing.nanoseconds),
+                    seconds: <SC as Container>::reborrow(thing.seconds),
+                    nanoseconds: <NC as Container>::reborrow(thing.nanoseconds),
                 }
             }
         }
@@ -1403,7 +1403,7 @@ pub mod string {
         fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
     }
 
-    impl<BC: Container<u64>> Container<String> for Strings<BC, Vec<u8>> {
+    impl<BC: for<'a> Container<Ref<'a> = &'a u64>> Container for Strings<BC, Vec<u8>> {
         type Ref<'a> = &'a str;
         type Borrowed<'a> = Strings<BC::Borrowed<'a>, &'a [u8]> where BC: 'a;
         #[inline(always)]
@@ -1416,7 +1416,7 @@ pub mod string {
         #[inline(always)]
         fn reborrow<'c, 'a: 'c>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'c> where BC: 'a {
             Strings {
-                bounds: <BC as Container<u64>>::reborrow(thing.bounds),
+                bounds: <BC as Container>::reborrow(thing.bounds),
                 values: thing.values,
             }
         }
@@ -1534,7 +1534,7 @@ pub mod vector {
     }
 
     impl<T: Columnar> Columnar for Vec<T> {
-        type Ref<'a> = Slice<<T::Container as Container<T>>::Borrowed<'a>> where T: 'a;
+        type Ref<'a> = Slice<<T::Container as Container>::Borrowed<'a>> where T: 'a;
         #[inline(always)]
         fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
             self.truncate(other.len());
@@ -1553,12 +1553,12 @@ pub mod vector {
         type Container = Vecs<T::Container>;
         #[inline(always)]
         fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a {
-            thing.map(|x| <T::Container as Container<T>>::reborrow(x))
+            thing.map(|x| <T::Container as Container>::reborrow(x))
         }
     }
 
     impl<T: Columnar, const N: usize> Columnar for [T; N] {
-        type Ref<'a> = Slice<<T::Container as Container<T>>::Borrowed<'a>> where T: 'a;
+        type Ref<'a> = Slice<<T::Container as Container>::Borrowed<'a>> where T: 'a;
         #[inline(always)]
         fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
             for (s, o) in self.iter_mut().zip(other.into_iter()) {
@@ -1576,12 +1576,12 @@ pub mod vector {
         type Container = Vecs<T::Container>;
         #[inline(always)]
         fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a {
-            thing.map(|x| <T::Container as Container<T>>::reborrow(x))
+            thing.map(|x| <T::Container as Container>::reborrow(x))
         }
     }
 
     impl<T: Columnar, const N: usize> Columnar for smallvec::SmallVec<[T; N]> {
-        type Ref<'a> = Slice<<T::Container as Container<T>>::Borrowed<'a>> where T: 'a;
+        type Ref<'a> = Slice<<T::Container as Container>::Borrowed<'a>> where T: 'a;
         #[inline(always)]
         fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
             self.truncate(other.len());
@@ -1600,13 +1600,13 @@ pub mod vector {
         type Container = Vecs<T::Container>;
         #[inline(always)]
         fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a {
-            thing.map(|x| <T::Container as Container<T>>::reborrow(x))
+            thing.map(|x| <T::Container as Container>::reborrow(x))
         }
     }
 
-    impl<T: Columnar<Container = TC>, BC: Container<u64>, TC: Container<T>> Container<Vec<T>> for Vecs<TC, BC> {
-        type Ref<'a> = Slice<<T::Container as Container<T>>::Borrowed<'a>> where T: 'a;
-        type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>> where BC: 'a, TC: 'a, T: 'a;
+    impl<BC: for<'a> Container<Ref<'a> = &'a u64>, TC: Container> Container for Vecs<TC, BC> {
+        type Ref<'a> = Slice<TC::Borrowed<'a>> where TC: 'a;
+        type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>> where BC: 'a, TC: 'a;
         #[inline(always)]
         fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
             Vecs {
@@ -1617,45 +1617,7 @@ pub mod vector {
         #[inline(always)]
         fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> where BC: 'a, TC: 'a {
             Vecs {
-                bounds: <BC as Container<u64>>::reborrow(thing.bounds),
-                values: TC::reborrow(thing.values),
-            }
-        }
-    }
-
-    impl<T: Columnar<Container = TC>, BC: Container<u64>, TC: Container<T>, const N: usize> Container<[T; N]> for Vecs<TC, BC> {
-        type Ref<'a> = Slice<<T::Container as Container<T>>::Borrowed<'a>> where T: 'a;
-        type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>> where BC: 'a, TC: 'a, T: 'a;
-        #[inline(always)]
-        fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
-            Vecs {
-                bounds: self.bounds.borrow(),
-                values: self.values.borrow(),
-            }
-        }
-        #[inline(always)]
-        fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> where BC: 'a, TC: 'a {
-            Vecs {
-                bounds: <BC as Container<u64>>::reborrow(thing.bounds),
-                values: TC::reborrow(thing.values),
-            }
-        }
-    }
-
-    impl<T: Columnar<Container = TC>, BC: Container<u64>, TC: Container<T>, const N: usize> Container<smallvec::SmallVec<[T; N]>> for Vecs<TC, BC> {
-        type Ref<'a> = Slice<<T::Container as Container<T>>::Borrowed<'a>> where T: 'a;
-        type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>> where BC: 'a, TC: 'a, T: 'a;
-        #[inline(always)]
-        fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
-            Vecs {
-                bounds: self.bounds.borrow(),
-                values: self.values.borrow(),
-            }
-        }
-        #[inline(always)]
-        fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> where BC: 'a, TC: 'a {
-            Vecs {
-                bounds: <BC as Container<u64>>::reborrow(thing.bounds),
+                bounds: <BC as Container>::reborrow(thing.bounds),
                 values: TC::reborrow(thing.values),
             }
         }
@@ -1774,9 +1736,9 @@ pub mod tuple {
                     ($($name::reborrow($name),)*)
                 }
             }
-            impl<$($name: crate::Columnar, $name2: Container<$name>,)*> Container<($($name,)*)> for ($($name2,)*) {
-                type Ref<'a> = ($($name::Ref<'a>,)*) where $($name: 'a,)*;
-                type Borrowed<'a> = ($($name2::Borrowed<'a>,)*) where $($name: 'a, $name2: 'a,)*;
+            impl<$($name2: Container,)*> Container for ($($name2,)*) {
+                type Ref<'a> = ($($name2::Ref<'a>,)*) where $($name2: 'a,)*;
+                type Borrowed<'a> = ($($name2::Borrowed<'a>,)*) where $($name2: 'a,)*;
                 #[inline(always)]
                 fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
                     let ($($name,)*) = self;
@@ -1953,7 +1915,7 @@ pub mod sums {
             pub values: Bools<VC, WC>,
         }
 
-        impl<CC: Container<u64>, VC: Container<u64>> RankSelect<CC, VC> {
+        impl<CC: for<'a> Container<Ref<'a> = &'a u64>, VC: for<'a> Container<Ref<'a> = &'a u64>> RankSelect<CC, VC> {
             pub fn borrow<'a>(&'a self) -> RankSelect<CC::Borrowed<'a>, VC::Borrowed<'a>, &'a u64> {
                 RankSelect {
                     counts: self.counts.borrow(),
@@ -1963,8 +1925,8 @@ pub mod sums {
             #[inline(always)]
             pub fn reborrow<'b, 'a: 'b>(thing: RankSelect<CC::Borrowed<'a>, VC::Borrowed<'a>, &'a u64>) -> RankSelect<CC::Borrowed<'b>, VC::Borrowed<'b>, &'b u64> {
                 RankSelect {
-                    counts: <CC as Container<u64>>::reborrow(thing.counts),
-                    values: <Bools::<VC, u64> as Container<bool>>::reborrow(thing.values),
+                    counts: <CC as Container>::reborrow(thing.counts),
+                    values: <Bools::<VC, u64> as Container>::reborrow(thing.values),
                 }
             }
         }
@@ -2118,9 +2080,9 @@ pub mod sums {
             }
         }
 
-        impl<S: Columnar, T: Columnar, SC: Container<S>, TC: Container<T>> Container<Result<S, T>> for Results<SC, TC> {
-            type Ref<'a> = Result<S::Ref<'a>, T::Ref<'a>> where S: 'a, T: 'a;
-            type Borrowed<'a> = Results<SC::Borrowed<'a>, TC::Borrowed<'a>, &'a [u64], &'a [u64], &'a u64> where SC: 'a, TC: 'a, S:'a, T: 'a;
+        impl<SC: Container, TC: Container> Container for Results<SC, TC> {
+            type Ref<'a> = Result<SC::Ref<'a>, TC::Ref<'a>> where SC: 'a, TC: 'a;
+            type Borrowed<'a> = Results<SC::Borrowed<'a>, TC::Borrowed<'a>, &'a [u64], &'a [u64], &'a u64> where SC: 'a, TC: 'a;
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
                 Results {
                     indexes: self.indexes.borrow(),
@@ -2339,9 +2301,9 @@ pub mod sums {
             }
         }
 
-        impl<T: Columnar, TC: Container<T>> Container<Option<T>> for Options<TC> {
-            type Ref<'a> = Option<T::Ref<'a>> where T: 'a;
-            type Borrowed<'a> = Options<TC::Borrowed<'a>, &'a [u64], &'a [u64], &'a u64> where TC: 'a, T: 'a;
+        impl<TC: Container> Container for Options<TC> {
+            type Ref<'a> = Option<TC::Ref<'a>> where TC: 'a;
+            type Borrowed<'a> = Options<TC::Borrowed<'a>, &'a [u64], &'a [u64], &'a u64> where TC: 'a;
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
                 Options {
                     indexes: self.indexes.borrow(),
