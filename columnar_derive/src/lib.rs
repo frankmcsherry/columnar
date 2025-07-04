@@ -365,6 +365,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
             }
 
             impl #impl_gen ::columnar::Container<#name #ty_gen> for #c_ident < #(<#types as ::columnar::Columnar>::Container ),* > #where_clause2 {
+                type Ref<'a> = #r_ident < #(<#types as ::columnar::Columnar>::Ref<'a>,)* > where #(#types: 'a,)*;
                 type Borrowed<'a> = #c_ident < #(<<#types as ::columnar::Columnar>::Container as ::columnar::Container<#types>>::Borrowed<'a> ),* > where #(#types: 'a,)*;
                 #[inline(always)]
                 fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -498,6 +499,7 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
         }
 
         impl ::columnar::Container<#name> for #c_ident {
+            type Ref<'a> = #name;
             type Borrowed<'a> = #c_ident < &'a u64 >;
             #[inline(always)]
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -881,6 +883,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         let container_types = &variants.iter().map(|(_, types)| quote! { <(#(#types),*) as ::columnar::Columnar>::Container }).collect::<Vec<_>>();
 
         let reference_args = variants.iter().map(|(_, types)| quote! { <(#(#types),*) as ::columnar::Columnar>::Ref<'a> });
+        let reference_args2 = reference_args.clone();
 
         // For each variant of `other`, the matching and non-matching variant cases.
         let copy_from = variants.iter().enumerate().map(|(index, (variant, types))| {
@@ -975,6 +978,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
             }
 
             impl #impl_gen ::columnar::Container<#name #ty_gen> for #c_ident < #(#container_types),* > #where_clause2 {
+                type Ref<'a> = #r_ident < #(#reference_args2,)* > where Self: 'a, #(#variant_types: 'a,)*;
                 type Borrowed<'a> = #c_ident < #( < #container_types as ::columnar::Container<#variant_types> >::Borrowed<'a>, )* &'a [u8], &'a [u64] > where #(#variant_types: 'a,)*;
                 #[inline(always)]
                 fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -1126,6 +1130,7 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
         }
 
         impl<CV: ::columnar::Container<u8>> ::columnar::Container<#name> for #c_ident <CV> {
+            type Ref<'a> = #name;
             type Borrowed<'a> = #c_ident < CV::Borrowed<'a> > where CV: 'a;
             #[inline(always)]
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {

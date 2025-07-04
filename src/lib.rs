@@ -71,6 +71,10 @@ pub trait Columnar : 'static {
 ///
 /// As an example, `(Vec<A>, Vecs<Vec<B>>)`.
 pub trait Container<C: Columnar + ?Sized> : Len + Clear + for<'a> Push<C::Ref<'a>> + Clone + Default + Send + 'static {
+    /// For each lifetime, a reference with that lifetime.
+    ///
+    /// As an example, `(&'a A, &'a [B])`.
+    type Ref<'a> : Copy;
     /// The type of a borrowed container.
     ///
     /// Corresponding to our example, `(&'a [A], Vecs<&'a [B], &'a [u64]>)`.
@@ -870,6 +874,7 @@ pub mod primitive {
                 fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
             }
             impl crate::Container<$index_type> for Vec<$index_type> {
+                type Ref<'a> = &'a $index_type;
                 type Borrowed<'a> = &'a [$index_type];
                 #[inline(always)]
                 fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { &self[..] }
@@ -919,6 +924,7 @@ pub mod primitive {
         }
 
         impl<CV: Container<u64>> Container<usize> for Usizes<CV> {
+            type Ref<'a> = usize;
             type Borrowed<'a> = Usizes<CV::Borrowed<'a>> where CV: 'a;
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
                 Usizes { values: self.values.borrow() }
@@ -985,6 +991,7 @@ pub mod primitive {
         }
 
         impl<CV: Container<i64>> Container<isize> for Isizes<CV> {
+            type Ref<'a> = isize;
             type Borrowed<'a> = Isizes<CV::Borrowed<'a>> where CV: 'a;
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
                 Isizes { values: self.values.borrow() }
@@ -1059,6 +1066,7 @@ pub mod primitive {
         }
 
         impl Container<()> for Empties {
+            type Ref<'a> = ();
             type Borrowed<'a> = Empties<&'a u64>;
             #[inline(always)]
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { Empties { count: &self.count, empty: () } }
@@ -1156,6 +1164,7 @@ pub mod primitive {
         }
 
         impl<VC: Container<u64>> Container<bool> for Bools<VC> {
+            type Ref<'a> = bool;
             type Borrowed<'a> = Bools<VC::Borrowed<'a>, &'a u64> where VC: 'a;
             #[inline(always)]
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -1281,6 +1290,7 @@ pub mod primitive {
         }
 
         impl<SC: Container<u64>, NC: Container<u32>> Container<Duration> for Durations<SC, NC> {
+            type Ref<'a> = Duration;
             type Borrowed<'a> = Durations<SC::Borrowed<'a>, NC::Borrowed<'a>> where SC: 'a, NC: 'a;
             #[inline(always)]
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -1394,6 +1404,7 @@ pub mod string {
     }
 
     impl<BC: Container<u64>> Container<String> for Strings<BC, Vec<u8>> {
+        type Ref<'a> = &'a str;
         type Borrowed<'a> = Strings<BC::Borrowed<'a>, &'a [u8]> where BC: 'a;
         #[inline(always)]
         fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -1594,6 +1605,7 @@ pub mod vector {
     }
 
     impl<T: Columnar<Container = TC>, BC: Container<u64>, TC: Container<T>> Container<Vec<T>> for Vecs<TC, BC> {
+        type Ref<'a> = Slice<<T::Container as Container<T>>::Borrowed<'a>> where T: 'a;
         type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>> where BC: 'a, TC: 'a, T: 'a;
         #[inline(always)]
         fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -1612,6 +1624,7 @@ pub mod vector {
     }
 
     impl<T: Columnar<Container = TC>, BC: Container<u64>, TC: Container<T>, const N: usize> Container<[T; N]> for Vecs<TC, BC> {
+        type Ref<'a> = Slice<<T::Container as Container<T>>::Borrowed<'a>> where T: 'a;
         type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>> where BC: 'a, TC: 'a, T: 'a;
         #[inline(always)]
         fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -1630,6 +1643,7 @@ pub mod vector {
     }
 
     impl<T: Columnar<Container = TC>, BC: Container<u64>, TC: Container<T>, const N: usize> Container<smallvec::SmallVec<[T; N]>> for Vecs<TC, BC> {
+        type Ref<'a> = Slice<<T::Container as Container<T>>::Borrowed<'a>> where T: 'a;
         type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>> where BC: 'a, TC: 'a, T: 'a;
         #[inline(always)]
         fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -1761,6 +1775,7 @@ pub mod tuple {
                 }
             }
             impl<$($name: crate::Columnar, $name2: Container<$name>,)*> Container<($($name,)*)> for ($($name2,)*) {
+                type Ref<'a> = ($($name::Ref<'a>,)*) where $($name: 'a,)*;
                 type Borrowed<'a> = ($($name2::Borrowed<'a>,)*) where $($name: 'a, $name2: 'a,)*;
                 #[inline(always)]
                 fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -2104,6 +2119,7 @@ pub mod sums {
         }
 
         impl<S: Columnar, T: Columnar, SC: Container<S>, TC: Container<T>> Container<Result<S, T>> for Results<SC, TC> {
+            type Ref<'a> = Result<S::Ref<'a>, T::Ref<'a>> where S: 'a, T: 'a;
             type Borrowed<'a> = Results<SC::Borrowed<'a>, TC::Borrowed<'a>, &'a [u64], &'a [u64], &'a u64> where SC: 'a, TC: 'a, S:'a, T: 'a;
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
                 Results {
@@ -2324,6 +2340,7 @@ pub mod sums {
         }
 
         impl<T: Columnar, TC: Container<T>> Container<Option<T>> for Options<TC> {
+            type Ref<'a> = Option<T::Ref<'a>> where T: 'a;
             type Borrowed<'a> = Options<TC::Borrowed<'a>, &'a [u64], &'a [u64], &'a u64> where TC: 'a, T: 'a;
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
                 Options {
