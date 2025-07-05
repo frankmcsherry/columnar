@@ -12,6 +12,16 @@ fn string20_copy(bencher: &mut Bencher) { _bench_copy(bencher, vec![format!("gra
 fn vec_u_s_copy(bencher: &mut Bencher) { _bench_copy(bencher, vec![vec![(0u64, format!("grawwwwrr!")); 32]; 32]); }
 fn vec_u_vn_s_copy(bencher: &mut Bencher) { _bench_copy(bencher, vec![vec![(0u64, vec![(); 1 << 40], format!("grawwwwrr!")); 32]; 32]); }
 
+fn empty_extend(bencher: &mut Bencher) { _bench_extend(bencher, vec![(); 1024]); }
+fn option_extend(bencher: &mut Bencher) { _bench_extend(bencher, vec![Option::<String>::None; 1024]); }
+fn u64_extend(bencher: &mut Bencher) { _bench_extend(bencher, vec![0u64; 1024]); }
+fn u32x2_extend(bencher: &mut Bencher) { _bench_extend(bencher, vec![(0u32,0u32); 1024]); }
+fn u8_u64_extend(bencher: &mut Bencher) { _bench_extend(bencher, vec![(0u8, 0u64); 512]); }
+fn string10_extend(bencher: &mut Bencher) { _bench_extend(bencher, vec![format!("grawwwwrr!"); 1024]); }
+fn string20_extend(bencher: &mut Bencher) { _bench_extend(bencher, vec![format!("grawwwwrr!!!!!!!!!!!"); 512]); }
+fn vec_u_s_extend(bencher: &mut Bencher) { _bench_extend(bencher, vec![vec![(0u64, format!("grawwwwrr!")); 32]; 32]); }
+fn vec_u_vn_s_extend(bencher: &mut Bencher) { _bench_extend(bencher, vec![vec![(0u64, vec![(); 1 << 40], format!("grawwwwrr!")); 32]; 32]); }
+
 fn empty_clone(bencher: &mut Bencher) { _bench_clone(bencher, vec![(); 1024]); }
 fn option_clone(bencher: &mut Bencher) { _bench_clone(bencher, vec![Option::<String>::None; 1024]); }
 fn u64_clone(bencher: &mut Bencher) { _bench_clone(bencher, vec![0u64; 1024]); }
@@ -58,6 +68,29 @@ fn _bench_copy<T: Columnar+Eq>(bencher: &mut Bencher, record: T) where T::Contai
         arena.clear();
         for _ in 0 .. 1024 {
             arena.push(&record);
+        }
+    });
+}
+
+fn _bench_extend<T: Columnar+Eq>(bencher: &mut Bencher, record: T) where T::Container : for<'a> columnar::Push<&'a T> {
+    use columnar::Push;
+
+    // prepare encoded data for bencher.bytes
+    let mut arena: T::Container = Default::default();
+
+    // get sizing information for throughput reports.
+    for _ in 0 .. 1024 {
+        arena.push(&record);
+    }
+    use columnar::Container;
+    bencher.bytes = Sequence::length_in_bytes(&arena.borrow()) as u64;
+
+    let arena2 = arena.clone();
+    
+    bencher.iter(|| {
+        arena.clear();
+        for i in 0 .. 1024 {
+            arena.extend_from_self(arena2.borrow(), i .. i+1)
         }
     });
 }
@@ -112,6 +145,18 @@ benchmark_group!(
     vec_u_vn_s_clone,
 );
 benchmark_group!(
+    extend,
+    empty_extend,
+    option_extend,
+    string10_extend,
+    string20_extend,
+    u32x2_extend,
+    u64_extend,
+    u8_u64_extend,
+    vec_u_s_extend,
+    vec_u_vn_s_extend,
+);
+benchmark_group!(
     copy,
     empty_copy,
     option_copy,
@@ -123,4 +168,4 @@ benchmark_group!(
     vec_u_s_copy,
     vec_u_vn_s_copy,
 );
-benchmark_main!(clone, copy);
+benchmark_main!(clone, copy, extend);

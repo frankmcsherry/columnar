@@ -379,6 +379,11 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
                         #( #names: <#container_types as ::columnar::Container>::reborrow_ref(thing.#names), )*
                     }
                 }
+
+                #[inline(always)]
+                fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+                    #( self.#names.extend_from_self(other.#names, range.clone()); )*
+                }
             }
         }
     };
@@ -509,6 +514,11 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
             }
             #[inline(always)]
             fn reborrow_ref<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> { thing }
+
+            #[inline(always)]
+            fn extend_from_self(&mut self, _other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+                self.count += range.len() as u64;
+            }         
         }
 
     }.into()
@@ -990,6 +1000,8 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                         #( #reborrow_ref )*
                     }
                 }
+
+                // TODO: implement `extend_from_self`.
             }
         }
     };
@@ -1138,6 +1150,8 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
             }
             #[inline(always)]
             fn reborrow_ref<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> { thing }
+
+            // TODO: implement `extend_from_self`.
         }
     }.into()
 }
