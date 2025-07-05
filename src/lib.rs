@@ -16,28 +16,23 @@ pub mod adts;
 ///
 /// For a running example, a type like `(A, Vec<B>)`.
 pub trait Columnar : 'static {
-
-    /// For each lifetime, a reference with that lifetime.
-    ///
-    /// As an example, `(&'a A, &'a [B])`.
-    type Ref<'a> : Copy;
     /// Repopulates `self` from a reference.
     ///
     /// By default this just calls `into_owned()`, but it can be overridden.
-    fn copy_from<'a>(&mut self, other: Self::Ref<'a>) where Self: Sized {
+    fn copy_from<'a>(&mut self, other: Ref<'a, Self>) where Self: Sized {
         *self = Self::into_owned(other);
     }
     /// Produce an instance of `Self` from `Self::Ref<'a>`.
-    fn into_owned<'a>(other: Self::Ref<'a>) -> Self;
+    fn into_owned<'a>(other: Ref<'a, Self>) -> Self;
 
     /// The type that stores the columnar representation.
     ///
     /// The container must support pushing both `&Self` and `Self::Ref<'_>`.
     /// In our running example this might be `(Vec<A>, Vecs<Vec<B>>)`.
-    type Container: for<'a> Push<&'a Self> + for<'a> Container<Ref<'a> = Self::Ref<'a>>;
+    type Container: Container + for<'a> Push<&'a Self>;
 
     /// Converts a sequence of the references to the type into columnar form.
-    fn as_columns<'a, I>(selves: I) -> Self::Container where I: IntoIterator<Item =&'a Self>, Self: 'a {
+    fn as_columns<'a, I>(selves: I) -> Self::Container where I: IntoIterator<Item=&'a Self>, Self: 'a {
         let mut columns: Self::Container = Default::default();
         for item in selves {
             columns.push(item);
@@ -64,10 +59,20 @@ pub trait Columnar : 'static {
     /// For example, when comparing two references `Ref<'a>` and `Ref<'b>`, we can
     /// reborrow both to a local lifetime to compare them. This allows us to keep the
     /// lifetimes `'a` and `'b` separate, while otherwise Rust would unify them.
-    #[inline(always)] fn reborrow<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> {
-        <Self::Container as Container>::reborrow_ref(thing)
+    #[inline(always)] fn reborrow<'b, 'a: 'b>(thing: Ref<'a, Self>) -> Ref<'b, Self> {
+        Self::Container::reborrow_ref(thing)
     }
 }
+
+/// The container type of columnar type `T`.
+///
+/// Equivalent to `<T as Columnar>::Container`.
+pub type ContainerOf<T> = <T as Columnar>::Container;
+
+/// For a lifetime, the reference type of columnar type `T`.
+///
+/// Equivalent to `<ContainerOf<T> as Container>::Ref<'a>`.
+pub type Ref<'a, T> = <ContainerOf<T> as Container>::Ref<'a>;
 
 /// A container that can hold `C`, and provide its preferred references.
 ///
@@ -816,7 +821,7 @@ pub mod bytes {
         #[cfg(test)]
         mod test {
 
-            use crate::{Columnar, Container};
+            use crate::{Container, ContainerOf};
             use crate::common::Push;
             use crate::AsBytes;
 
@@ -831,7 +836,7 @@ pub mod bytes {
             #[test]
             fn round_trip() {
 
-                let mut column: <Result<u64, String> as Columnar>::Container = Default::default();
+                let mut column: ContainerOf<Result<u64, String>> = Default::default();
                 for i in 0..10000u64 {
                     column.push(&Ok::<u64, String>(i));
                     column.push(&Err::<u64, String>(format!("{:?}", i)));
@@ -844,14 +849,15 @@ pub mod bytes {
 
     #[cfg(test)]
     mod test {
+        use crate::ContainerOf;
+
         #[test]
         fn round_trip() {
 
-            use crate::{Columnar, Container};
             use crate::common::{Push, HeapSize, Len, Index};
-            use crate::{AsBytes, FromBytes};
+            use crate::{Container, AsBytes, FromBytes};
 
-            let mut column: <Result<u64, u64> as Columnar>::Container = Default::default();
+            let mut column: ContainerOf<Result<u64, u64>> = Default::default();
             for i in 0..100u64 {
                 column.push(Ok::<u64, u64>(i));
                 column.push(Err::<u64, u64>(i));
@@ -888,9 +894,8 @@ pub mod primitive {
     macro_rules! implement_columnable {
         ($($index_type:ty),*) => { $(
             impl crate::Columnar for $index_type {
-                type Ref<'a> = &'a $index_type;
                 #[inline(always)]
-                fn into_owned<'a>(other: Self::Ref<'a>) -> Self { *other }
+                fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self { *other }
 
                 type Container = Vec<$index_type>;
             }
@@ -943,8 +948,7 @@ pub mod primitive {
         pub struct Usizes<CV = Vec<u64>> { pub values: CV }
 
         impl Columnar for usize {
-            type Ref<'a> = usize;
-            fn into_owned<'a>(other: Self::Ref<'a>) -> Self { other }
+            fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self { other }
             type Container = Usizes;
         }
 
@@ -1015,8 +1019,7 @@ pub mod primitive {
         pub struct Isizes<CV = Vec<i64>> { pub values: CV }
 
         impl Columnar for isize {
-            type Ref<'a> = isize;
-            fn into_owned<'a>(other: Self::Ref<'a>) -> Self { other }
+            fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self { other }
             type Container = Isizes;
         }
 
@@ -1094,9 +1097,8 @@ pub mod primitive {
         pub struct Empties<CC = u64> { pub count: CC, pub empty: () }
 
         impl Columnar for () {
-            type Ref<'a> = ();
             #[inline(always)]
-            fn into_owned<'a>(_other: Self::Ref<'a>) -> Self { () }
+            fn into_owned<'a>(_other: crate::Ref<'a, Self>) -> Self { }
             type Container = Empties;
         }
 
@@ -1129,7 +1131,7 @@ pub mod primitive {
         impl<CC> Index for Empties<CC> {
             type Ref = ();
             #[inline(always)]
-            fn get(&self, _index: usize) -> Self::Ref { () }
+            fn get(&self, _index: usize) -> Self::Ref { }
         }
         impl<'a, CC> Index for &'a Empties<CC> {
             type Ref = &'a ();
@@ -1197,9 +1199,8 @@ pub mod primitive {
         }
 
         impl crate::Columnar for bool {
-            type Ref<'a> = bool;
             #[inline(always)]
-            fn into_owned<'a>(other: Self::Ref<'a>) -> Self { other }
+            fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self { other }
             type Container = Bools;
         }
 
@@ -1325,9 +1326,8 @@ pub mod primitive {
         }
 
         impl crate::Columnar for Duration {
-            type Ref<'a> = Duration;
             #[inline(always)]
-            fn into_owned<'a>(other: Self::Ref<'a>) -> Self { other }
+            fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self { other }
             type Container = Durations;
         }
 
@@ -1440,14 +1440,13 @@ pub mod string {
     }
 
     impl Columnar for String {
-        type Ref<'a> = &'a str;
         #[inline(always)]
-        fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
+        fn copy_from<'a>(&mut self, other: crate::Ref<'a, Self>) {
             self.clear();
             self.push_str(other);
         }
         #[inline(always)]
-        fn into_owned<'a>(other: Self::Ref<'a>) -> Self { other.to_string() }
+        fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self { other.to_string() }
         type Container = Strings;
     }
 
@@ -1608,9 +1607,8 @@ pub mod vector {
     }
 
     impl<T: Columnar> Columnar for Vec<T> {
-        type Ref<'a> = Slice<<T::Container as Container>::Borrowed<'a>> where T: 'a;
         #[inline(always)]
-        fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
+        fn copy_from<'a>(&mut self, other: crate::Ref<'a, Self>) {
             self.truncate(other.len());
             let mut other_iter = other.into_iter();
             for (s, o) in self.iter_mut().zip(&mut other_iter) {
@@ -1621,22 +1619,21 @@ pub mod vector {
             }
         }
         #[inline(always)]
-        fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
+        fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self {
             other.into_iter().map(|x| T::into_owned(x)).collect()
         }
         type Container = Vecs<T::Container>;
     }
 
     impl<T: Columnar, const N: usize> Columnar for [T; N] {
-        type Ref<'a> = Slice<<T::Container as Container>::Borrowed<'a>> where T: 'a;
         #[inline(always)]
-        fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
+        fn copy_from<'a>(&mut self, other: crate::Ref<'a, Self>) {
             for (s, o) in self.iter_mut().zip(other.into_iter()) {
                 T::copy_from(s, o);
             }
         }
         #[inline(always)]
-        fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
+        fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self {
             let vec: Vec<_> = other.into_iter().map(|x| T::into_owned(x)).collect();
             match vec.try_into() {
                 Ok(array) => array,
@@ -1647,9 +1644,8 @@ pub mod vector {
     }
 
     impl<T: Columnar, const N: usize> Columnar for smallvec::SmallVec<[T; N]> {
-        type Ref<'a> = Slice<<T::Container as Container>::Borrowed<'a>> where T: 'a;
         #[inline(always)]
-        fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
+        fn copy_from<'a>(&mut self, other: crate::Ref<'a, Self>) {
             self.truncate(other.len());
             let mut other_iter = other.into_iter();
             for (s, o) in self.iter_mut().zip(&mut other_iter) {
@@ -1660,7 +1656,7 @@ pub mod vector {
             }
         }
         #[inline(always)]
-        fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
+        fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self {
             other.into_iter().map(|x| T::into_owned(x)).collect()
         }
         type Container = Vecs<T::Container>;
@@ -1807,15 +1803,14 @@ pub mod tuple {
         ( $($name:ident,$name2:ident)+) => (
 
             impl<$($name: Columnar),*> Columnar for ($($name,)*) {
-                type Ref<'a> = ($($name::Ref<'a>,)*) where $($name: 'a,)*;
                 #[inline(always)]
-                fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
+                fn copy_from<'a>(&mut self, other: crate::Ref<'a, Self>) {
                     let ($($name,)*) = self;
                     let ($($name2,)*) = other;
                     $(crate::Columnar::copy_from($name, $name2);)*
                 }
                 #[inline(always)]
-                fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
+                fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self {
                     let ($($name2,)*) = other;
                     ($($name::into_owned($name2),)*)
                 }
@@ -1950,10 +1945,9 @@ pub mod tuple {
         #[test]
         fn round_trip() {
 
-            use crate::Columnar;
             use crate::common::{Index, Push, HeapSize, Len};
 
-            let mut column: <(u64, u8, String) as Columnar>::Container = Default::default();
+            let mut column: crate::ContainerOf<(u64, u8, String)> = Default::default();
             for i in 0..100 {
                 column.push((i, i as u8, &i.to_string()));
                 column.push((i, i as u8, &"".to_string()));
@@ -2153,15 +2147,14 @@ pub mod sums {
         }
 
         impl<S: Columnar, T: Columnar> Columnar for Result<S, T> {
-            type Ref<'a> = Result<S::Ref<'a>, T::Ref<'a>> where S: 'a, T: 'a;
-            fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
+            fn copy_from<'a>(&mut self, other: crate::Ref<'a, Self>) {
                 match (&mut *self, other) {
                     (Ok(x), Ok(y)) => x.copy_from(y),
                     (Err(x), Err(y)) => x.copy_from(y),
                     (_, other) => { *self = Self::into_owned(other); },
                 }
             }
-            fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
+            fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self {
                 match other {
                     Ok(y) => Ok(S::into_owned(y)),
                     Err(y) => Err(T::into_owned(y)),
@@ -2357,10 +2350,9 @@ pub mod sums {
             #[test]
             fn round_trip() {
 
-                use crate::Columnar;
                 use crate::common::{Index, Push, HeapSize, Len};
 
-                let mut column: <Result<u64, u64> as Columnar>::Container = Default::default();
+                let mut column: crate::ContainerOf<Result<u64, u64>> = Default::default();
                 for i in 0..100 {
                     column.push(Ok::<u64, u64>(i));
                     column.push(Err::<u64, u64>(i));
@@ -2374,7 +2366,7 @@ pub mod sums {
                     assert_eq!(column.get(2*i+1), Err(i as u64));
                 }
 
-                let mut column: <Result<u64, u8> as Columnar>::Container = Default::default();
+                let mut column: crate::ContainerOf<Result<u64, u8>> = Default::default();
                 for i in 0..100 {
                     column.push(Ok::<u64, u8>(i as u64));
                     column.push(Err::<u64, u8>(i as u8));
@@ -2406,14 +2398,13 @@ pub mod sums {
         }
 
         impl<T: Columnar> Columnar for Option<T> {
-            type Ref<'a> = Option<T::Ref<'a>> where T: 'a;
-            fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
+            fn copy_from<'a>(&mut self, other: crate::Ref<'a, Self>) {
                 match (&mut *self, other) {
                     (Some(x), Some(y)) => { x.copy_from(y); }
                     (_, other) => { *self = Self::into_owned(other); }
                 }
             }
-            fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
+            fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self {
                 other.map(|x| T::into_owned(x))
             }
             type Container = Options<T::Container>;
