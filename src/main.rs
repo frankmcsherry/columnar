@@ -60,14 +60,14 @@ fn main() {
     // Borrow raw bytes from `columns`, and reconstruct a borrowed `columns`.
     // In practice, we would use serialized bytes from somewhere else.
     // This local function gives type support, relating `T` to `T::Borrowed`.
-    fn round_trip<'a, C: Columnar>(container: &'a C::Container) -> <C::Container as Container<C>>::Borrowed<'a> {
+    fn round_trip<'a, C: Container>(container: &'a C) -> C::Borrowed<'a> {
         // Grab a reference to underlying bytes, as if serialized.
         let borrow = container.borrow();
         let mut bytes_iter = borrow.as_bytes().map(|(_, bytes)| bytes);
         columnar::FromBytes::from_bytes(&mut bytes_iter)
     }
 
-    let borrowed = round_trip::<Group<_>>(&columns);
+    let borrowed = round_trip(&columns);
 
     // Project down to columns and variants using field accessors.
     // This gets all ages from people in teams.
