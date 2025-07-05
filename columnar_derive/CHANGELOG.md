@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6](https://github.com/frankmcsherry/columnar/compare/columnar_derive-v0.2.5...columnar_derive-v0.2.6) - 2025-07-05
+
+### Other
+
+- Add Container::reborrow_ref
+- Introduce PushIndexAs trait
+- Remove type argument from Container
+- Introduce Container::Ref type
+- Migrate Push<Ref> constraint
+
 ## [0.2.5](https://github.com/frankmcsherry/columnar/compare/columnar_derive-v0.2.4...columnar_derive-v0.2.5) - 2025-06-20
 
 ### Other
