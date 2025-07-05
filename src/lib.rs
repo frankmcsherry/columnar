@@ -1475,20 +1475,22 @@ pub mod string {
         fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
             if !range.is_empty() {
                 // Imported bounds will be relative to this starting offset.
-                let mut values_len = self.values.len() as u64;
+                let values_len = self.values.len() as u64;
 
                 // Push all bytes that we can, all at once.
-                let other_lower: usize = if range.start == 0 { 0 } else { other.bounds.index_as(range.start-1) } as usize;
-                let other_upper: usize = other.bounds.index_as(range.end-1) as usize;
+                let other_lower = if range.start == 0 { 0 } else { other.bounds.index_as(range.start-1) };
+                let other_upper = other.bounds.index_as(range.end-1);
                 self.values.extend_from_self(other.values, other_lower as usize .. other_upper as usize);
 
-                // Determine new bounds to push based on lengths, relative to `values_len`.
-                let mut lower = other_lower as u64;
-                for index in range {
-                    let upper = other.bounds.index_as(index);
-                    values_len += upper - lower;
-                    self.bounds.push(&values_len);
-                    lower = upper;
+                // Each bound needs to be shifted by `values_len - other_lower`.
+                if values_len == other_lower {
+                    self.bounds.extend_from_self(other.bounds, range);
+                }
+                else {
+                    for index in range {
+                        let shifted = other.bounds.index_as(index) - other_lower + values_len;
+                        self.bounds.push(&shifted)
+                    }
                 }
             }
         }
@@ -1690,20 +1692,22 @@ pub mod vector {
         fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
             if !range.is_empty() {
                 // Imported bounds will be relative to this starting offset.
-                let mut values_len = self.values.len() as u64;
+                let values_len = self.values.len() as u64;
 
                 // Push all bytes that we can, all at once.
-                let other_lower: usize = if range.start == 0 { 0 } else { other.bounds.index_as(range.start-1) } as usize;
-                let other_upper: usize = other.bounds.index_as(range.end-1) as usize;
+                let other_lower = if range.start == 0 { 0 } else { other.bounds.index_as(range.start-1) };
+                let other_upper = other.bounds.index_as(range.end-1);
                 self.values.extend_from_self(other.values, other_lower as usize .. other_upper as usize);
 
-                // Determine new bounds to push based on lengths, relative to `values_len`.
-                let mut lower = other_lower as u64;
-                for index in range {
-                    let upper = other.bounds.index_as(index);
-                    values_len += upper - lower;
-                    self.bounds.push(&values_len);
-                    lower = upper;
+                // Each bound needs to be shifted by `values_len - other_lower`.
+                if values_len == other_lower {
+                    self.bounds.extend_from_self(other.bounds, range);
+                }
+                else {
+                    for index in range {
+                        let shifted = other.bounds.index_as(index) - other_lower + values_len;
+                        self.bounds.push(&shifted)
+                    }
                 }
             }
         }
