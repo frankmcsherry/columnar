@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0](https://github.com/frankmcsherry/columnar/compare/columnar-v0.6.0...columnar-v0.7.0) - 2025-07-05
+
+### Other
+
+- Update MSRV to 1.79
+- Add Container::reborrow_ref
+- Introduce PushIndexAs trait
+- Minimize as Container use
+- Remove type argument from Container
+- Introduce Container::Ref type
+- Migrate Push<Ref> constraint
+- Migrate Clear constraint
+- Migrate Len constraint
+- Migrate Default constraint
+- Migrate Clone constraint
+- Migrate Send constraint
+- Clippy clean-up
+- Revert D: Display Push due to perf, but with note
+- Unify Strings::push implementations
+- Update ops benchmark
+
 ## [0.6.0](https://github.com/frankmcsherry/columnar/compare/columnar-v0.5.1...columnar-v0.6.0) - 2025-06-20
 
 ### Other
