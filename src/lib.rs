@@ -1483,9 +1483,14 @@ pub mod string {
                 self.values.extend_from_self(other.values, other_lower as usize .. other_upper as usize);
 
                 // Each bound needs to be shifted by `values_len - other_lower`.
-                for index in range {
-                    let shifted = other.bounds.index_as(index) - other_lower + values_len;
-                    self.bounds.push(&shifted)
+                if values_len == other_lower {
+                    self.bounds.extend_from_self(other.bounds, range);
+                }
+                else {
+                    for index in range {
+                        let shifted = other.bounds.index_as(index) - other_lower + values_len;
+                        self.bounds.push(&shifted)
+                    }
                 }
             }
         }
@@ -1695,9 +1700,14 @@ pub mod vector {
                 self.values.extend_from_self(other.values, other_lower as usize .. other_upper as usize);
 
                 // Each bound needs to be shifted by `values_len - other_lower`.
-                for index in range {
-                    let shifted = other.bounds.index_as(index) - other_lower + values_len;
-                    self.bounds.push(&shifted)
+                if values_len == other_lower {
+                    self.bounds.extend_from_self(other.bounds, range);
+                }
+                else {
+                    for index in range {
+                        let shifted = other.bounds.index_as(index) - other_lower + values_len;
+                        self.bounds.push(&shifted)
+                    }
                 }
             }
         }
