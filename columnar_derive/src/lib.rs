@@ -345,14 +345,13 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
 
         quote! {
             impl #impl_gen ::columnar::Columnar for #name #ty_gen #where_clause2 {
-                type Ref<'a> = #r_ident < #(<#types as ::columnar::Columnar>::Ref<'a>,)* > where #(#types: 'a,)*;
                 #[inline(always)]
-                fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
+                fn copy_from<'a>(&mut self, other: ::columnar::Ref<'a, Self>) {
                     #destructure_self
                     #( ::columnar::Columnar::copy_from(#names, other.#names); )*
                 }
                 #[inline(always)]
-                fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
+                fn into_owned<'a>(other: ::columnar::Ref<'a, Self>) -> Self {
                     #into_self
                 }
                 type Container = #c_ident < #(<#types as ::columnar::Columnar>::Container ),* >;
@@ -493,11 +492,10 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
         }
 
         impl ::columnar::Columnar for #name {
-            type Ref<'a> = #name;
             #[inline(always)]
-            fn copy_from<'a>(&mut self, other: Self::Ref<'a>) { *self = other; }
+            fn copy_from<'a>(&mut self, other: ::columnar::Ref<'a, Self>) { *self = other; }
             #[inline(always)]
-            fn into_owned<'a>(other: Self::Ref<'a>) -> Self { other }
+            fn into_owned<'a>(other: ::columnar::Ref<'a, Self>) -> Self { other }
             type Container = #c_ident;
         }
 
@@ -958,16 +956,15 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         
         quote! {
             impl #impl_gen ::columnar::Columnar for #name #ty_gen #where_clause2 {
-                type Ref<'a> = #r_ident < #(#reference_args,)* > where Self: 'a, #(#variant_types: 'a,)*;
                 #[inline(always)]
-                fn copy_from<'a>(&mut self, other: Self::Ref<'a>) {
+                fn copy_from<'a>(&mut self, other: ::columnar::Ref<'a, Self>) {
                     match (&mut *self, other) {
                         #( #copy_from )*
                         (_, other) => { *self = Self::into_owned(other); }
                     }
                 }
                 #[inline(always)]
-                fn into_owned<'a>(other: Self::Ref<'a>) -> Self {
+                fn into_owned<'a>(other: ::columnar::Ref<'a, Self>) -> Self {
                     match other {
                         #( #into_owned )*
                     }
@@ -1125,11 +1122,10 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
         }
 
         impl ::columnar::Columnar for #name {
-            type Ref<'a> = #name;
             #[inline(always)]
-            fn copy_from<'a>(&mut self, other: Self::Ref<'a>) { *self = other; }
+            fn copy_from<'a>(&mut self, other: ::columnar::Ref<'a, Self>) { *self = other; }
             #[inline(always)]
-            fn into_owned<'a>(other: Self::Ref<'a>) -> Self { other }
+            fn into_owned<'a>(other: ::columnar::Ref<'a, Self>) -> Self { other }
             type Container = #c_ident;
         }
 
