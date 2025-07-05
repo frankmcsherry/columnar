@@ -87,6 +87,16 @@ pub trait Container : Len + Clear + for<'a> Push<Self::Ref<'a>> + Clone + Defaul
     fn reborrow<'b, 'a: 'b>(item: Self::Borrowed<'a>) -> Self::Borrowed<'b> where Self: 'a;
     /// Reborrows the borrowed type to a shorter lifetime. See [`Columnar::reborrow`] for details.
     fn reborrow_ref<'b, 'a: 'b>(item: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a;
+
+    /// Extends `self` by a range in `other`.
+    ///
+    /// This method has a default implementation, but can and should be specialized when ranges can be copied.
+    /// As an example, lists of lists are often backed by contiguous elements, all of which can be memcopied,
+    /// with only the offsets into them (the bounds) to push either before or after (rather than during).
+    #[inline(always)]
+    fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+        self.extend(range.map(|i| other.get(i)))
+    }
 }
 
 pub use common::{Clear, Len, Push, IndexMut, Index, IndexAs, HeapSize, Slice, AsBytes, FromBytes};
@@ -253,22 +263,22 @@ pub mod common {
             fn copy_as(self) -> T;
         }
         impl<T: Copy> CopyAs<T> for &T {
-            fn copy_as(self) -> T { *self }
+            #[inline(always)] fn copy_as(self) -> T { *self }
         }
         impl<T> CopyAs<T> for T {
-            fn copy_as(self) -> T { self }
+            #[inline(always)] fn copy_as(self) -> T { self }
         }
 
         pub trait IndexAs<T> {
             fn index_as(&self, index: usize) -> T;
-            fn last(&self) -> Option<T> where Self: Len {
+            #[inline(always)] fn last(&self) -> Option<T> where Self: Len {
                 if self.is_empty() { None }
                 else { Some(self.index_as(self.len()-1)) }
             }
         }
 
         impl<T: Index, S> IndexAs<S> for T where T::Ref: CopyAs<S> {
-            fn index_as(&self, index: usize) -> S { self.get(index).copy_as() }
+            #[inline(always)] fn index_as(&self, index: usize) -> S { self.get(index).copy_as() }
         }
 
     }
@@ -893,6 +903,9 @@ pub mod primitive {
                 fn reborrow<'b, 'a: 'b>(thing: &'a [$index_type]) -> Self::Borrowed<'b> where Self: 'a { thing }
                 #[inline(always)]
                 fn reborrow_ref<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
+
+                #[inline(always)]
+                fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) { self.extend_from_slice(&other[range]) }
             }
 
             impl crate::HeapSize for $index_type { }
@@ -947,6 +960,11 @@ pub mod primitive {
             }
             #[inline(always)]
             fn reborrow_ref<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
+
+            #[inline(always)]
+            fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+                self.values.extend_from_self(other.values, range)
+            }
         }
 
         impl<CV: Len> Len for Usizes<CV> { fn len(&self) -> usize { self.values.len() }}
@@ -1014,6 +1032,11 @@ pub mod primitive {
             }
             #[inline(always)]
             fn reborrow_ref<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
+
+            #[inline(always)]
+            fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+                self.values.extend_from_self(other.values, range)
+            }
         }
 
         impl<CV: Len> Len for Isizes<CV> { fn len(&self) -> usize { self.values.len() }}
@@ -1088,6 +1111,11 @@ pub mod primitive {
             }
             #[inline(always)]
             fn reborrow_ref<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
+
+            #[inline(always)]
+            fn extend_from_self(&mut self, _other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+                self.count += range.len() as u64;
+            }
         }
 
         impl<CC: CopyAs<u64> + Copy> Len for Empties<CC> {
@@ -1196,6 +1224,8 @@ pub mod primitive {
             }
             #[inline(always)]
             fn reborrow_ref<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
+
+            // TODO: There is probably a smart way to implement `extend_from_slice`, but it isn't trivial due to alignment.
         }
 
         impl<'a, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for crate::primitive::Bools<VC, &'a u64> {
@@ -1320,6 +1350,12 @@ pub mod primitive {
             }
             #[inline(always)]
             fn reborrow_ref<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
+
+            #[inline(always)]
+            fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+                self.seconds.extend_from_self(other.seconds, range.clone());
+                self.nanoseconds.extend_from_self(other.nanoseconds, range);
+            }
         }
 
         impl<'a, SC: crate::AsBytes<'a>, NC: crate::AsBytes<'a>> crate::AsBytes<'a> for crate::primitive::Durations<SC, NC> {
@@ -1434,6 +1470,28 @@ pub mod string {
         }
         #[inline(always)]
         fn reborrow_ref<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
+
+        #[inline(always)]
+        fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+            if !range.is_empty() {
+                // Imported bounds will be relative to this starting offset.
+                let mut values_len = self.values.len() as u64;
+
+                // Push all bytes that we can, all at once.
+                let other_lower: usize = if range.start == 0 { 0 } else { other.bounds.index_as(range.start-1) } as usize;
+                let other_upper: usize = other.bounds.index_as(range.end-1) as usize;
+                self.values.extend_from_self(other.values, other_lower as usize .. other_upper as usize);
+
+                // Determine new bounds to push based on lengths, relative to `values_len`.
+                let mut lower = other_lower as u64;
+                for index in range {
+                    let upper = other.bounds.index_as(index);
+                    values_len += upper - lower;
+                    self.bounds.push(&values_len);
+                    lower = upper;
+                }
+            }
+        }
     }
 
     impl<'a, BC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for Strings<BC, VC> {
@@ -1627,6 +1685,28 @@ pub mod vector {
         fn reborrow_ref<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a {
             thing.map(|x| TC::reborrow(x))
         }
+
+        #[inline(always)]
+        fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+            if !range.is_empty() {
+                // Imported bounds will be relative to this starting offset.
+                let mut values_len = self.values.len() as u64;
+
+                // Push all bytes that we can, all at once.
+                let other_lower: usize = if range.start == 0 { 0 } else { other.bounds.index_as(range.start-1) } as usize;
+                let other_upper: usize = other.bounds.index_as(range.end-1) as usize;
+                self.values.extend_from_self(other.values, other_lower as usize .. other_upper as usize);
+
+                // Determine new bounds to push based on lengths, relative to `values_len`.
+                let mut lower = other_lower as u64;
+                for index in range {
+                    let upper = other.bounds.index_as(index);
+                    values_len += upper - lower;
+                    self.bounds.push(&values_len);
+                    lower = upper;
+                }
+            }
+        }
     }
 
     impl<'a, TC: crate::AsBytes<'a>, BC: crate::AsBytes<'a>> crate::AsBytes<'a> for Vecs<TC, BC> {
@@ -1754,6 +1834,13 @@ pub mod tuple {
                 fn reborrow_ref<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a {
                     let ($($name2,)*) = thing;
                     ($($name2::reborrow_ref($name2),)*)
+                }
+
+                #[inline(always)]
+                fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+                    let ($($name,)*) = self;
+                    let ($($name2,)*) = other;
+                    $( $name.extend_from_self($name2, range.clone()); )*
                 }
             }
 
@@ -1955,7 +2042,7 @@ pub mod sums {
 
 
         impl<CC, VC: Len + IndexAs<u64>, WC: Copy+CopyAs<u64>> RankSelect<CC, VC, WC> {
-            #[inline]
+            #[inline(always)]
             pub fn get(&self, index: usize) -> bool {
                 Index::get(&self.values, index)
             }
@@ -2104,6 +2191,28 @@ pub mod sums {
                     Err(y) => Err(TC::reborrow_ref(y)),
                 }
             }
+
+            #[inline(always)]
+            fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+                if !range.is_empty() {
+                    // Starting offsets of each variant in `other`.
+                    let oks_start = other.indexes.rank(range.start);
+                    let errs_start = range.start - oks_start;
+
+                    // Count the number of `Ok` and `Err` variants as we push, to determine the range.
+                    // TODO: This could probably be `popcnt` somehow.
+                    let mut oks = 0;
+                    for index in range.clone() {
+                        let bit = other.indexes.get(index);
+                        self.indexes.push(bit);
+                        if bit { oks += 1; }
+                    }
+                    let errs = range.len() - oks;
+
+                    self.oks.extend_from_self(other.oks, oks_start .. oks_start + oks);
+                    self.errs.extend_from_self(other.errs, errs_start .. errs_start + errs);
+                }
+            }
         }
 
         impl<'a, SC: crate::AsBytes<'a>, TC: crate::AsBytes<'a>, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for Results<SC, TC, CC, VC, &'a u64> {
@@ -2138,6 +2247,7 @@ pub mod sums {
             WC: Copy + CopyAs<u64>,
         {
             type Ref = Result<SC::Ref, TC::Ref>;
+            #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref {
                 if self.indexes.get(index) {
                     Ok(self.oks.get(self.indexes.rank(index)))
@@ -2155,6 +2265,7 @@ pub mod sums {
             WC: Copy + CopyAs<u64>,
         {
             type Ref = Result<<&'a SC as Index>::Ref, <&'a TC as Index>::Ref>;
+            #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref {
                 if self.indexes.get(index) {
                     Ok((&self.oks).get(self.indexes.rank(index)))
@@ -2167,6 +2278,7 @@ pub mod sums {
         // NB: You are not allowed to change the variant, but can change its contents.
         impl<SC: IndexMut, TC: IndexMut, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len> IndexMut for Results<SC, TC, CC, VC> {
             type IndexMut<'a> = Result<SC::IndexMut<'a>, TC::IndexMut<'a>> where SC: 'a, TC: 'a, CC: 'a, VC: 'a;
+            #[inline(always)]
             fn get_mut(&mut self, index: usize) -> Self::IndexMut<'_> {
                 if self.indexes.get(index) {
                     Ok(self.oks.get_mut(self.indexes.rank(index)))
@@ -2323,6 +2435,25 @@ pub mod sums {
             fn reborrow_ref<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a {
                 thing.map(TC::reborrow_ref)
             }
+
+            #[inline(always)]
+            fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+                if !range.is_empty() {
+                    // Starting offsets of `Some` variants in `other`.
+                    let somes_start = other.indexes.rank(range.start);
+
+                    // Count the number of `Some` variants as we push, to determine the range.
+                    // TODO: This could probably be `popcnt` somehow.
+                    let mut somes = 0;
+                    for index in range {
+                        let bit = other.indexes.get(index);
+                        self.indexes.push(bit);
+                        if bit { somes += 1; }
+                    }
+
+                    self.somes.extend_from_self(other.somes, somes_start .. somes_start + somes);
+                }
+            }
         }
 
         impl<'a, TC: crate::AsBytes<'a>, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for Options<TC, CC, VC, &'a u64> {
@@ -2348,6 +2479,7 @@ pub mod sums {
 
         impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: Copy+CopyAs<u64>> Index for Options<TC, CC, VC, WC> {
             type Ref = Option<TC::Ref>;
+            #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref {
                 if self.indexes.get(index) {
                     Some(self.somes.get(self.indexes.rank(index)))
@@ -2360,6 +2492,7 @@ pub mod sums {
         where &'a TC: Index
         {
             type Ref = Option<<&'a TC as Index>::Ref>;
+            #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref {
                 if self.indexes.get(index) {
                     Some((&self.somes).get(self.indexes.rank(index)))
@@ -2370,6 +2503,7 @@ pub mod sums {
         }
         impl<TC: IndexMut, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len> IndexMut for Options<TC, CC, VC> {
             type IndexMut<'a> = Option<TC::IndexMut<'a>> where TC: 'a, CC: 'a, VC: 'a;
+            #[inline(always)]
             fn get_mut(&mut self, index: usize) -> Self::IndexMut<'_> {
                 if self.indexes.get(index) {
                     Some(self.somes.get_mut(self.indexes.rank(index)))
