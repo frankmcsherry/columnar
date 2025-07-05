@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.7](https://github.com/frankmcsherry/columnar/compare/columnar_derive-v0.2.6...columnar_derive-v0.2.7) - 2025-07-05
+
+### Other
+
+- Remove Columnar::Ref and replace by type defs
+- Add Container::extend_from_self
+
 ## [0.2.6](https://github.com/frankmcsherry/columnar/compare/columnar_derive-v0.2.5...columnar_derive-v0.2.6) - 2025-07-05
 
 ### Other

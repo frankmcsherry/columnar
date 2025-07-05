@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0](https://github.com/frankmcsherry/columnar/compare/columnar-v0.7.0...columnar-v0.8.0) - 2025-07-05
+
+### Other
+
+- Specialize Vecs::Push<Slice>
+- Remove Columnar::Ref and replace by type defs
+- Optimize non-shifting case
+- Tidy extend_from_self
+- Update _extend benchmark
+- Add Container::extend_from_self
+
 ## [0.7.0](https://github.com/frankmcsherry/columnar/compare/columnar-v0.6.0...columnar-v0.7.0) - 2025-07-05
 
 ### Other
