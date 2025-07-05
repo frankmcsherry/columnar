@@ -353,9 +353,9 @@ pub mod common {
     /// The lower and upper bounds should be meaningfully set on construction.
     #[derive(Copy, Clone, Debug)]
     pub struct Slice<S> {
-        lower: usize,
-        upper: usize,
-        slice: S,
+        pub lower: usize,
+        pub upper: usize,
+        pub slice: S,
     }
 
     impl<S> Slice<S> {
@@ -482,10 +482,12 @@ pub mod common {
         }
     }
 
-    impl<S: Index + Len> IntoIterator for Slice<S> {
-        type Item = S::Ref;
-        type IntoIter = IterOwn<Slice<S>>;
-        fn into_iter(self) -> Self::IntoIter {
+    impl<S: Index + Len> Slice<S> {
+        /// Converts the slice into an iterator.
+        ///
+        /// This method exists rather than an `IntoIterator` implementation to avoid
+        /// a conflicting implementation for pushing an `I: IntoIterator` into `Vecs`.
+        pub fn into_iter(self) -> IterOwn<Slice<S>> {
             self.into_index_iter()
         }
     }
@@ -1763,6 +1765,14 @@ pub mod vector {
             let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
             let upper = self.bounds.index_as(index);
             Slice::new(lower, upper, &mut self.values)
+        }
+    }
+
+    impl<'a, TC: Container, BC: for<'b> Push<&'b u64>> Push<Slice<TC::Borrowed<'a>>> for Vecs<TC, BC> {
+        #[inline]
+        fn push(&mut self, item: Slice<TC::Borrowed<'a>>) {
+            self.values.extend_from_self(item.slice, item.lower .. item.upper);
+            self.bounds.push(&(self.values.len() as u64));
         }
     }
 
