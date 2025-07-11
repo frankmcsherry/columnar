@@ -71,7 +71,8 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
     let container_struct = {
         quote! {
             /// Derived columnar container for a struct.
-            #[derive(Copy, Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+            #[derive(Copy, Clone, Debug, Default)]
             #vis struct #c_ident < #(#container_types),* >{
                 #(
                     /// Container for #names.
@@ -87,7 +88,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
             let new_name = format!("R{}", index);
             syn::Ident::new(&new_name, name.span())
         }).collect::<Vec<_>>();
-    
+
         let ty_gen = quote! { < #(#reference_types),* > };
 
         let attr = if let Some(attr) = attr {
@@ -140,17 +141,17 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
 
     };
 
-    let push_own = { 
+    let push_own = {
         let (_impl_gen, ty_gen, _where_clause) = generics.split_for_impl();
         let push = names.iter().map(|name| { quote! { self.#name.push(#name); } });
-        
+
         let struct_generics = generics.params.iter();
         let impl_gen = quote! { < #(#struct_generics,)* #(#container_types),* > };
 
         let where_clause2 = quote! { where #(#container_types: ::columnar::Push<#types>),* };
 
         // Either use curly braces or parentheses to destructure the item.
-        let destructure_self = 
+        let destructure_self =
         if named { quote! { let #name { #(#names),* } = item; } }
         else     { quote! { let #name ( #(#names),* ) = item; } };
 
@@ -165,16 +166,16 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         }
     };
 
-    let push_ref = { 
+    let push_ref = {
         let (_impl_gen, ty_gen, _where_clause) = generics.split_for_impl();
         let push = names.iter().map(|name| { quote! { self.#name.push(#name); } });
-        
+
         let struct_generics = generics.params.iter();
         let impl_gen = quote! { < 'columnar, #(#struct_generics,)* #(#container_types),* > };
 
         let where_clause2 = quote! { where #(#container_types: ::columnar::Push<&'columnar #types>),* };
 
-        let destructure_self = 
+        let destructure_self =
         if named { quote! { let #name { #(#names),* } = item; } }
         else     { quote! { let #name ( #(#names),* ) = item; } };
 
@@ -190,7 +191,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
     };
 
     // Implementation of `Push<#r_ident>`
-    let push_new = { 
+    let push_new = {
 
         let reference_types = &names.iter().enumerate().map(|(index, name)| {
             let new_name = format!("R{}", index);
@@ -198,7 +199,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         }).collect::<Vec<_>>();
 
         let push = names.iter().map(|name| { quote! { self.#name.push(#name); } });
-        
+
         let impl_gen = quote! { < #(#container_types,)* #(#reference_types),* > };
 
         let where_clause = quote! { where #(#container_types: ::columnar::Push<#reference_types>),* };
@@ -253,7 +254,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         }
     };
 
-    let clear = { 
+    let clear = {
 
         let impl_gen = quote! { < #(#container_types),* > };
         let ty_gen = quote! { < #(#container_types),* > };
@@ -267,14 +268,14 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         }
     };
 
-    let length = { 
+    let length = {
 
         let impl_gen = quote! { < #(#container_types),* > };
         let ty_gen = quote! { < #(#container_types),* > };
         let where_clause = quote! { where #(#container_types: ::columnar::Len),* };
 
         let first_name = &names[0];
-        
+
         quote! {
             impl #impl_gen ::columnar::Len for #c_ident #ty_gen #where_clause {
                 #[inline(always)]
@@ -285,12 +286,12 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         }
     };
 
-    let as_bytes = { 
+    let as_bytes = {
 
         let impl_gen = quote! { <'a, #(#container_types),* > };
         let ty_gen = quote! { < #(#container_types),* > };
         let where_clause = quote! { where #(#container_types: ::columnar::AsBytes<'a>),* };
-        
+
         quote! {
             impl #impl_gen ::columnar::AsBytes<'a> for #c_ident #ty_gen #where_clause {
                 // type Borrowed<'columnar> = #c_ident < #(<#container_types as ::columnar::AsBytes>::Borrowed<'columnar>,)*>;
@@ -304,12 +305,12 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         }
     };
 
-    let from_bytes = { 
+    let from_bytes = {
 
         let impl_gen = quote! { < 'columnar, #(#container_types),* > };
         let ty_gen = quote! { < #(#container_types),* > };
         let where_clause = quote! { where #(#container_types: ::columnar::FromBytes<'columnar>),* };
-        
+
         quote! {
             impl #impl_gen ::columnar::FromBytes<'columnar> for #c_ident #ty_gen #where_clause {
                 #[inline(always)]
@@ -326,18 +327,18 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         let (impl_gen, ty_gen, where_clause) = generics.split_for_impl();
 
         let where_clause2 = if let Some(struct_where) = where_clause {
-            let params = struct_where.predicates.iter(); 
+            let params = struct_where.predicates.iter();
             quote! {  where #(#types : ::columnar::Columnar,)* #(#params),* }
         }
         else {
             quote! { where #(#types : ::columnar::Columnar,)* }
         };
-    
+
         // Either use curly braces or parentheses to destructure the item.
-        let destructure_self = 
+        let destructure_self =
         if named { quote! { let #name { #(#names),* } = self; } }
         else     { quote! { let #name ( #(#names),* ) = self; } };
-        
+
         // Either use curly braces or parentheses to destructure the item.
         let into_self =
         if named { quote! { #name { #(#names: ::columnar::Columnar::into_owned(other.#names)),* } } }
@@ -414,7 +415,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
 
 // TODO: Do we need to use the generics?
 fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Visibility, attr: Option<proc_macro2::TokenStream>) -> proc_macro::TokenStream {
-    
+
     let c_name = format!("{}Container", name);
     let c_ident = syn::Ident::new(&c_name, name.span());
 
@@ -425,7 +426,8 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
     quote! {
 
         /// Derived columnar container for a unit struct.
-        #[derive(Copy, Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+        #[derive(Copy, Clone, Debug, Default)]
         #vis struct #c_ident<CW = u64> {
             /// Count of the number of contained records.
             pub count: CW,
@@ -516,7 +518,7 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
             #[inline(always)]
             fn extend_from_self(&mut self, _other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
                 self.count += range.len() as u64;
-            }         
+            }
         }
 
     }.into()
@@ -539,12 +541,12 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
     // Record everything we know about the variants.
     // TODO: Distinguish between unit and 0-tuple variants.
-    let variants: Vec<(&syn::Ident, Vec<_>)> = 
+    let variants: Vec<(&syn::Ident, Vec<_>)> =
     data_enum
         .variants
         .iter()
         .map(|variant| (
-            &variant.ident, 
+            &variant.ident,
             variant.fields.iter().map(|field| &field.ty).collect()
         ))
         .collect();
@@ -559,11 +561,12 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         let new_name = format!("C{}", index);
         syn::Ident::new(&new_name, name.span())
     }).collect::<Vec<_>>();
-    
+
     let container_struct = {
         quote! {
             /// Derived columnar container for an enum.
-            #[derive(Copy, Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+            #[derive(Copy, Clone, Debug, Default)]
             #[allow(non_snake_case)]
             #vis struct #c_ident < #(#container_types,)* CVar = Vec<u8>, COff = Vec<u64>, >{
                 #(
@@ -584,7 +587,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
             let new_name = format!("R{}", index);
             syn::Ident::new(&new_name, name.span())
         }).collect::<Vec<_>>();
-    
+
         let ty_gen = quote! { < #(#reference_types),* > };
 
         let attr = if let Some(attr) = attr {
@@ -607,10 +610,10 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         }
     };
 
-    let push_own = { 
+    let push_own = {
 
         let (_impl_gen, ty_gen, _where_clause) = generics.split_for_impl();
-        
+
         let push = variants.iter().enumerate().map(|(index, (variant, types))| {
 
             match data_enum.variants[index].fields {
@@ -662,7 +665,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         }
     };
 
-    let push_ref = { 
+    let push_ref = {
 
         let (_impl_gen, ty_gen, _where_clause) = generics.split_for_impl();
 
@@ -718,7 +721,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
     };
 
     // Implementation of `Push<#r_ident>`
-    let push_new = { 
+    let push_new = {
 
         let reference_types = &names.iter().enumerate().map(|(index, name)| {
             let new_name = format!("R{}", index);
@@ -737,19 +740,19 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                 #[inline]
                 fn push(&mut self, item: #index_type) {
                     match item {
-                        #( 
+                        #(
                             #r_ident::#names(x) => {
                                 self.offset.push(self.#names.len() as u64);
                                 self.#names.push(x);
                                 self.variant.push(#numbers as u8);
-                            }, 
+                            },
                         )*
                     }
                 }
             }
         }
     };
-    
+
     let index_own = {
         let impl_gen = quote! { < #(#container_types,)* CVal, COff> };
         let ty_gen = quote! { < #(#container_types,)* CVal, COff> };
@@ -798,7 +801,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         }
     };
 
-    let clear = { 
+    let clear = {
 
         let impl_gen = quote! { < #(#container_types),* > };
         let ty_gen = quote! { < #(#container_types),* > };
@@ -807,8 +810,8 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         quote! {
             impl #impl_gen ::columnar::Clear for #c_ident #ty_gen #where_clause {
                 #[inline(always)]
-                fn clear(&mut self) { 
-                    #(self.#names.clear();)* 
+                fn clear(&mut self) {
+                    #(self.#names.clear();)*
                     self.variant.clear();
                     self.offset.clear();
                 }
@@ -816,7 +819,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         }
     };
 
-    let length = { 
+    let length = {
 
         let impl_gen = quote! { < #(#container_types,)* CVar, COff> };
         let ty_gen = quote! { < #(#container_types,)* CVar, COff > };
@@ -831,12 +834,12 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         }
     };
 
-    let as_bytes = { 
+    let as_bytes = {
 
         let impl_gen = quote! { < 'a, #(#container_types,)* CVar, COff> };
         let ty_gen = quote! { < #(#container_types,)* CVar, COff > };
         let where_clause = quote! { where #(#container_types: ::columnar::AsBytes<'a>,)* CVar: ::columnar::AsBytes<'a>, COff: ::columnar::AsBytes<'a> };
-        
+
         quote! {
             impl #impl_gen ::columnar::AsBytes<'a> for #c_ident #ty_gen #where_clause {
                 #[inline(always)]
@@ -851,12 +854,12 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         }
     };
 
-    let from_bytes = { 
+    let from_bytes = {
 
         let impl_gen = quote! { < 'columnar, #(#container_types,)* CVar, COff> };
         let ty_gen = quote! { < #(#container_types,)* CVar, COff > };
         let where_clause = quote! { where #(#container_types: ::columnar::FromBytes<'columnar>,)* CVar: ::columnar::FromBytes<'columnar>, COff: ::columnar::FromBytes<'columnar> };
-        
+
         quote! {
             #[allow(non_snake_case)]
             impl #impl_gen ::columnar::FromBytes<'columnar> for #c_ident #ty_gen #where_clause {
@@ -878,7 +881,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         let types = &variants.iter().flat_map(|(_, types)| types).collect::<Vec<_>>();
 
         let where_clause2 = if let Some(enum_where) = where_clause {
-            let params = enum_where.predicates.iter(); 
+            let params = enum_where.predicates.iter();
             quote! {  where #(#types : ::columnar::Columnar,)* #(#params),* }
         }
         else {
@@ -902,7 +905,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         let copy_from = variants.iter().enumerate().map(|(index, (variant, types))| {
 
             if data_enum.variants[index].fields == syn::Fields::Unit {
-                quote! { 
+                quote! {
                     (#name::#variant, #r_ident::#variant(_)) => { }
                     (_, #r_ident::#variant(_)) => { *self = #name::#variant; }
                 }
@@ -953,7 +956,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                 },
             }
         }).collect::<Vec<_>>();
-        
+
         quote! {
             impl #impl_gen ::columnar::Columnar for #name #ty_gen #where_clause2 {
                 #[inline(always)]
@@ -1046,7 +1049,8 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
 
     quote! {
         /// Derived columnar container for all-unit enum.
-        #[derive(Copy, Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+        #[derive(Copy, Clone, Debug, Default)]
         #vis struct #c_ident <CVar = Vec<u8>> {
             /// Container for variant.
             pub variant: CVar,

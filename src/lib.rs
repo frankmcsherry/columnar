@@ -358,6 +358,15 @@ pub mod common {
         pub slice: S,
     }
 
+    impl<S> std::hash::Hash for Slice<S> where Self: Index<Ref: std::hash::Hash> {
+        fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+            self.len().hash(state);
+            for i in 0 .. self.len() {
+                self.get(i).hash(state);
+            }
+        }
+    }
+
     impl<S> Slice<S> {
         pub fn slice<R: std::ops::RangeBounds<usize>>(self, range: R) -> Self {
             use std::ops::Bound;
@@ -1190,7 +1199,8 @@ pub mod primitive {
         use crate::{Container, Clear, Len, Index, IndexAs, Push, HeapSize};
 
         /// A store for maintaining `Vec<bool>`.
-        #[derive(Copy, Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+        #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+        #[derive(Copy, Clone, Debug, Default, PartialEq)]
         pub struct Bools<VC = Vec<u64>, WC = u64> {
             /// The bundles of bits that form complete `u64` values.
             pub values: VC,
@@ -1321,7 +1331,8 @@ pub mod primitive {
         use crate::{Container, Len, Index, IndexAs, Push, Clear, HeapSize};
 
         // `std::time::Duration` is equivalent to `(u64, u32)`, corresponding to seconds and nanoseconds.
-        #[derive(Copy, Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+        #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+        #[derive(Copy, Clone, Debug, Default, PartialEq)]
         pub struct Durations<SC = Vec<u64>, NC = Vec<u32>> {
             pub seconds: SC,
             pub nanoseconds: NC,
@@ -1433,7 +1444,8 @@ pub mod string {
     use super::{Clear, Columnar, Container, Len, Index, IndexAs, Push, HeapSize};
 
     /// A stand-in for `Vec<String>`.
-    #[derive(Copy, Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[derive(Copy, Clone, Debug, Default, PartialEq)]
     pub struct Strings<BC = Vec<u64>, VC = Vec<u8>> {
         /// Bounds container; provides indexed access to offsets.
         pub bounds: BC,
@@ -1540,7 +1552,7 @@ pub mod string {
 
     // This is a simpler implementation, but it leads to a performance regression
     // for Strings and str because it loses access to `Vec::extend_from_slice`.
-    // 
+    //
     // impl<BC: Push<u64>, D: std::fmt::Display> Push<D> for Strings<BC> {
     //     #[inline(always)]
     //     fn push(&mut self, item: D) {
@@ -1602,7 +1614,8 @@ pub mod vector {
     use super::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, HeapSize, Slice};
 
     /// A stand-in for `Vec<Vec<T>>` for complex `T`.
-    #[derive(Debug, Default, Copy, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[derive(Debug, Default, Copy, Clone, PartialEq)]
     pub struct Vecs<TC, BC = Vec<u64>> {
         pub bounds: BC,
         pub values: TC,
@@ -2008,7 +2021,8 @@ pub mod sums {
         /// The design is to have `u64` running counts for each block of 1024 bits,
         /// which are roughly the size of a cache line. This is roughly 6% overhead,
         /// above the bits themselves, which seems pretty solid.
-        #[derive(Copy, Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+        #[derive(Copy, Clone, Debug, Default, PartialEq)]
         pub struct RankSelect<CC = Vec<u64>, VC = Vec<u64>, WC = u64> {
             /// Counts of the number of cumulative set (true) bits, *after* each block of 1024 bits.
             pub counts: CC,
@@ -2148,7 +2162,8 @@ pub mod sums {
         use crate::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, HeapSize};
         use crate::RankSelect;
 
-        #[derive(Copy, Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+        #[derive(Copy, Clone, Debug, Default, PartialEq)]
         pub struct Results<SC, TC, CC=Vec<u64>, VC=Vec<u64>, WC=u64> {
             /// Bits set to `true` correspond to `Ok` variants.
             pub indexes: RankSelect<CC, VC, WC>,
@@ -2399,7 +2414,8 @@ pub mod sums {
         use crate::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, HeapSize};
         use crate::RankSelect;
 
-        #[derive(Copy, Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+        #[derive(Copy, Clone, Debug, Default, PartialEq)]
         pub struct Options<TC, CC=Vec<u64>, VC=Vec<u64>, WC=u64> {
             /// Uses two bits for each item, one to indicate the variant and one (amortized)
             /// to enable efficient rank determination.
@@ -2609,7 +2625,8 @@ pub mod lookback {
     use crate::{Options, Results, Push, Index, Len, HeapSize};
 
     /// A container that encodes repeated values with a `None` variant, at the cost of extra bits for every record.
-    #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[derive(Clone, Debug, Default, PartialEq)]
     pub struct Repeats<TC, const N: u8 = 255> {
         /// Some(x) encodes a value, and None indicates the prior `x` value.
         pub inner: Options<TC>,
@@ -2655,7 +2672,8 @@ pub mod lookback {
         }
     }
 
-    #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[derive(Clone, Debug, Default, PartialEq)]
     pub struct Lookbacks<TC, VC = Vec<u8>, const N: u8 = 255> {
         /// Ok(x) encodes a value, and Err(y) indicates a value `y` back.
         pub inner: Results<TC, VC>,

@@ -76,7 +76,7 @@ impl HeapSize for Number { }
 /// This approach uses `indexes` which contains discriminants, which should allow
 /// an efficient representation of offset information. Unfortunately, both `arrays`
 /// and `objects` just list their intended offsets directly, rather than encode the
-/// offsets using unary degree sequences, which seemed hard to thread through the 
+/// offsets using unary degree sequences, which seemed hard to thread through the
 /// other abstractions. Their `Vec<usize>` container can probably be made smarter,
 /// in particular by an `Option<usize>` container where `None` indicates increment.
 // struct Jsons {
