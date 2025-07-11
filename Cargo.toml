@@ -51,6 +51,7 @@ harness = false
 [[bench]]
 name = "serde"
 harness = false
+required-features = ["serde"]
 
 [[bench]]
 name = "ops"
