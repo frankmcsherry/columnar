@@ -68,11 +68,15 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
     }).collect::<Vec<_>>();
 
     // The container struct is a tuple of containers, named to correspond with fields.
+    #[cfg(feature = "serde")]
+    let derive = quote! { #[derive(Copy, Clone, Debug, Default, serde::Serialize, serde::Deserialize)] };
+    #[cfg(not(feature = "serde"))]
+    let derive = quote! { #[derive(Copy, Clone, Debug, Default)] };
+
     let container_struct = {
         quote! {
             /// Derived columnar container for a struct.
-            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-            #[derive(Copy, Clone, Debug, Default)]
+            #derive
             #vis struct #c_ident < #(#container_types),* >{
                 #(
                     /// Container for #names.
@@ -423,11 +427,15 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
         panic!("Unit structs do not support attributes");
     }
 
+    #[cfg(feature = "serde")]
+    let derive = quote! { #[derive(Copy, Clone, Debug, Default, serde::Serialize, serde::Deserialize)] };
+    #[cfg(not(feature = "serde"))]
+    let derive = quote! { #[derive(Copy, Clone, Debug, Default)] };
+
     quote! {
 
         /// Derived columnar container for a unit struct.
-            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-        #[derive(Copy, Clone, Debug, Default)]
+        #derive
         #vis struct #c_ident<CW = u64> {
             /// Count of the number of contained records.
             pub count: CW,
@@ -562,11 +570,15 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         syn::Ident::new(&new_name, name.span())
     }).collect::<Vec<_>>();
 
+    #[cfg(feature = "serde")]
+    let derive = quote! { #[derive(Copy, Clone, Debug, Default, serde::Serialize, serde::Deserialize)] };
+    #[cfg(not(feature = "serde"))]
+    let derive = quote! { #[derive(Copy, Clone, Debug, Default)] };
+
     let container_struct = {
         quote! {
             /// Derived columnar container for an enum.
-            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-            #[derive(Copy, Clone, Debug, Default)]
+            #derive
             #[allow(non_snake_case)]
             #vis struct #c_ident < #(#container_types,)* CVar = Vec<u8>, COff = Vec<u64>, >{
                 #(
@@ -1047,10 +1059,14 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
     // Bit silly, but to help us fit in a byte and reign in bloat.
     assert!(names.len() <= 256, "Too many variants for enum");
 
+    #[cfg(feature = "serde")]
+    let derive = quote! { #[derive(Copy, Clone, Debug, Default, serde::Serialize, serde::Deserialize)] };
+    #[cfg(not(feature = "serde"))]
+    let derive = quote! { #[derive(Copy, Clone, Debug, Default)] };
+
     quote! {
         /// Derived columnar container for all-unit enum.
-            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-        #[derive(Copy, Clone, Debug, Default)]
+        #derive
         #vis struct #c_ident <CVar = Vec<u8>> {
             /// Container for variant.
             pub variant: CVar,
