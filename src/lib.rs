@@ -110,6 +110,10 @@ impl<T: Clone + Send + 'static> Container for Vec<T> {
     fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { &self[..] }
     fn reborrow<'b, 'a: 'b>(item: Self::Borrowed<'a>) -> Self::Borrowed<'b> where Self: 'a { item }
     fn reborrow_ref<'b, 'a: 'b>(item: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { item }
+    fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+        self.extend_from_slice(&other[range])
+    }
+
 }
 
 /// A container that can also be viewed as and reconstituted from bytes.
