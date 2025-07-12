@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0](https://github.com/frankmcsherry/columnar/compare/columnar-v0.8.0...columnar-v0.9.0) - 2025-07-12
+
+### Other
+
+- Add Copy to CopyAs
+- Containers for integer offsets
+- Update whitespace
+- Update benches/ops
+- Copy specialized extend_from_self
+- Decouple container and bytes traits
+- Move feature test outside quote
+- Include serde bench
+- Make serde optional
+
 ## [0.8.0](https://github.com/frankmcsherry/columnar/compare/columnar-v0.7.0...columnar-v0.8.0) - 2025-07-05
 
 ### Other
