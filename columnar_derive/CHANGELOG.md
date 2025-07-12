@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.8](https://github.com/frankmcsherry/columnar/compare/columnar_derive-v0.2.7...columnar_derive-v0.2.8) - 2025-07-12
+
+### Other
+
+- Move feature test outside quote
+- Make serde optional
+
 ## [0.2.7](https://github.com/frankmcsherry/columnar/compare/columnar_derive-v0.2.6...columnar_derive-v0.2.7) - 2025-07-05
 
 ### Other
