@@ -1,4 +1,4 @@
-use columnar::{Columnar, Container};
+use columnar::{Columnar, Container, ContainerBytes};
 
 #[derive(Columnar)]
 enum Group<T> {
@@ -60,7 +60,7 @@ fn main() {
     // Borrow raw bytes from `columns`, and reconstruct a borrowed `columns`.
     // In practice, we would use serialized bytes from somewhere else.
     // This local function gives type support, relating `T` to `T::Borrowed`.
-    fn round_trip<'a, C: Container>(container: &'a C) -> C::Borrowed<'a> {
+    fn round_trip<'a, C: ContainerBytes>(container: &'a C) -> C::Borrowed<'a> {
         // Grab a reference to underlying bytes, as if serialized.
         let borrow = container.borrow();
         let mut bytes_iter = borrow.as_bytes().map(|(_, bytes)| bytes);
@@ -109,7 +109,7 @@ mod test {
         Foo,
         Bar,
     }
-    
+
     // Tests derived implementations for a unit struct.
     #[derive(Columnar, Debug, Copy, Clone)]
     struct Test5;
@@ -150,7 +150,7 @@ mod test {
             Test3::Bar(4),
         ];
         let test3c = columnar::Columnar::as_columns(test3s.iter());
-        
+
         println!("{:?}", test3c);
 
         let iterc = (&test3c).into_index_iter();

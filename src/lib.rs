@@ -29,7 +29,7 @@ pub trait Columnar : 'static {
     ///
     /// The container must support pushing both `&Self` and `Self::Ref<'_>`.
     /// In our running example this might be `(Vec<A>, Vecs<Vec<B>>)`.
-    type Container: Container + for<'a> Push<&'a Self>;
+    type Container: ContainerBytes + for<'a> Push<&'a Self>;
 
     /// Converts a sequence of the references to the type into columnar form.
     fn as_columns<'a, I>(selves: I) -> Self::Container where I: IntoIterator<Item=&'a Self>, Self: 'a {
@@ -85,7 +85,7 @@ pub trait Container : Len + Clear + for<'a> Push<Self::Ref<'a>> + Clone + Defaul
     /// The type of a borrowed container.
     ///
     /// Corresponding to our example, `(&'a [A], Vecs<&'a [B], &'a [u64]>)`.
-    type Borrowed<'a>: Copy + Len + AsBytes<'a> + FromBytes<'a> + Index<Ref = Self::Ref<'a>> where Self: 'a;
+    type Borrowed<'a>: Copy + Len + Index<Ref = Self::Ref<'a>> where Self: 'a;
     /// Converts a reference to the type to a borrowed variant.
     fn borrow<'a>(&'a self) -> Self::Borrowed<'a>;
     /// Reborrows the borrowed type to a shorter lifetime. See [`Columnar::reborrow`] for details.
@@ -103,6 +103,22 @@ pub trait Container : Len + Clear + for<'a> Push<Self::Ref<'a>> + Clone + Defaul
         self.extend(range.map(|i| other.get(i)))
     }
 }
+
+impl<T: Clone + Send + 'static> Container for Vec<T> {
+    type Ref<'a> = &'a T;
+    type Borrowed<'a> = &'a [T];
+    fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { &self[..] }
+    fn reborrow<'b, 'a: 'b>(item: Self::Borrowed<'a>) -> Self::Borrowed<'b> where Self: 'a { item }
+    fn reborrow_ref<'b, 'a: 'b>(item: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { item }
+    fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+        self.extend_from_slice(&other[range])
+    }
+
+}
+
+/// A container that can also be viewed as and reconstituted from bytes.
+pub trait ContainerBytes : for<'a> Container<Borrowed<'a> : AsBytes<'a> + FromBytes<'a>> { }
+impl<C: for<'a> Container<Borrowed<'a> : AsBytes<'a> + FromBytes<'a>>> ContainerBytes for C { }
 
 pub use common::{Clear, Len, Push, IndexMut, Index, IndexAs, HeapSize, Slice, AsBytes, FromBytes};
 /// Common traits and types that are re-used throughout the module.
@@ -909,19 +925,6 @@ pub mod primitive {
                 fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self { *other }
 
                 type Container = Vec<$index_type>;
-            }
-            impl crate::Container for Vec<$index_type> {
-                type Ref<'a> = &'a $index_type;
-                type Borrowed<'a> = &'a [$index_type];
-                #[inline(always)]
-                fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { &self[..] }
-                #[inline(always)]
-                fn reborrow<'b, 'a: 'b>(thing: &'a [$index_type]) -> Self::Borrowed<'b> where Self: 'a { thing }
-                #[inline(always)]
-                fn reborrow_ref<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
-
-                #[inline(always)]
-                fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) { self.extend_from_slice(&other[range]) }
             }
 
             impl crate::HeapSize for $index_type { }
