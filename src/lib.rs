@@ -1100,6 +1100,268 @@ pub mod primitive {
         }
     }
 
+    /// Columnar stores for non-decreasing `u64`, stored in various ways.
+    ///
+    /// The venerable `Vec<u64>` works as a general container for arbitrary offests,
+    /// but it can be non-optimal for various patterns of offset, including constant
+    /// inter-offset spacing, and relatively short runs (compared to a `RankSelect`).
+    pub mod offsets {
+
+        pub use array::Fixeds;
+        pub use stride::Strides;
+
+        /// An offset container that encodes a constant spacing in its type.
+        ///
+        /// Any attempt to push any value will result in pushing the next value
+        /// at the specified spacing. This type is only appropriate in certain
+        /// contexts, for example when storing `[T; K]` array types, or having
+        /// introspected a `Strides` and found it to be only one constant stride.
+        mod array {
+
+            use crate::{Container, Index, Len, Push};
+            use crate::common::index::CopyAs;
+
+            /// An offset container that encodes a constant `K` spacing.
+            #[derive(Copy, Clone, Debug, Default)]
+            pub struct Fixeds<const K: u64, CC = u64> { pub count: CC }
+
+            impl<const K: u64> Container for Fixeds<K> {
+                type Ref<'a> = u64;
+                type Borrowed<'a> = Fixeds<K, &'a u64>;
+                #[inline(always)]
+                fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { Fixeds { count: &self.count } }
+                #[inline(always)]
+                fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> where Self: 'a {
+                    Fixeds { count: thing.count }
+                }
+                #[inline(always)]
+                fn reborrow_ref<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
+
+                #[inline(always)]
+                fn extend_from_self(&mut self, _other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+                    self.count += range.len() as u64;
+                }
+            }
+
+            impl<const K: u64, CC: CopyAs<u64> + Copy> Len for Fixeds<K, CC> {
+                #[inline(always)] fn len(&self) -> usize { self.count.copy_as() as usize }
+            }
+
+            impl<const K: u64, CC> Index for Fixeds<K, CC> {
+                type Ref = u64;
+                #[inline(always)]
+                fn get(&self, index: usize) -> Self::Ref { (index as u64 + 1) * K }
+            }
+            impl<'a, const K: u64, CC> Index for &'a Fixeds<K, CC> {
+                type Ref = u64;
+                #[inline(always)]
+                fn get(&self, index: usize) -> Self::Ref { (index as u64 + 1) * K }
+            }
+
+            impl<'a, const K: u64, T> Push<T> for Fixeds<K> {
+                // TODO: check for overflow?
+                #[inline(always)]
+                fn push(&mut self, _item: T) { self.count += 1; }
+                #[inline(always)]
+                fn extend(&mut self, iter: impl IntoIterator<Item=T>) {
+                    self.count += iter.into_iter().count() as u64;
+                }
+            }
+
+            impl<const K: u64> crate::HeapSize for Fixeds<K> {
+                #[inline(always)]
+                fn heap_size(&self) -> (usize, usize) { (0, 0) }
+            }
+            impl<const K: u64> crate::Clear for Fixeds<K> {
+                #[inline(always)]
+                fn clear(&mut self) { self.count = 0; }
+            }
+
+            impl<'a, const K: u64> crate::AsBytes<'a> for Fixeds<K, &'a u64> {
+                #[inline(always)]
+                fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
+                    std::iter::once((8, bytemuck::cast_slice(std::slice::from_ref(self.count))))
+                }
+            }
+            impl<'a, const K: u64> crate::FromBytes<'a> for Fixeds<K, &'a u64> {
+                #[inline(always)]
+                fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+                    Self { count: &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0] }
+                }
+            }
+
+            use super::Strides;
+            impl<const K: u64, BC: Len, CC: CopyAs<u64>+Copy> std::convert::TryFrom<Strides<BC, CC>> for Fixeds<K, CC> {
+                // On error we return the original.
+                type Error = Strides<BC, CC>;
+                fn try_from(item: Strides<BC, CC>) -> Result<Self, Self::Error> {
+                    if item.strided() == Some(K) { Ok( Self { count: item.length } ) } else { Err(item) }
+                }
+            }
+        }
+
+        /// An general offset container optimized for fixed inter-offset sizes.
+        ///
+        /// Although it can handle general offsets, it starts with the optimistic
+        /// assumption that the offsets will be evenly spaced from zero, and while
+        /// that holds it will maintain the stride and length. Should it stop being
+        /// true, when a non-confirming offset is pushed, it will start to store
+        /// the offsets in a general container.
+        mod stride {
+
+            use std::ops::Deref;
+            use crate::{Container, Index, Len, Push, Clear, AsBytes, FromBytes};
+            use crate::common::index::CopyAs;
+
+            /// The first two integers describe a stride pattern, [stride, length].
+            ///
+            /// If the length is zero the collection is empty. The first `item` pushed
+            /// always becomes the first list element. The next element is the number of
+            /// items at position `i` whose value is `item * (i+1)`. After this comes
+            /// the remaining entries in the bounds container.
+            #[derive(Copy, Clone, Debug, Default)]
+            pub struct Strides<BC = Vec<u64>, CC = u64> {
+                pub stride: CC,
+                pub length: CC,
+                pub bounds: BC,
+            }
+
+            impl Container for Strides {
+                type Ref<'a> = u64;
+                type Borrowed<'a> = Strides<&'a [u64], &'a u64>;
+
+                #[inline(always)] fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { Strides { stride: &self.stride, length: &self.length, bounds: &self.bounds[..] } }
+                /// Reborrows the borrowed type to a shorter lifetime. See [`Columnar::reborrow`] for details.
+                #[inline(always)] fn reborrow<'b, 'a: 'b>(item: Self::Borrowed<'a>) -> Self::Borrowed<'b> where Self: 'a {
+                    Strides { stride: item.stride, length: item.length, bounds: item.bounds }
+                }
+                /// Reborrows the borrowed type to a shorter lifetime. See [`Columnar::reborrow`] for details.
+                 #[inline(always)]fn reborrow_ref<'b, 'a: 'b>(item: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { item }
+            }
+
+            impl<'a> Push<&'a u64> for Strides { #[inline(always)] fn push(&mut self, item: &'a u64) { self.push(*item) } }
+            impl Push<u64> for Strides { #[inline(always)] fn push(&mut self, item: u64) { self.push(item) } }
+            impl Clear for Strides { #[inline(always)] fn clear(&mut self) { self.clear() } }
+
+            impl<BC: Len, CC: CopyAs<u64> + Copy> Len for Strides<BC, CC> {
+                #[inline(always)]
+                fn len(&self) -> usize { self.length.copy_as() as usize + self.bounds.len() }
+            }
+            impl Index for Strides<&[u64], &u64> {
+                type Ref = u64;
+                #[inline(always)]
+                fn get(&self, index: usize) -> Self::Ref {
+                    let index = index as u64;
+                    if index < *self.length { (index+1) * self.stride } else { self.bounds[(index - self.length) as usize] }
+                }
+            }
+
+            impl<'a, BC: AsBytes<'a>> AsBytes<'a> for Strides<BC, &'a u64> {
+                #[inline(always)]
+                fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
+                    let stride = std::iter::once((8, bytemuck::cast_slice(std::slice::from_ref(self.stride))));
+                    let length = std::iter::once((8, bytemuck::cast_slice(std::slice::from_ref(self.length))));
+                    let bounds = self.bounds.as_bytes();
+                    crate::chain(stride, crate::chain(length, bounds))
+                }
+            }
+            impl<'a, BC: FromBytes<'a>> FromBytes<'a> for Strides<BC, &'a u64> {
+                #[inline(always)]
+                fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+                    let stride = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
+                    let length = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
+                    let bounds = BC::from_bytes(bytes);
+                    Self { stride, length, bounds }
+                }
+            }
+
+            impl Strides {
+                pub fn new(stride: u64, length: u64) -> Self {
+                    Self { stride, length, bounds: Vec::default() }
+                }
+                #[inline(always)]
+                pub fn push(&mut self, item: u64) {
+                    if self.length == 0 {
+                        self.stride = item;
+                        self.length = 1;
+                    }
+                    else if !self.bounds.is_empty() {
+                        self.bounds.push(item);
+                    }
+                    else if item == self.stride * (self.length + 1) {
+                        self.length += 1;
+                    }
+                    else {
+                        self.bounds.push(item);
+                    }
+                }
+                #[inline(always)]
+                pub fn clear(&mut self) {
+                    self.stride = 0;
+                    self.length = 0;
+                    self.bounds.clear();
+                }
+            }
+
+            impl<BC: Deref<Target=[u64]>, CC: CopyAs<u64>+Copy> Strides<BC, CC> {
+                #[inline(always)]
+                pub fn bounds(&self, index: usize) -> (usize, usize) {
+                    let stride = self.stride.copy_as();
+                    let length = self.length.copy_as();
+                    let index = index as u64;
+                    let lower = if index == 0 { 0 } else {
+                        let index = index - 1;
+                        if index < length { (index+1) * stride } else { self.bounds[(index - length) as usize] }
+                    } as usize;
+                    let upper = if index < length { (index+1) * stride } else { self.bounds[(index - length) as usize] } as usize;
+                    (lower, upper)
+                }
+            }
+            impl<BC: Len, CC: CopyAs<u64>+Copy> Strides<BC, CC> {
+                #[inline(always)] pub fn strided(&self) -> Option<u64> {
+                    if self.bounds.is_empty() {
+                        Some(self.stride.copy_as())
+                    }
+                    else { None }
+                }
+            }
+        }
+
+        #[cfg(test)]
+        mod test {
+            #[test]
+            fn round_trip() {
+
+                use crate::common::{Index, Push, Len};
+                use crate::{Container, Vecs};
+                use crate::primitive::offsets::{Strides, Fixeds};
+
+                let mut cols = Vecs::<Vec::<i32>, Strides>::default();
+                for i in 0 .. 100 {
+                    cols.push(&[1i32, 2, i]);
+                }
+
+                let cols = Vecs {
+                    bounds: TryInto::<Fixeds<3>>::try_into(cols.bounds).unwrap(),
+                    values: cols.values,
+                };
+
+                assert_eq!(cols.borrow().len(), 100);
+                for i in 0 .. 100 {
+                    assert_eq!(cols.borrow().get(i).len(), 3);
+                }
+
+                let mut cols = Vecs {
+                    bounds: Strides::new(3, cols.bounds.count),
+                    values: cols.values
+                };
+
+                cols.push(&[0, 0]);
+                assert!(TryInto::<Fixeds<3>>::try_into(cols.bounds).is_err());
+            }
+        }
+    }
+
     pub use empty::Empties;
     /// A columnar store for `()`.
     mod empty {
