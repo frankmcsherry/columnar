@@ -280,13 +280,13 @@ pub mod common {
         ///
         /// We use this trait to unify the ability of `T` and `&T` to be converted into `T`.
         /// This is handy for copy types that we'd like to use, like `u8`, `u64` and `usize`.
-        pub trait CopyAs<T> {
+        pub trait CopyAs<T> : Copy {
             fn copy_as(self) -> T;
         }
         impl<T: Copy> CopyAs<T> for &T {
             #[inline(always)] fn copy_as(self) -> T { *self }
         }
-        impl<T> CopyAs<T> for T {
+        impl<T: Copy> CopyAs<T> for T {
             #[inline(always)] fn copy_as(self) -> T { self }
         }
 
@@ -1143,7 +1143,7 @@ pub mod primitive {
                 }
             }
 
-            impl<const K: u64, CC: CopyAs<u64> + Copy> Len for Fixeds<K, CC> {
+            impl<const K: u64, CC: CopyAs<u64>> Len for Fixeds<K, CC> {
                 #[inline(always)] fn len(&self) -> usize { self.count.copy_as() as usize }
             }
 
@@ -1191,7 +1191,7 @@ pub mod primitive {
             }
 
             use super::Strides;
-            impl<const K: u64, BC: Len, CC: CopyAs<u64>+Copy> std::convert::TryFrom<Strides<BC, CC>> for Fixeds<K, CC> {
+            impl<const K: u64, BC: Len, CC: CopyAs<u64>> std::convert::TryFrom<Strides<BC, CC>> for Fixeds<K, CC> {
                 // On error we return the original.
                 type Error = Strides<BC, CC>;
                 fn try_from(item: Strides<BC, CC>) -> Result<Self, Self::Error> {
@@ -1243,7 +1243,7 @@ pub mod primitive {
             impl Push<u64> for Strides { #[inline(always)] fn push(&mut self, item: u64) { self.push(item) } }
             impl Clear for Strides { #[inline(always)] fn clear(&mut self) { self.clear() } }
 
-            impl<BC: Len, CC: CopyAs<u64> + Copy> Len for Strides<BC, CC> {
+            impl<BC: Len, CC: CopyAs<u64>> Len for Strides<BC, CC> {
                 #[inline(always)]
                 fn len(&self) -> usize { self.length.copy_as() as usize + self.bounds.len() }
             }
@@ -1303,7 +1303,7 @@ pub mod primitive {
                 }
             }
 
-            impl<BC: Deref<Target=[u64]>, CC: CopyAs<u64>+Copy> Strides<BC, CC> {
+            impl<BC: Deref<Target=[u64]>, CC: CopyAs<u64>> Strides<BC, CC> {
                 #[inline(always)]
                 pub fn bounds(&self, index: usize) -> (usize, usize) {
                     let stride = self.stride.copy_as();
@@ -1317,7 +1317,7 @@ pub mod primitive {
                     (lower, upper)
                 }
             }
-            impl<BC: Len, CC: CopyAs<u64>+Copy> Strides<BC, CC> {
+            impl<BC: Len, CC: CopyAs<u64>> Strides<BC, CC> {
                 #[inline(always)] pub fn strided(&self) -> Option<u64> {
                     if self.bounds.is_empty() {
                         Some(self.stride.copy_as())
@@ -1396,7 +1396,7 @@ pub mod primitive {
             }
         }
 
-        impl<CC: CopyAs<u64> + Copy> Len for Empties<CC> {
+        impl<CC: CopyAs<u64>> Len for Empties<CC> {
             #[inline(always)] fn len(&self) -> usize { self.count.copy_as() as usize }
         }
         impl<CC> IndexMut for Empties<CC> {
@@ -1525,11 +1525,11 @@ pub mod primitive {
             }
         }
 
-        impl<VC: Len, WC: Copy + CopyAs<u64>> Len for Bools<VC, WC> {
+        impl<VC: Len, WC: CopyAs<u64>> Len for Bools<VC, WC> {
             #[inline(always)] fn len(&self) -> usize { self.values.len() * 64 + (self.last_bits.copy_as() as usize) }
         }
 
-        impl<VC: Len + IndexAs<u64>, WC: Copy + CopyAs<u64>> Index for Bools<VC, WC> {
+        impl<VC: Len + IndexAs<u64>, WC: CopyAs<u64>> Index for Bools<VC, WC> {
             type Ref = bool;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
                 let block = index / 64;
@@ -1543,7 +1543,7 @@ pub mod primitive {
             }
         }
 
-        impl<VC: Len + IndexAs<u64>, WC: Copy + CopyAs<u64>> Index for &Bools<VC, WC> {
+        impl<VC: Len + IndexAs<u64>, WC: CopyAs<u64>> Index for &Bools<VC, WC> {
             type Ref = bool;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
                 (*self).get(index)
@@ -2328,13 +2328,13 @@ pub mod sums {
         }
 
 
-        impl<CC, VC: Len + IndexAs<u64>, WC: Copy+CopyAs<u64>> RankSelect<CC, VC, WC> {
+        impl<CC, VC: Len + IndexAs<u64>, WC: CopyAs<u64>> RankSelect<CC, VC, WC> {
             #[inline(always)]
             pub fn get(&self, index: usize) -> bool {
                 Index::get(&self.values, index)
             }
         }
-        impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, WC: Copy+CopyAs<u64>> RankSelect<CC, VC, WC> {
+        impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, WC: CopyAs<u64>> RankSelect<CC, VC, WC> {
             /// The number of set bits *strictly* preceding `index`.
             ///
             /// This number is accumulated first by reading out of `self.counts` at the correct position,
@@ -2383,7 +2383,7 @@ pub mod sums {
             }
         }
 
-        impl<CC, VC: Len, WC: Copy + CopyAs<u64>> RankSelect<CC, VC, WC> {
+        impl<CC, VC: Len, WC: CopyAs<u64>> RankSelect<CC, VC, WC> {
             pub fn len(&self) -> usize {
                 self.values.len()
             }
@@ -2521,7 +2521,7 @@ pub mod sums {
             }
         }
 
-        impl<SC, TC, CC, VC: Len, WC: Copy+CopyAs<u64>> Len for Results<SC, TC, CC, VC, WC> {
+        impl<SC, TC, CC, VC: Len, WC: CopyAs<u64>> Len for Results<SC, TC, CC, VC, WC> {
             #[inline(always)] fn len(&self) -> usize { self.indexes.len() }
         }
 
@@ -2531,7 +2531,7 @@ pub mod sums {
             TC: Index,
             CC: IndexAs<u64> + Len,
             VC: IndexAs<u64> + Len,
-            WC: Copy + CopyAs<u64>,
+            WC: CopyAs<u64>,
         {
             type Ref = Result<SC::Ref, TC::Ref>;
             #[inline(always)]
@@ -2549,7 +2549,7 @@ pub mod sums {
             &'a TC: Index,
             CC: IndexAs<u64> + Len,
             VC: IndexAs<u64> + Len,
-            WC: Copy + CopyAs<u64>,
+            WC: CopyAs<u64>,
         {
             type Ref = Result<<&'a SC as Index>::Ref, <&'a TC as Index>::Ref>;
             #[inline(always)]
@@ -2759,11 +2759,11 @@ pub mod sums {
             }
         }
 
-        impl<T, CC, VC: Len, WC: Copy + CopyAs<u64>> Len for Options<T, CC, VC, WC> {
+        impl<T, CC, VC: Len, WC: CopyAs<u64>> Len for Options<T, CC, VC, WC> {
             #[inline(always)] fn len(&self) -> usize { self.indexes.len() }
         }
 
-        impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: Copy+CopyAs<u64>> Index for Options<TC, CC, VC, WC> {
+        impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: CopyAs<u64>> Index for Options<TC, CC, VC, WC> {
             type Ref = Option<TC::Ref>;
             #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref {
@@ -2774,7 +2774,7 @@ pub mod sums {
                 }
             }
         }
-        impl<'a, TC, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: Copy+CopyAs<u64>> Index for &'a Options<TC, CC, VC, WC>
+        impl<'a, TC, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: CopyAs<u64>> Index for &'a Options<TC, CC, VC, WC>
         where &'a TC: Index
         {
             type Ref = Option<<&'a TC as Index>::Ref>;
