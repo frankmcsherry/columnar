@@ -388,6 +388,10 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
                 fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
                     #( self.#names.extend_from_self(other.#names, range.clone()); )*
                 }
+
+                fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
+                    #( self.#names.reserve_for(selves.clone().map(|x| x.#names)); )*
+                }
             }
         }
     };
@@ -527,6 +531,8 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
             fn extend_from_self(&mut self, _other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
                 self.count += range.len() as u64;
             }
+
+            fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone { }
         }
 
     }.into()
@@ -1014,6 +1020,12 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                 }
 
                 // TODO: implement `extend_from_self`.
+
+                fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
+                    #( self.#names.reserve_for(selves.clone().map(|x| x.#names)); )*
+                    self.variant.reserve_for(selves.clone().map(|x| x.variant));
+                    self.offset.reserve_for(selves.map(|x| x.offset));
+                }
             }
         }
     };
@@ -1168,6 +1180,10 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
             fn reborrow_ref<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> { thing }
 
             // TODO: implement `extend_from_self`.
+
+            fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
+                self.variant.reserve_for(selves.map(|x| x.variant));
+            }
         }
     }.into()
 }
