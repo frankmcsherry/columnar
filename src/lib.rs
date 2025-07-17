@@ -93,6 +93,29 @@ pub trait Container : Len + Clear + for<'a> Push<Self::Ref<'a>> + Clone + Defaul
     /// Reborrows the borrowed type to a shorter lifetime. See [`Columnar::reborrow`] for details.
     fn reborrow_ref<'b, 'a: 'b>(item: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a;
 
+
+    /// Allocates an empty container that can be extended by `selves` without reallocation.
+    ///
+    /// This goal is optimistic, and some containers may struggle to size correctly, especially
+    /// if they employ compression or other variable-sizing techniques that respond to the data
+    /// and the order in which is it presented. Best effort, but still useful!
+    fn with_capacity_for<'a, I>(selves: I) -> Self
+    where
+        Self: 'a,
+        I: Iterator<Item = Self::Borrowed<'a>> + Clone
+    {
+        let mut output = Self::default();
+        output.reserve_for(selves);
+        output
+    }
+
+    // Ensure that `self` can extend from `selves` without reallocation.
+    fn reserve_for<'a, I>(&mut self, selves: I)
+    where
+        Self: 'a,
+        I: Iterator<Item = Self::Borrowed<'a>> + Clone;
+
+
     /// Extends `self` by a range in `other`.
     ///
     /// This method has a default implementation, but can and should be specialized when ranges can be copied.
@@ -113,7 +136,9 @@ impl<T: Clone + Send + 'static> Container for Vec<T> {
     fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
         self.extend_from_slice(&other[range])
     }
-
+    fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
+        self.reserve(selves.map(|x| x.len()).sum::<usize>())
+    }
 }
 
 /// A container that can also be viewed as and reconstituted from bytes.
@@ -983,6 +1008,10 @@ pub mod primitive {
             fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
                 self.values.extend_from_self(other.values, range)
             }
+
+            fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
+                self.values.reserve_for(selves.map(|x| x.values))
+            }
         }
 
         impl<CV: Len> Len for Usizes<CV> { fn len(&self) -> usize { self.values.len() }}
@@ -1053,6 +1082,10 @@ pub mod primitive {
             #[inline(always)]
             fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
                 self.values.extend_from_self(other.values, range)
+            }
+
+            fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
+                self.values.reserve_for(selves.map(|x| x.values))
             }
         }
 
@@ -1141,6 +1174,8 @@ pub mod primitive {
                 fn extend_from_self(&mut self, _other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
                     self.count += range.len() as u64;
                 }
+
+                fn reserve_for<'a, I>(&mut self, _selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone { }
             }
 
             impl<const K: u64, CC: CopyAs<u64>> Len for Fixeds<K, CC> {
@@ -1237,6 +1272,10 @@ pub mod primitive {
                 }
                 /// Reborrows the borrowed type to a shorter lifetime. See [`Columnar::reborrow`] for details.
                  #[inline(always)]fn reborrow_ref<'b, 'a: 'b>(item: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { item }
+
+                fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
+                    self.bounds.reserve_for(selves.map(|x| x.bounds))
+                }
             }
 
             impl<'a> Push<&'a u64> for Strides { #[inline(always)] fn push(&mut self, item: &'a u64) { self.push(*item) } }
@@ -1394,6 +1433,8 @@ pub mod primitive {
             fn extend_from_self(&mut self, _other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
                 self.count += range.len() as u64;
             }
+
+            fn reserve_for<'a, I>(&mut self, _selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone { }
         }
 
         impl<CC: CopyAs<u64>> Len for Empties<CC> {
@@ -1504,6 +1545,10 @@ pub mod primitive {
             fn reborrow_ref<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
 
             // TODO: There is probably a smart way to implement `extend_from_slice`, but it isn't trivial due to alignment.
+
+            fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
+                self.values.reserve_for(selves.map(|x| x.values))
+            }
         }
 
         impl<'a, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for crate::primitive::Bools<VC, &'a u64> {
@@ -1633,6 +1678,11 @@ pub mod primitive {
             fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
                 self.seconds.extend_from_self(other.seconds, range.clone());
                 self.nanoseconds.extend_from_self(other.nanoseconds, range);
+            }
+
+            fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
+                self.seconds.reserve_for(selves.clone().map(|x| x.seconds));
+                self.nanoseconds.reserve_for(selves.map(|x| x.nanoseconds));
             }
         }
 
@@ -1772,6 +1822,12 @@ pub mod string {
                 }
             }
         }
+
+        fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
+            self.bounds.reserve_for(selves.clone().map(|x| x.bounds));
+            self.values.reserve_for(selves.map(|x| x.values));
+        }
+
     }
 
     impl<'a, BC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for Strings<BC, VC> {
@@ -1987,6 +2043,11 @@ pub mod vector {
                 }
             }
         }
+
+        fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
+            self.bounds.reserve_for(selves.clone().map(|x| x.bounds));
+            self.values.reserve_for(selves.map(|x| x.values));
+        }
     }
 
     impl<'a, TC: crate::AsBytes<'a>, BC: crate::AsBytes<'a>> crate::AsBytes<'a> for Vecs<TC, BC> {
@@ -2088,7 +2149,7 @@ pub mod tuple {
     // These are all macro based, because the implementations are very similar.
     // The macro requires two names, one for the store and one for pushable types.
     macro_rules! tuple_impl {
-        ( $($name:ident,$name2:ident)+) => (
+        ( $($name:ident,$name2:ident,$idx:tt)+) => (
 
             impl<$($name: Columnar),*> Columnar for ($($name,)*) {
                 #[inline(always)]
@@ -2128,6 +2189,11 @@ pub mod tuple {
                     let ($($name,)*) = self;
                     let ($($name2,)*) = other;
                     $( $name.extend_from_self($name2, range.clone()); )*
+                }
+
+                fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
+                    let ($($name,)*) = self;
+                    $( $name.reserve_for(selves.clone().map(|x| x.$idx)); )*
                 }
             }
 
@@ -2217,16 +2283,16 @@ pub mod tuple {
         )
     }
 
-    tuple_impl!(A,AA);
-    tuple_impl!(A,AA B,BB);
-    tuple_impl!(A,AA B,BB C,CC);
-    tuple_impl!(A,AA B,BB C,CC D,DD);
-    tuple_impl!(A,AA B,BB C,CC D,DD E,EE);
-    tuple_impl!(A,AA B,BB C,CC D,DD E,EE F,FF);
-    tuple_impl!(A,AA B,BB C,CC D,DD E,EE F,FF G,GG);
-    tuple_impl!(A,AA B,BB C,CC D,DD E,EE F,FF G,GG H,HH);
-    tuple_impl!(A,AA B,BB C,CC D,DD E,EE F,FF G,GG H,HH I,II);
-    tuple_impl!(A,AA B,BB C,CC D,DD E,EE F,FF G,GG H,HH I,II J,JJ);
+    tuple_impl!(A,AA,0);
+    tuple_impl!(A,AA,0 B,BB,1);
+    tuple_impl!(A,AA,0 B,BB,1 C,CC,2);
+    tuple_impl!(A,AA,0 B,BB,1 C,CC,2 D,DD,3);
+    tuple_impl!(A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4);
+    tuple_impl!(A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5);
+    tuple_impl!(A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5 G,GG,6);
+    tuple_impl!(A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5 G,GG,6 H,HH,7);
+    tuple_impl!(A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5 G,GG,6 H,HH,7 I,II,8);
+    tuple_impl!(A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5 G,GG,6 H,HH,7 I,II,8 J,JJ,9);
 
     #[cfg(test)]
     mod test {
@@ -2427,7 +2493,7 @@ pub mod sums {
         use crate::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, HeapSize};
         use crate::RankSelect;
 
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+        #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
         #[derive(Copy, Clone, Debug, Default, PartialEq)]
         pub struct Results<SC, TC, CC=Vec<u64>, VC=Vec<u64>, WC=u64> {
             /// Bits set to `true` correspond to `Ok` variants.
@@ -2499,6 +2565,12 @@ pub mod sums {
                     self.oks.extend_from_self(other.oks, oks_start .. oks_start + oks);
                     self.errs.extend_from_self(other.errs, errs_start .. errs_start + errs);
                 }
+            }
+
+            fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
+                // TODO: reserve room in `self.indexes`.
+                self.oks.reserve_for(selves.clone().map(|x| x.oks));
+                self.errs.reserve_for(selves.map(|x| x.errs));
             }
         }
 
@@ -2739,6 +2811,11 @@ pub mod sums {
 
                     self.somes.extend_from_self(other.somes, somes_start .. somes_start + somes);
                 }
+            }
+
+            fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
+                // TODO: reserve room in `self.indexes`.
+                self.somes.reserve_for(selves.map(|x| x.somes));
             }
         }
 
