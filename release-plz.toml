@@ -1,0 +1,13 @@
+# Release columnar and columnar_derive with the same version.
+#
+# This should prevent situations where release-plz doesn't
+# recognize semver-incompatible changes and only bumps the minor
+# version of the derive package.
+[[package]]
+name = "columnar"
+version_group = "columnar"
+
+[[package]]
+name = "columnar_derive"
+version_group = "columnar"
+
