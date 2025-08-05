@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0](https://github.com/frankmcsherry/columnar/compare/columnar_derive-v0.3.0...columnar_derive-v0.10.0) - 2025-08-05
+
+### Other
+
+- Add Container::reserve_for
+
 ## [0.2.7](https://github.com/frankmcsherry/columnar/compare/columnar_derive-v0.2.6...columnar_derive-v0.2.7) - 2025-07-05
 
 ### Other
