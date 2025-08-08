@@ -146,8 +146,8 @@ pub trait ContainerBytes : for<'a> Container<Borrowed<'a> : AsBytes<'a> + FromBy
 impl<C: for<'a> Container<Borrowed<'a> : AsBytes<'a> + FromBytes<'a>>> ContainerBytes for C { }
 
 pub use common::{Clear, Len, Push, IndexMut, Index, IndexAs, HeapSize, Slice, AsBytes, FromBytes};
-/// Common traits and types that are re-used throughout the module.
 pub mod common {
+    //! Common traits and types that are re-used throughout the module.
 
     /// A type with a length.
     pub trait Len {
@@ -204,12 +204,12 @@ pub mod common {
 
 
     pub use index::{Index, IndexMut, IndexAs};
-    /// Traits for accessing elements by `usize` indexes.
-    ///
-    /// There are several traits, with a core distinction being whether the returned reference depends on the lifetime of `&self`.
-    /// For one trait `Index` the result does not depend on this lifetime.
-    /// There is a third trait `IndexMut` that allows mutable access, that may be less commonly implemented.
     pub mod index {
+        //! Traits for accessing elements by `usize` indexes.
+        //!
+        //! There are several traits, with a core distinction being whether the returned reference depends on the lifetime of `&self`.
+        //! For one trait `Index` the result does not depend on this lifetime.
+        //! There is a third trait `IndexMut` that allows mutable access, that may be less commonly implemented.
 
         use crate::Len;
         use crate::common::IterOwn;
@@ -607,10 +607,10 @@ pub mod common {
 
 }
 
-/// Logic related to the transformation to and from bytes.
-///
-/// The methods here line up with the `AsBytes` and `FromBytes` traits.
 pub mod bytes {
+    //! Logic related to the transformation to and from bytes.
+    //!
+    //! The methods here line up with the `AsBytes` and `FromBytes` traits.
 
     use crate::AsBytes;
 
@@ -630,12 +630,12 @@ pub mod bytes {
         fn decode(store: &[u64]) -> impl Iterator<Item=&[u8]>;
     }
 
-    /// A sequential byte layout for `AsBytes` and `FromBytes` implementors.
-    ///
-    /// The layout is aligned like a sequence of `u64`, where we repeatedly announce a length,
-    /// and then follow it by that many bytes. We may need to follow this with padding bytes.
     pub use serialization::Sequence;
     mod serialization {
+        //! A sequential byte layout for `AsBytes` and `FromBytes` implementors.
+        //!
+        //! The layout is aligned like a sequence of `u64`, where we repeatedly announce a length,
+        //! and then follow it by that many bytes. We may need to follow this with padding bytes.
 
         use crate::AsBytes;
 
@@ -738,13 +738,13 @@ pub mod bytes {
         }
     }
 
-    /// A binary encoding of sequences of byte slices.
-    ///
-    /// The encoding starts with a sequence of n+1 offsets describing where to find the n slices in the bytes that follow.
-    /// Treating the offsets as a byte slice too, the each offset indicates the location (in bytes) of the end of its slice.
-    /// Each byte slice can be found from a pair of adjacent offsets, where the first is rounded up to a multiple of eight.
     pub use serialization_neu::Indexed;
     pub mod serialization_neu {
+        //! A binary encoding of sequences of byte slices.
+        //!
+        //! The encoding starts with a sequence of n+1 offsets describing where to find the n slices in the bytes that follow.
+        //! Treating the offsets as a byte slice too, the each offset indicates the location (in bytes) of the end of its slice.
+        //! Each byte slice can be found from a pair of adjacent offsets, where the first is rounded up to a multiple of eight.
 
         use crate::AsBytes;
 
@@ -938,8 +938,8 @@ pub mod bytes {
     }
 }
 
-/// Types that prefer to be represented by `Vec<T>`.
 pub mod primitive {
+    //! Types that prefer to be represented by `Vec<T>`.
     use std::num::Wrapping;
 
     /// An implementation of opinions for types that want to use `Vec<T>`.
@@ -977,8 +977,8 @@ pub mod primitive {
     implement_columnable!(Wrapping<i8>, Wrapping<i16>, Wrapping<i32>, Wrapping<i64>, Wrapping<i128>);
 
     pub use sizes::{Usizes, Isizes};
-    /// Columnar stores for `usize` and `isize`, stored as 64 bits.
     mod sizes {
+        //! Columnar stores for `usize` and `isize`, stored as 64 bits.
 
         use crate::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, HeapSize};
         use crate::common::PushIndexAs;
@@ -1133,23 +1133,23 @@ pub mod primitive {
         }
     }
 
-    /// Columnar stores for non-decreasing `u64`, stored in various ways.
-    ///
-    /// The venerable `Vec<u64>` works as a general container for arbitrary offests,
-    /// but it can be non-optimal for various patterns of offset, including constant
-    /// inter-offset spacing, and relatively short runs (compared to a `RankSelect`).
     pub mod offsets {
+        //! Columnar stores for non-decreasing `u64`, stored in various ways.
+        //!
+        //! The venerable `Vec<u64>` works as a general container for arbitrary offests,
+        //! but it can be non-optimal for various patterns of offset, including constant
+        //! inter-offset spacing, and relatively short runs (compared to a `RankSelect`).
 
         pub use array::Fixeds;
         pub use stride::Strides;
 
-        /// An offset container that encodes a constant spacing in its type.
-        ///
-        /// Any attempt to push any value will result in pushing the next value
-        /// at the specified spacing. This type is only appropriate in certain
-        /// contexts, for example when storing `[T; K]` array types, or having
-        /// introspected a `Strides` and found it to be only one constant stride.
         mod array {
+            //! An offset container that encodes a constant spacing in its type.
+            //!
+            //! Any attempt to push any value will result in pushing the next value
+            //! at the specified spacing. This type is only appropriate in certain
+            //! contexts, for example when storing `[T; K]` array types, or having
+            //! introspected a `Strides` and found it to be only one constant stride.
 
             use crate::{Container, Index, Len, Push};
             use crate::common::index::CopyAs;
@@ -1235,14 +1235,14 @@ pub mod primitive {
             }
         }
 
-        /// An general offset container optimized for fixed inter-offset sizes.
-        ///
-        /// Although it can handle general offsets, it starts with the optimistic
-        /// assumption that the offsets will be evenly spaced from zero, and while
-        /// that holds it will maintain the stride and length. Should it stop being
-        /// true, when a non-confirming offset is pushed, it will start to store
-        /// the offsets in a general container.
         mod stride {
+            //! An general offset container optimized for fixed inter-offset sizes.
+            //!
+            //! Although it can handle general offsets, it starts with the optimistic
+            //! assumption that the offsets will be evenly spaced from zero, and while
+            //! that holds it will maintain the stride and length. Should it stop being
+            //! true, when a non-confirming offset is pushed, it will start to store
+            //! the offsets in a general container.
 
             use std::ops::Deref;
             use crate::{Container, Index, Len, Push, Clear, AsBytes, FromBytes};
@@ -1402,8 +1402,8 @@ pub mod primitive {
     }
 
     pub use empty::Empties;
-    /// A columnar store for `()`.
     mod empty {
+        //! A columnar store for `()`.
 
         use crate::common::index::CopyAs;
         use crate::{Clear, Columnar, Container, Len, IndexMut, Index, Push, HeapSize};
@@ -1498,8 +1498,8 @@ pub mod primitive {
     }
 
     pub use boolean::Bools;
-    /// A columnar store for `bool`.
     mod boolean {
+        //! A columnar store for `bool`.
 
         use crate::common::index::CopyAs;
         use crate::{Container, Clear, Len, Index, IndexAs, Push, HeapSize};
@@ -1634,8 +1634,8 @@ pub mod primitive {
     }
 
     pub use duration::Durations;
-    /// A columnar store for `std::time::Duration`.
     mod duration {
+        //! A columnar store for `std::time::Duration`.
 
         use std::time::Duration;
         use crate::{Container, Len, Index, IndexAs, Push, Clear, HeapSize};
@@ -2328,20 +2328,20 @@ pub mod tuple {
 }
 
 pub use sums::{rank_select::RankSelect, result::Results, option::Options};
-/// Containers for enumerations ("sum types") that store variants separately.
-///
-/// The main work of these types is storing a discriminant and index efficiently,
-/// as containers for each of the variant types can hold the actual data.
 pub mod sums {
+    //! Containers for enumerations ("sum types") that store variants separately.
+    //!
+    //! The main work of these types is storing a discriminant and index efficiently,
+    //! as containers for each of the variant types can hold the actual data.
 
-    /// Stores for maintaining discriminants, and associated sequential indexes.
-    ///
-    /// The sequential indexes are not explicitly maintained, but are supported
-    /// by a `rank(index)` function that indicates how many of a certain variant
-    /// precede the given index. While this could potentially be done with a scan
-    /// of all preceding discriminants, the stores maintain running accumulations
-    /// that make the operation constant time (using additional amortized memory).
     pub mod rank_select {
+        //! Stores for maintaining discriminants, and associated sequential indexes.
+        //!
+        //! The sequential indexes are not explicitly maintained, but are supported
+        //! by a `rank(index)` function that indicates how many of a certain variant
+        //! precede the given index. While this could potentially be done with a scan
+        //! of all preceding discriminants, the stores maintain running accumulations
+        //! that make the operation constant time (using additional amortized memory).
 
         use crate::primitive::Bools;
         use crate::common::index::CopyAs;
@@ -2958,11 +2958,11 @@ pub mod sums {
 }
 
 pub use lookback::{Repeats, Lookbacks};
-/// Containers that can store either values, or offsets to prior values.
-///
-/// This has the potential to be more efficient than a list of `T` when many values repeat in
-/// close proximity. Values must be equatable, and the degree of lookback can be configured.
 pub mod lookback {
+    //! Containers that can store either values, or offsets to prior values.
+    //!
+    //! This has the potential to be more efficient than a list of `T` when many values repeat in
+    //! close proximity. Values must be equatable, and the degree of lookback can be configured.
 
     use crate::{Options, Results, Push, Index, Len, HeapSize};
 
@@ -3075,8 +3075,8 @@ pub mod lookback {
     }
 }
 
-/// Containers for `Vec<(K, V)>` that form columns by `K` keys.
 mod maps {
+    //! Containers for `Vec<(K, V)>` that form columns by `K` keys.
 
     use crate::{Len, Push};
     use crate::Options;
@@ -3195,11 +3195,11 @@ mod maps {
 
 }
 
-/// Containers for `isize` and `usize` that adapt to the size of the data.
-///
-/// Similar structures could be used for containers of `u8`, `u16`, `u32`, and `u64`,
-/// without losing their type information, if one didn't need the bespoke compression.
 mod sizes {
+    //! Containers for `isize` and `usize` that adapt to the size of the data.
+    //!
+    //! Similar structures could be used for containers of `u8`, `u16`, `u32`, and `u64`,
+    //! without losing their type information, if one didn't need the bespoke compression.
 
     use crate::Push;
     use crate::Results;
@@ -3251,8 +3251,8 @@ mod sizes {
     }
 }
 
-/// Roaring bitmap (and similar) containers.
 pub mod roaring {
+    //! Roaring bitmap (and similar) containers.
 
     use crate::Results;
 
