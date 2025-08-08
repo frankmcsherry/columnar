@@ -1,297 +1,51 @@
-/// Methods to convert containers to and from byte slices.
+//! Logic related to the transformation to and from bytes.
+//!
+//! The methods here line up with the `AsBytes` and `FromBytes` traits.
 
-// pub trait AsBytes {
-//     type Borrowed<'a>: FromBytes<'a> where Self: 'a;
-//     fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { unimplemented!() }
-//     /// Presents `self` as a sequence of byte slices, with their required alignment.
-//     fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])>;
-//     /// The number of `u64` words required to record `self` as aligned bytes.
-//     fn length_in_words(&self) -> usize {
-//         self.as_bytes().map(|(_, x)| 1 + (x.len()/8) + if x.len() % 8 == 0 { 0 } else { 1 }).sum()
-//     }
-// }
-// pub trait FromBytes<'a> : AsBytes {
-//     /// Reconstructs `self` from a sequence of correctly aligned and sized bytes slices.
-//     ///
-//     /// The implementation is expected to consume the right number of items from the iterator,
-//     /// which may go on to be used by other implementations of `FromBytes`.
-//     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self;
-// }
+use crate::AsBytes;
 
-// macro_rules! implement_byteslices {
-//     ($($index_type:ty),*) => { $(
-//         impl AsBytes for Vec<$index_type> {
-//             type Borrowed<'a> = &'a [$index_type];
-//             fn borrow(&self) -> Self::Borrowed<'_> { &self[..] }
-//             fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-//                 std::iter::once((std::mem::align_of::<$index_type>() as u64, bytemuck::cast_slice(&self[..])))
-//             }
-//         }
-//         impl<'a> AsBytes for &'a [$index_type] {
-//             type Borrowed<'b> = &'b [$index_type];
-//             fn borrow(&self) -> Self::Borrowed<'_> { &self[..] }
-//             fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-//                 std::iter::once((std::mem::align_of::<$index_type>() as u64, bytemuck::cast_slice(&self[..])))
-//             }
-//         }
-//         impl<'a> FromBytes<'a> for &'a [$index_type] {
-//             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-//                 bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()
-//             }
-//         }
-//     )* }
-// }
+/// A coupled encode/decode pair for byte sequences.
+pub trait EncodeDecode {
+    /// Encoded length in number of `u64` words required.
+    fn length_in_words<'a, A>(bytes: &A) -> usize where A : AsBytes<'a>;
+    /// Encoded length in number of `u8` bytes required.
+    ///
+    /// This method should always be eight times `Self::length_in_words`, and is provided for convenience and clarity.
+    fn length_in_bytes<'a, A>(bytes: &A) -> usize where A : AsBytes<'a> { 8 * Self::length_in_words(bytes) }
+    /// Encodes `bytes` into a sequence of `u64`.
+    fn encode<'a, A>(store: &mut Vec<u64>, bytes: &A) where A : AsBytes<'a>;
+    /// Writes `bytes` in the encoded format to an arbitrary writer.
+    fn write<'a, A, W: std::io::Write>(writer: W, bytes: &A) -> std::io::Result<()> where A : AsBytes<'a>;
+    /// Decodes bytes from a sequence of `u64`.
+    fn decode(store: &[u64]) -> impl Iterator<Item=&[u8]>;
+}
 
-// implement_byteslices!(u8, u16, u32, u64, u128);
-// implement_byteslices!(i8, i16, i32, i64, i128);
-// implement_byteslices!(f32, f64);
-// implement_byteslices!(());
+pub use serialization::Sequence;
+mod serialization {
+    //! A sequential byte layout for `AsBytes` and `FromBytes` implementors.
+    //!
+    //! The layout is aligned like a sequence of `u64`, where we repeatedly announce a length,
+    //! and then follow it by that many bytes. We may need to follow this with padding bytes.
 
-// use crate::{Strings, Vecs, Results, Options, RankSelect};
+    use crate::AsBytes;
 
-// impl<BC: AsBytes, VC: AsBytes> AsBytes for Strings<BC, VC> {
-//     type Borrowed<'a> = Strings<BC::Borrowed<'a>, VC::Borrowed<'a>> where BC: 'a, VC: 'a;
-//     fn borrow(&self) -> Self::Borrowed<'_> { 
-//         Strings { 
-//             values: self.values.borrow(),
-//             bounds: self.bounds.borrow(),
-//         } 
-//     }
-//     fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-//         self.bounds.as_bytes().chain(self.values.as_bytes())
-//     }
-// }
-// impl<'a, BC: FromBytes<'a>, VC: FromBytes<'a>> FromBytes<'a> for Strings<BC, VC> {
-//     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-//         Self {
-//             bounds: FromBytes::from_bytes(bytes),
-//             values: FromBytes::from_bytes(bytes),
-//         }
-//     }
-// }
-
-// impl<TC: AsBytes, BC: AsBytes> AsBytes for Vecs<TC, BC> {
-//     type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>> where BC: 'a, TC: 'a;
-//     fn borrow(&self) -> Self::Borrowed<'_> {
-//         Vecs {
-//             values: self.values.borrow(),
-//             bounds: self.bounds.borrow(),
-//         }
-//     }
-//     fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-//         self.bounds.as_bytes().chain(self.values.as_bytes())
-//     }
-// }
-// impl<'a, TC: FromBytes<'a>, BC: FromBytes<'a>> FromBytes<'a> for Vecs<TC, BC> {
-//     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-//         Self {
-//             bounds: FromBytes::from_bytes(bytes),
-//             values: FromBytes::from_bytes(bytes),
-//         }
-//     }
-// }
-
-// macro_rules! tuple_impl {
-//     ( $($name:ident)+) => (
-//         #[allow(non_snake_case)]
-//         impl<$($name: AsBytes),*> AsBytes for ($($name,)*) {
-//             type Borrowed<'a> = ($($name::Borrowed<'a>,)*) where $($name: 'a,)*;
-//             fn borrow(&self) -> Self::Borrowed<'_> {
-//                 let ($($name,)*) = self;
-//                 ($($name.borrow(),)*)
-//             }
-//             fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-//                 let ($($name,)*) = self;
-//                 let iter = None.into_iter();
-//                 $( let iter = iter.chain($name.as_bytes()); )*
-//                 iter
-//             }
-//         }
-//         impl<'a, $($name: FromBytes<'a>),*> FromBytes<'a> for ($($name,)*) {
-//             #[allow(non_snake_case)]
-//             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-//                 $(let $name = FromBytes::from_bytes(bytes);)*
-//                 ($($name,)*)
-//             }
-//         }
-//     )
-// }
-
-// tuple_impl!(A);
-// tuple_impl!(A B);
-// tuple_impl!(A B C);
-// tuple_impl!(A B C D);
-// tuple_impl!(A B C D E);
-// tuple_impl!(A B C D E F);
-// tuple_impl!(A B C D E F G);
-// tuple_impl!(A B C D E F G H);
-// tuple_impl!(A B C D E F G H I);
-// tuple_impl!(A B C D E F G H I J);
-
-// impl<CV: AsBytes> AsBytes for crate::primitive::Usizes<CV> {
-//     type Borrowed<'a> = crate::primitive::Usizes<CV::Borrowed<'a>> where CV: 'a;
-//     fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
-//         crate::primitive::Usizes { values: self.values.borrow() }
-//     }
-//     fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-//         self.values.as_bytes()
-//     }
-// }
-
-// impl<'a, CV: FromBytes<'a>> FromBytes<'a> for crate::primitive::Usizes<CV> {
-//     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-//         Self { values: CV::from_bytes(bytes) }
-//     }
-// }
-
-// impl<CV: AsBytes> AsBytes for crate::primitive::Isizes<CV> {
-//     type Borrowed<'a> = crate::primitive::Isizes<CV::Borrowed<'a>> where CV: 'a;
-//     fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
-//         crate::primitive::Isizes { values: self.values.borrow() }
-//     }
-//     fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-//         self.values.as_bytes()
-//     }
-// }
-
-// impl<'a, CV: FromBytes<'a>> FromBytes<'a> for crate::primitive::Isizes<CV> {
-//     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-//         Self { values: CV::from_bytes(bytes) }
-//     }
-// }
-
-
-// impl AsBytes for crate::primitive::Empties {
-//     type Borrowed<'a> = crate::primitive::Empties;
-//     fn borrow(&self) -> Self::Borrowed<'_> { 
-//         crate::primitive::Empties { count: self.count, empty: () }
-//     }
-//     fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-//         std::iter::once((8, bytemuck::cast_slice(std::slice::from_ref(&self.count))))
-//     }
-// }
-// impl<'a> FromBytes<'a> for crate::primitive::Empties {
-//     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-//         Self { count: bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0], empty: () }
-//     }
-// }
-
-// impl<VC: AsBytes> AsBytes for crate::primitive::Bools<VC> {
-//     type Borrowed<'a> = crate::primitive::Bools<VC::Borrowed<'a>> where VC: 'a;
-//     fn borrow(&self) -> Self::Borrowed<'_> { 
-//         crate::primitive::Bools {
-//             values: self.values.borrow(),
-//             last_word: self.last_word,
-//             last_bits: self.last_bits,
-//         }
-//     }
-//     fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-//         self.values.as_bytes()
-//         .chain(std::iter::once((std::mem::align_of::<u64>() as u64, bytemuck::cast_slice(std::slice::from_ref(&self.last_word)))))
-//         .chain(std::iter::once((1, bytemuck::cast_slice(std::slice::from_ref(&self.last_bits)))))
-//     }
-// }
-
-// impl<'a, VC: FromBytes<'a>> FromBytes<'a> for crate::primitive::Bools<VC> {
-//     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-//         let values = FromBytes::from_bytes(bytes);
-//         let last_word = bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0];
-//         let last_bits = bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0];
-//         Self { values, last_word, last_bits }
-//     }
-// }
-
-// impl<SC: AsBytes, NC: AsBytes> AsBytes for crate::primitive::Durations<SC, NC> {
-//     type Borrowed<'a> = crate::primitive::Durations<SC::Borrowed<'a>, NC::Borrowed<'a>> where SC: 'a, NC: 'a;
-//     fn borrow(&self) -> Self::Borrowed<'_> {
-//         crate::primitive::Durations {
-//             seconds: self.seconds.borrow(),
-//             nanoseconds: self.nanoseconds.borrow(),
-//         }
-//     }
-//     fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-//         self.seconds.as_bytes().chain(self.nanoseconds.as_bytes())
-//     }
-// }
-// impl<'a, SC: FromBytes<'a>, NC: FromBytes<'a>> FromBytes<'a> for crate::primitive::Durations<SC, NC> {
-//     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-//         Self {
-//             seconds: FromBytes::from_bytes(bytes),
-//             nanoseconds: FromBytes::from_bytes(bytes),
-//         }
-//     }
-// }
-
-// impl<CC: AsBytes, VC: AsBytes> AsBytes for RankSelect<CC, VC> {
-//     type Borrowed<'a> = RankSelect<CC::Borrowed<'a>, VC::Borrowed<'a>> where CC: 'a, VC: 'a;
-//     fn borrow(&self) -> Self::Borrowed<'_> {
-//         RankSelect {
-//             counts: self.counts.borrow(),
-//             values: self.values.borrow(),
-//         }
-//     }
-//     fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-//         self.counts.as_bytes().chain(self.values.as_bytes())
-//     }
-// }
-// impl<'a, CC: FromBytes<'a>, VC: FromBytes<'a>> FromBytes<'a> for RankSelect<CC, VC> {
-//     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-//         Self {
-//             counts: FromBytes::from_bytes(bytes),
-//             values: FromBytes::from_bytes(bytes),
-//         }
-//     }
-// }
-
-// impl<SC: AsBytes, TC: AsBytes, CC: AsBytes, VC: AsBytes> AsBytes for Results<SC, TC, CC, VC> {
-//     type Borrowed<'a> = Results<SC::Borrowed<'a>, TC::Borrowed<'a>, CC::Borrowed<'a>, VC::Borrowed<'a>> where SC: 'a, TC: 'a, CC: 'a, VC: 'a;
-//     fn borrow(&self) -> Self::Borrowed<'_> {
-//         Results {
-//             indexes: self.indexes.borrow(),
-//             oks: self.oks.borrow(),
-//             errs: self.errs.borrow(),
-//         }
-//     }
-//     fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-//         self.indexes.as_bytes().chain(self.oks.as_bytes()).chain(self.errs.as_bytes())
-//     }
-// }
-// impl<'a, SC: FromBytes<'a>, TC: FromBytes<'a>, CC: FromBytes<'a>, VC: FromBytes<'a>> FromBytes<'a> for Results<SC, TC, CC, VC> {
-//     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-//         Self {
-//             indexes: FromBytes::from_bytes(bytes),
-//             oks: FromBytes::from_bytes(bytes),
-//             errs: FromBytes::from_bytes(bytes),
-//         }
-//     }
-// }
-
-// impl <TC: AsBytes, CC: AsBytes, VC: AsBytes> AsBytes for Options<TC, CC, VC> {
-//     type Borrowed<'a> = Options<TC::Borrowed<'a>, CC::Borrowed<'a>, VC::Borrowed<'a>> where TC: 'a, CC: 'a, VC: 'a;
-//     fn borrow(&self) -> Self::Borrowed<'_> {
-//         Options {
-//             indexes: self.indexes.borrow(),
-//             somes: self.somes.borrow(),
-//         }
-//     }    fn as_bytes(&self) -> impl Iterator<Item=(u64, &[u8])> {
-//         self.indexes.as_bytes().chain(self.somes.as_bytes())
-//     }
-// }
-
-// impl <'a, TC: FromBytes<'a>, CC: FromBytes<'a>, VC: FromBytes<'a>> FromBytes<'a> for Options<TC, CC, VC> {
-//     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-//         Self {
-//             indexes: FromBytes::from_bytes(bytes),
-//             somes: FromBytes::from_bytes(bytes),
-//         }
-//     }
-// }
-
-/// A sequential byte layout for `AsBytes` and `FromBytes` implementors.
-///
-/// The layout is aligned like a sequence of `u64`, where we repeatedly announce a length,
-/// and then follow it by that many bytes. We may need to follow this with padding bytes.
-pub mod serialization {
+    /// Encodes and decodes bytes sequences, by prepending the length and appending the all sequences.
+    pub struct Sequence;
+    impl super::EncodeDecode for Sequence {
+        fn length_in_words<'a, A>(bytes: &A) -> usize where A : AsBytes<'a> {
+            // Each byte slice has one `u64` for the length, and then as many `u64`s as needed to hold all bytes.
+            bytes.as_bytes().map(|(_align, bytes)| 1 + bytes.len().div_ceil(8)).sum()
+        }
+        fn encode<'a, A>(store: &mut Vec<u64>, bytes: &A) where A : AsBytes<'a> {
+            encode(store, bytes.as_bytes())
+        }
+        fn write<'a, A, W: std::io::Write>(writer: W, bytes: &A) -> std::io::Result<()> where A : AsBytes<'a> {
+            write(writer, bytes.as_bytes())
+        }
+        fn decode(store: &[u64]) -> impl Iterator<Item=&[u8]> {
+            decode(store)
+        }
+    }
 
     /// Encodes a sequence of byte slices as their length followed by their bytes, aligned to 8 bytes.
     ///
@@ -302,16 +56,46 @@ pub mod serialization {
             assert!(align <= 8);
             store.push(bytes.len() as u64);
             let whole_words = 8 * (bytes.len() / 8);
-            store.extend(bytemuck::try_cast_slice(&bytes[.. whole_words]).unwrap());
+            // We want to extend `store` by `bytes`, but `bytes` may not be `u64` aligned.
+            // In the latter case, init `store` and cast and copy onto it as a byte slice.
+            if let Ok(words) = bytemuck::try_cast_slice(&bytes[.. whole_words]) {
+                store.extend_from_slice(words);
+            }
+            else {
+                let store_len = store.len();
+                store.resize(store_len + whole_words/8, 0);
+                let slice = bytemuck::try_cast_slice_mut(&mut store[store_len..]).expect("&[u64] should convert to &[u8]");
+                slice.copy_from_slice(&bytes[.. whole_words]);
+            }
             let remaining_bytes = &bytes[whole_words..];
             if !remaining_bytes.is_empty() {
-                let mut remainder = [0u8; 8];
+                let mut remainder = 0u64;
+                let transmute: &mut [u8] = bytemuck::try_cast_slice_mut(std::slice::from_mut(&mut remainder)).expect("&[u64] should convert to &[u8]");
                 for (i, byte) in remaining_bytes.iter().enumerate() {
-                    remainder[i] = *byte;
+                    transmute[i] = *byte;
                 }
-                store.push(bytemuck::try_cast_slice(&remainder).unwrap()[0]);
+                store.push(remainder);
             }
         }
+    }
+
+    /// Writes a sequence of byte slices as their length followed by their bytes, padded to 8 bytes.
+    ///
+    /// Each length will be exactly 8 bytes, and the bytes that follow are padded out to a multiple of 8 bytes.
+    /// When reading the data, the length is in bytes, and one should consume those bytes and advance over padding.
+    pub fn write<'a>(mut writer: impl std::io::Write, bytes: impl Iterator<Item=(u64, &'a [u8])>) -> std::io::Result<()> {
+        // Columnar data is serialized as a sequence of `u64` values, with each `[u8]` slice
+        // serialize as first its length in bytes, and then as many `u64` values as needed.
+        // Padding should be added, but only for alignment; no specific values are required.
+        for (align, bytes) in bytes {
+            assert!(align <= 8);
+            let length = u64::try_from(bytes.len()).unwrap();
+            writer.write_all(bytemuck::cast_slice(std::slice::from_ref(&length)))?;
+            writer.write_all(bytes)?;
+            let padding = usize::try_from((8 - (length % 8)) % 8).unwrap();
+            writer.write_all(&[0; 8][..padding])?;
+        }
+        Ok(())
     }
 
     /// Decodes a sequence of byte slices from their length followed by their bytes.
@@ -334,7 +118,7 @@ pub mod serialization {
                 let length = *length as usize;
                 self.store = &self.store[1..];
                 let whole_words = if length % 8 == 0 { length / 8 } else { length / 8 + 1 };
-                let bytes: &[u8] = bytemuck::try_cast_slice(&self.store[..whole_words]).unwrap();
+                let bytes: &[u8] = bytemuck::try_cast_slice(&self.store[..whole_words]).expect("&[u64] should convert to &[u8]");
                 self.store = &self.store[whole_words..];
                 Some(&bytes[..length])
             } else {
@@ -342,40 +126,180 @@ pub mod serialization {
             }
         }
     }
+}
 
-    /// A wrapper for binary data that can be interpreted as a columnar container type `C`.
-    ///
-    /// The binary data must present as a `[u64]`, ensuring the appropriate alignment.
-    pub struct ColumnarBytes<B, C> {
-        bytes: B,
-        phantom: std::marker::PhantomData<C>,
+pub use serialization_neu::Indexed;
+pub mod serialization_neu {
+    //! A binary encoding of sequences of byte slices.
+    //!
+    //! The encoding starts with a sequence of n+1 offsets describing where to find the n slices in the bytes that follow.
+    //! Treating the offsets as a byte slice too, the each offset indicates the location (in bytes) of the end of its slice.
+    //! Each byte slice can be found from a pair of adjacent offsets, where the first is rounded up to a multiple of eight.
+
+    use crate::AsBytes;
+
+    /// Encodes and decodes bytes sequences, using an index of offsets.
+    pub struct Indexed;
+    impl super::EncodeDecode for Indexed {
+        fn length_in_words<'a, A>(bytes: &A) -> usize where A : AsBytes<'a> {
+            1 + bytes.as_bytes().map(|(_align, bytes)| 1 + bytes.len().div_ceil(8)).sum::<usize>()
+        }
+        fn encode<'a, A>(store: &mut Vec<u64>, bytes: &A) where A : AsBytes<'a> {
+            encode(store, bytes)
+        }
+        fn write<'a, A, W: std::io::Write>(writer: W, bytes: &A) -> std::io::Result<()> where A : AsBytes<'a> {
+            write(writer, bytes)
+        }
+        fn decode(store: &[u64]) -> impl Iterator<Item=&[u8]> {
+            decode(store)
+        }
     }
 
-    use crate::bytes::{AsBytes, FromBytes};
-
-    impl<B, C> ColumnarBytes<B, C>
-    where
-        B: std::ops::Deref<Target = [u64]>,
-        C: AsBytes,
+    /// Encodes `item` into `u64` aligned words.
+    ///
+    /// The sequence of byte slices are appended, with padding to have each slice start `u64` aligned.
+    /// The sequence is then pre-pended with as many byte offsets as there are slices in `item`, plus one.
+    /// The byte offsets indicate where each slice ends, and by rounding up to `u64` alignemnt where the next slice begins.
+    /// The first offset indicates where the list of offsets itself ends, and where the first slice begins.
+    ///
+    /// We will need to visit `as_bytes` three times to extract this information, so the method should be efficient and inlined.
+    /// The first read writes the first offset, the second writes each other offset, and the third writes the bytes themselves.
+    ///
+    /// The offsets are zero-based, rather than based on `store.len()`.
+    /// If you call the method with a non-empty `store` be careful decoding.
+    pub fn encode<'a, A>(store: &mut Vec<u64>, iter: &A)
+    where A : AsBytes<'a>,
     {
-        /// Presents the binary data as a columnar wrapper for type `C`.
-        pub fn decode(&self) -> C::Borrowed<'_> {
-            FromBytes::from_bytes(&mut decode(&self.bytes))
+        // Read 1: Number of offsets we will record, equal to the number of slices plus one.
+        // TODO: right-size `store` before first call to `push`.
+        let offsets = 1 + iter.as_bytes().count();
+        let offsets_end: u64 = TryInto::<u64>::try_into((offsets) * std::mem::size_of::<u64>()).unwrap();
+        store.push(offsets_end);
+        // Read 2: Establish each of the offsets based on lengths of byte slices.
+        let mut position_bytes = offsets_end;
+        for (align, bytes) in iter.as_bytes() {
+            assert!(align <= 8);
+            // Write length in bytes, but round up to words before updating `position_bytes`.
+            let to_push: u64 = position_bytes + TryInto::<u64>::try_into(bytes.len()).unwrap();
+            store.push(to_push);
+            let round_len: u64 = ((bytes.len() + 7) & !7).try_into().unwrap();
+            position_bytes += round_len;
+        }
+        // Read 3: Append each byte slice, with padding to align starts to `u64`.
+        for (_align, bytes) in iter.as_bytes() {
+            let whole_words = 8 * (bytes.len() / 8);
+            // We want to extend `store` by `bytes`, but `bytes` may not be `u64` aligned.
+            // In the latter case, init `store` and cast and copy onto it as a byte slice.
+            if let Ok(words) = bytemuck::try_cast_slice(&bytes[.. whole_words]) {
+                store.extend_from_slice(words);
+            }
+            else {
+                let store_len = store.len();
+                store.resize(store_len + whole_words/8, 0);
+                let slice = bytemuck::try_cast_slice_mut(&mut store[store_len..]).expect("&[u64] should convert to &[u8]");
+                slice.copy_from_slice(&bytes[.. whole_words]);
+            }
+            let remaining_bytes = &bytes[whole_words..];
+            if !remaining_bytes.is_empty() {
+                let mut remainder = 0u64;
+                let transmute: &mut [u8] = bytemuck::try_cast_slice_mut(std::slice::from_mut(&mut remainder)).expect("&[u64] should convert to &[u8]");
+                for (i, byte) in remaining_bytes.iter().enumerate() {
+                    transmute[i] = *byte;
+                }
+                store.push(remainder);
+            }
+        }
+    }
+
+    pub fn write<'a, A, W>(mut writer: W, iter: &A) -> std::io::Result<()>
+    where
+        A: AsBytes<'a>,
+        W: std::io::Write,
+    {
+        // Read 1: Number of offsets we will record, equal to the number of slices plus one.
+        let offsets = 1 + iter.as_bytes().count();
+        let offsets_end: u64 = TryInto::<u64>::try_into((offsets) * std::mem::size_of::<u64>()).unwrap();
+        writer.write_all(bytemuck::cast_slice(std::slice::from_ref(&offsets_end)))?;
+        // Read 2: Establish each of the offsets based on lengths of byte slices.
+        let mut position_bytes = offsets_end;
+        for (align, bytes) in iter.as_bytes() {
+            assert!(align <= 8);
+            // Write length in bytes, but round up to words before updating `position_bytes`.
+            let to_push: u64 = position_bytes + TryInto::<u64>::try_into(bytes.len()).unwrap();
+            writer.write_all(bytemuck::cast_slice(std::slice::from_ref(&to_push)))?;
+            let round_len: u64 = ((bytes.len() + 7) & !7).try_into().unwrap();
+            position_bytes += round_len;
+        }
+        // Read 3: Append each byte slice, with padding to align starts to `u64`.
+        for (_align, bytes) in iter.as_bytes() {
+            writer.write_all(bytes)?;
+            let padding = ((bytes.len() + 7) & !7) - bytes.len();
+            if padding > 0 {
+                writer.write_all(&[0u8;8][..padding])?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Decodes an encoded sequence of byte slices. Each result will be `u64` aligned.
+    pub fn decode(store: &[u64]) -> impl Iterator<Item=&[u8]> {
+        assert!(store[0] % 8 == 0);
+        let slices = (store[0] / 8) - 1;
+        (0 .. slices).map(|i| decode_index(store, i))
+    }
+
+    /// Decodes a specific byte slice by index. It will be `u64` aligned.
+    #[inline(always)]
+    pub fn decode_index(store: &[u64], index: u64) -> &[u8] {
+        debug_assert!(index + 1 < store[0]/8);
+        let index: usize = index.try_into().unwrap();
+        let lower: usize = ((store[index] + 7) & !7).try_into().unwrap();
+        let upper: usize = (store[index + 1]).try_into().unwrap();
+        let bytes: &[u8] = bytemuck::try_cast_slice(store).expect("&[u64] should convert to &[u8]");
+        &bytes[lower .. upper]
+    }
+
+    #[cfg(test)]
+    mod test {
+
+        use crate::{Container, ContainerOf};
+        use crate::common::Push;
+        use crate::AsBytes;
+
+        use super::{encode, decode};
+
+        fn assert_roundtrip<'a, AB: AsBytes<'a>>(item: &AB) {
+            let mut store = Vec::new();
+            encode(&mut store, item);
+            assert!(item.as_bytes().map(|x| x.1).eq(decode(&store)));
+        }
+
+        #[test]
+        fn round_trip() {
+
+            let mut column: ContainerOf<Result<u64, String>> = Default::default();
+            for i in 0..10000u64 {
+                column.push(&Ok::<u64, String>(i));
+                column.push(&Err::<u64, String>(format!("{:?}", i)));
+            }
+
+            assert_roundtrip(&column.borrow());
         }
     }
 }
 
-
 #[cfg(test)]
 mod test {
+    use crate::ContainerOf;
+
     #[test]
     fn round_trip() {
 
-        use crate::Columnar;
-        use crate::common::{Index, Push, HeapSize, Len};
-        use crate::bytes::{AsBytes, FromBytes};
+        use crate::common::{Push, HeapSize, Len, Index};
+        use crate::{Container, AsBytes, FromBytes};
 
-        let mut column: <Result<u64, u64> as Columnar>::Container = Default::default();
+        let mut column: ContainerOf<Result<u64, u64>> = Default::default();
         for i in 0..100u64 {
             column.push(Ok::<u64, u64>(i));
             column.push(Err::<u64, u64>(i));
@@ -389,13 +313,13 @@ mod test {
             assert_eq!(column.get(2*i+1), Err(i as u64));
         }
 
-        let column2 = crate::Results::<&[u64], &[u64], &[u64], &[u64]>::from_bytes(&mut column.as_bytes().map(|(_, bytes)| bytes));
+        let column2 = crate::Results::<&[u64], &[u64], &[u64], &[u64], &u64>::from_bytes(&mut column.borrow().as_bytes().map(|(_, bytes)| bytes));
         for i in 0..100 {
             assert_eq!(column.get(2*i+0), column2.get(2*i+0).copied().map_err(|e| *e));
             assert_eq!(column.get(2*i+1), column2.get(2*i+1).copied().map_err(|e| *e));
         }
 
-        let column3 = crate::Results::<&[u64], &[u64], &[u64], &[u64]>::from_bytes(&mut column2.as_bytes().map(|(_, bytes)| bytes));
+        let column3 = crate::Results::<&[u64], &[u64], &[u64], &[u64], &u64>::from_bytes(&mut column2.as_bytes().map(|(_, bytes)| bytes));
         for i in 0..100 {
             assert_eq!(column3.get(2*i+0), column2.get(2*i+0));
             assert_eq!(column3.get(2*i+1), column2.get(2*i+1));
