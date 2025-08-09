@@ -967,14 +967,27 @@ pub mod primitive {
                     bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()
                 }
             }
+            impl<'a, const N: usize> crate::AsBytes<'a> for &'a [[$index_type; N]] {
+                #[inline(always)]
+                fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
+                    std::iter::once((std::mem::align_of::<$index_type>() as u64, bytemuck::cast_slice(&self[..])))
+                }
+            }
+            impl<'a, const N: usize> crate::FromBytes<'a> for &'a [[$index_type; N]] {
+                #[inline(always)]
+                fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+                    // We use `unwrap()` here in order to panic with the `bytemuck` error, which may be informative.
+                    bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()
+                }
+            }
         )* }
     }
 
-    implement_columnable!(u8, u16, u32, u64, u128);
-    implement_columnable!(i8, i16, i32, i64, i128);
+    implement_columnable!(u8, u16, u32, u64);
+    implement_columnable!(i8, i16, i32, i64);
     implement_columnable!(f32, f64);
-    implement_columnable!(Wrapping<u8>, Wrapping<u16>, Wrapping<u32>, Wrapping<u64>, Wrapping<u128>);
-    implement_columnable!(Wrapping<i8>, Wrapping<i16>, Wrapping<i32>, Wrapping<i64>, Wrapping<i128>);
+    implement_columnable!(Wrapping<u8>, Wrapping<u16>, Wrapping<u32>, Wrapping<u64>);
+    implement_columnable!(Wrapping<i8>, Wrapping<i16>, Wrapping<i32>, Wrapping<i64>);
 
     pub use sizes::{Usizes, Isizes};
     /// Columnar stores for `usize` and `isize`, stored as 64 bits.
@@ -1126,6 +1139,156 @@ pub mod primitive {
         }
 
         impl<'a, CV: crate::FromBytes<'a>> crate::FromBytes<'a> for crate::primitive::Isizes<CV> {
+            #[inline(always)]
+            fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+                Self { values: CV::from_bytes(bytes) }
+            }
+        }
+    }
+
+    pub use larges::{U128s, I128s};
+    /// Columnar stores for `u128` and `i128`, stored as [u8; 16] bits.
+    mod larges {
+
+        use crate::{Clear, Columnar, Container, Len, Index, IndexAs, Push, HeapSize};
+        use crate::common::PushIndexAs;
+
+        type Encoded = [u8; 16];
+
+        #[derive(Copy, Clone, Default)]
+        pub struct U128s<CV = Vec<Encoded>> { pub values: CV }
+
+        impl Columnar for u128 {
+            fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self { other }
+            type Container = U128s;
+        }
+
+        impl<CV: PushIndexAs<Encoded>> Container for U128s<CV> {
+            type Ref<'a> = u128;
+            type Borrowed<'a> = U128s<CV::Borrowed<'a>> where CV: 'a;
+            fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
+                U128s { values: self.values.borrow() }
+            }
+            #[inline(always)]
+            fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> where CV: 'a {
+                U128s { values: CV::reborrow(thing.values) }
+            }
+            #[inline(always)]
+            fn reborrow_ref<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
+
+            #[inline(always)]
+            fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+                self.values.extend_from_self(other.values, range)
+            }
+
+            fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
+                self.values.reserve_for(selves.map(|x| x.values))
+            }
+        }
+
+        impl<CV: Len> Len for U128s<CV> { fn len(&self) -> usize { self.values.len() }}
+        impl<CV: IndexAs<Encoded>> Index for U128s<CV> {
+            type Ref = u128;
+            #[inline(always)] fn get(&self, index: usize) -> Self::Ref { u128::from_le_bytes(self.values.index_as(index)) }
+        }
+        impl<CV: IndexAs<Encoded>> Index for &U128s<CV> {
+            type Ref = u128;
+            #[inline(always)] fn get(&self, index: usize) -> Self::Ref { u128::from_le_bytes(self.values.index_as(index)) }
+        }
+        impl<CV: for<'a> Push<&'a Encoded>> Push<u128> for U128s<CV> {
+            #[inline]
+            fn push(&mut self, item: u128) { self.values.push(&item.to_le_bytes()) }
+        }
+        impl Push<&u128> for U128s {
+            #[inline]
+            fn push(&mut self, item: &u128) { self.values.push(item.to_le_bytes()) }
+        }
+        impl<CV: Clear> Clear for U128s<CV> { fn clear(&mut self) { self.values.clear() }}
+
+        impl<CV: HeapSize> HeapSize for U128s<CV> {
+            fn heap_size(&self) -> (usize, usize) {
+                self.values.heap_size()
+            }
+        }
+
+        impl<'a, CV: crate::AsBytes<'a>> crate::AsBytes<'a> for U128s<CV> {
+            #[inline(always)]
+            fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
+                self.values.as_bytes()
+            }
+        }
+
+        impl<'a, CV: crate::FromBytes<'a>> crate::FromBytes<'a> for U128s<CV> {
+            #[inline(always)]
+            fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+                Self { values: CV::from_bytes(bytes) }
+            }
+        }
+
+        #[derive(Copy, Clone, Default)]
+        pub struct I128s<CV = Vec<Encoded>> { pub values: CV }
+
+        impl Columnar for i128 {
+            fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self { other }
+            type Container = I128s;
+        }
+
+        impl<CV: PushIndexAs<Encoded>> Container for I128s<CV> {
+            type Ref<'a> = i128;
+            type Borrowed<'a> = I128s<CV::Borrowed<'a>> where CV: 'a;
+            fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
+                I128s { values: self.values.borrow() }
+            }
+            #[inline(always)]
+            fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> where CV: 'a {
+                I128s { values: CV::reborrow(thing.values) }
+            }
+            #[inline(always)]
+            fn reborrow_ref<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
+
+            #[inline(always)]
+            fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+                self.values.extend_from_self(other.values, range)
+            }
+
+            fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
+                self.values.reserve_for(selves.map(|x| x.values))
+            }
+        }
+
+        impl<CV: Len> Len for I128s<CV> { fn len(&self) -> usize { self.values.len() }}
+        impl<CV: IndexAs<Encoded>> Index for I128s<CV> {
+            type Ref = i128;
+            #[inline(always)] fn get(&self, index: usize) -> Self::Ref { i128::from_le_bytes(self.values.index_as(index)) }
+        }
+        impl<CV: IndexAs<Encoded>> Index for &I128s<CV> {
+            type Ref = i128;
+            #[inline(always)] fn get(&self, index: usize) -> Self::Ref { i128::from_le_bytes(self.values.index_as(index)) }
+        }
+        impl<CV: for<'a> Push<&'a Encoded>> Push<i128> for I128s<CV> {
+            #[inline]
+            fn push(&mut self, item: i128) { self.values.push(&item.to_le_bytes()) }
+        }
+        impl Push<&i128> for I128s {
+            #[inline]
+            fn push(&mut self, item: &i128) { self.values.push(item.to_le_bytes()) }
+        }
+        impl<CV: Clear> Clear for I128s<CV> { fn clear(&mut self) { self.values.clear() }}
+
+        impl<CV: HeapSize> HeapSize for I128s<CV> {
+            fn heap_size(&self) -> (usize, usize) {
+                self.values.heap_size()
+            }
+        }
+
+        impl<'a, CV: crate::AsBytes<'a>> crate::AsBytes<'a> for I128s<CV> {
+            #[inline(always)]
+            fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
+                self.values.as_bytes()
+            }
+        }
+
+        impl<'a, CV: crate::FromBytes<'a>> crate::FromBytes<'a> for I128s<CV> {
             #[inline(always)]
             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
                 Self { values: CV::from_bytes(bytes) }
