@@ -182,4 +182,9 @@ mod test {
         columns.push(((), format_args!("{:?}", 10)));
 
     }
+
+
+    // Test names that collide with the prelude.
+    #[derive(Columnar, Debug, Copy, Clone)]
+    enum Strange { None, Some }
 }
