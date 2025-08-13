@@ -302,7 +302,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
                 #[inline(always)]
                 fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
                     let iter = None.into_iter();
-                    #( let iter = columnar::chain(iter, self.#names.as_bytes()); )*
+                    #( let iter = ::columnar::chain(iter, self.#names.as_bytes()); )*
                     iter
                 }
             }
@@ -319,8 +319,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
             impl #impl_gen ::columnar::FromBytes<'columnar> for #c_ident #ty_gen #where_clause {
                 #[inline(always)]
                 fn from_bytes(bytes: &mut impl Iterator<Item=&'columnar [u8]>) -> Self {
-                    #(let #names = ::columnar::FromBytes::from_bytes(bytes);)*
-                    Self { #(#names,)* }
+                    Self { #(#names: ::columnar::FromBytes::from_bytes(bytes),)* }
                 }
             }
         }
@@ -485,7 +484,7 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
         impl<CW: Copy+::columnar::common::index::CopyAs<u64>> ::columnar::Len for #c_ident<CW> {
             #[inline(always)]
             fn len(&self) -> usize {
-                use columnar::common::index::CopyAs;
+                use ::columnar::common::index::CopyAs;
                 self.count.copy_as() as usize
             }
         }
@@ -863,9 +862,9 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                 #[inline(always)]
                 fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
                     let iter = None.into_iter();
-                    #( let iter = columnar::chain(iter,self.#names.as_bytes()); )*
-                    let iter = columnar::chain(iter, self.variant.as_bytes());
-                    let iter = columnar::chain(iter, self.offset.as_bytes());
+                    #( let iter = ::columnar::chain(iter,self.#names.as_bytes()); )*
+                    let iter = ::columnar::chain(iter, self.variant.as_bytes());
+                    let iter = ::columnar::chain(iter, self.offset.as_bytes());
                     iter
                 }
             }
@@ -883,10 +882,11 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
             impl #impl_gen ::columnar::FromBytes<'columnar> for #c_ident #ty_gen #where_clause {
                 #[inline(always)]
                 fn from_bytes(bytes: &mut impl Iterator<Item=&'columnar [u8]>) -> Self {
-                    #(let #names = ::columnar::FromBytes::from_bytes(bytes);)*
-                    let variant = ::columnar::FromBytes::from_bytes(bytes);
-                    let offset = ::columnar::FromBytes::from_bytes(bytes);
-                    Self { #(#names,)* variant, offset }
+                    Self {
+                        #(#names: ::columnar::FromBytes::from_bytes(bytes),)*
+                        variant: ::columnar::FromBytes::from_bytes(bytes),
+                        offset: ::columnar::FromBytes::from_bytes(bytes),
+                    }
                 }
             }
         }
