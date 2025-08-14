@@ -191,6 +191,12 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
                     #(#push)*
                 }
             }
+            impl #impl_gen ::columnar::Push<&'columnar Box<#name #ty_gen>> for #c_ident < #(#container_types),* >  #where_clause2 {
+                #[inline]
+                fn push(&mut self, item: &'columnar Box<#name #ty_gen>) {
+                    self.push(&**item);
+                }
+            }
         }
     };
 
@@ -361,6 +367,18 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
                 type Container = #c_ident < #(<#types as ::columnar::Columnar>::Container ),* >;
             }
 
+            impl #impl_gen ::columnar::Columnar for Box<#name #ty_gen> #where_clause2 {
+                #[inline(always)]
+                fn copy_from<'a>(&mut self, other: ::columnar::Ref<'a, Self>) {
+                    self.as_mut().copy_from(other);
+                }
+                #[inline(always)]
+                fn into_owned<'a>(other: ::columnar::Ref<'a, Self>) -> Self {
+                    Box::new(#into_self)
+                }
+                type Container = #c_ident < #(<#types as ::columnar::Columnar>::Container ),* >;
+            }
+
             impl < #( #container_types: ::columnar::Container ),* > ::columnar::Container for #c_ident < #( #container_types ),* > {
                 type Ref<'a> = #r_ident < #(<#container_types as ::columnar::Container>::Ref<'a>,)* > where #(#container_types: 'a,)*;
                 type Borrowed<'a> = #c_ident < #(<#container_types as ::columnar::Container>::Borrowed<'a> ),* > where #(#container_types: 'a,)*;
@@ -458,6 +476,13 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
             }
         }
 
+        impl<'columnar> ::columnar::Push<&'columnar Box<#name>> for #c_ident {
+            #[inline]
+            fn push(&mut self, _item: &'columnar Box<#name>) {
+                self.count += 1;
+            }
+        }
+
         impl<CW> ::columnar::Index for #c_ident<CW> {
             type Ref = #name;
             #[inline(always)]
@@ -493,14 +518,14 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
             // type Borrowed<'columnar> = #c_ident;
             #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                std::iter::once((8, bytemuck::cast_slice(std::slice::from_ref(self.count))))
+                std::iter::once((8, ::columnar::bytemuck::cast_slice(std::slice::from_ref(self.count))))
             }
         }
 
         impl<'columnar> ::columnar::FromBytes<'columnar> for #c_ident <&'columnar u64> {
             #[inline(always)]
             fn from_bytes(bytes: &mut impl Iterator<Item=&'columnar [u8]>) -> Self {
-                Self { count: &bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0] }
+                Self { count: &::columnar::bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0] }
             }
         }
 
@@ -509,6 +534,14 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
             fn copy_from<'a>(&mut self, other: ::columnar::Ref<'a, Self>) { *self = other; }
             #[inline(always)]
             fn into_owned<'a>(other: ::columnar::Ref<'a, Self>) -> Self { other }
+            type Container = #c_ident;
+        }
+
+        impl ::columnar::Columnar for Box<#name> {
+            #[inline(always)]
+            fn copy_from<'a>(&mut self, other: ::columnar::Ref<'a, Self>) { *self.as_mut() = other; }
+            #[inline(always)]
+            fn into_owned<'a>(other: ::columnar::Ref<'a, Self>) -> Self { Box::new(other) }
             type Container = #c_ident;
         }
 
@@ -732,6 +765,12 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                     match item {
                         #( #push )*
                     }
+                }
+            }
+            impl #impl_gen ::columnar::Push<&'columnar Box<#name #ty_gen>> for #c_ident < #(#container_types),* > #where_clause {
+                #[inline]
+                fn push(&mut self, item: &'columnar Box<#name #ty_gen>) {
+                    self.push(&**item);
                 }
             }
         }
@@ -993,6 +1032,20 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                 type Container = #c_ident < #(#container_types),* >;
             }
 
+            impl #impl_gen ::columnar::Columnar for Box<#name #ty_gen> #where_clause2 {
+                #[inline(always)]
+                fn copy_from<'a>(&mut self, other: ::columnar::Ref<'a, Self>) {
+                    self.as_mut().copy_from(other);
+                }
+                #[inline(always)]
+                fn into_owned<'a>(other: ::columnar::Ref<'a, Self>) -> Self {
+                    Box::new(match other {
+                        #( #into_owned )*
+                    })
+                }
+                type Container = #c_ident < #(#container_types),* >;
+            }
+
             impl < #(#container_names : ::columnar::Container ),* > ::columnar::Container for #c_ident < #(#container_names),* > {
                 type Ref<'a> = #r_ident < #( <#container_names as ::columnar::Container>::Ref<'a> ,)* > where Self: 'a, #(#container_names: 'a,)*;
                 type Borrowed<'a> = #c_ident < #( < #container_names as ::columnar::Container >::Borrowed<'a>, )* &'a [u8], &'a [u64] > where #(#container_names: 'a,)*;
@@ -1099,6 +1152,12 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
                 match *item {
                     #( #name::#names => self.variant.push(#indices), )*
                 }
+            }
+        }
+        impl<'columnar> ::columnar::Push<&'columnar Box<#name>> for #c_ident {
+            #[inline]
+            fn push(&mut self, item: &'columnar Box<#name>) {
+                self.push(&**item);
             }
         }
 
