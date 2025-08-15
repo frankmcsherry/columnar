@@ -493,14 +493,14 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
             // type Borrowed<'columnar> = #c_ident;
             #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                std::iter::once((8, bytemuck::cast_slice(std::slice::from_ref(self.count))))
+                std::iter::once((8, ::columnar::bytemuck::cast_slice(std::slice::from_ref(self.count))))
             }
         }
 
         impl<'columnar> ::columnar::FromBytes<'columnar> for #c_ident <&'columnar u64> {
             #[inline(always)]
             fn from_bytes(bytes: &mut impl Iterator<Item=&'columnar [u8]>) -> Self {
-                Self { count: &bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0] }
+                Self { count: &::columnar::bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0] }
             }
         }
 
