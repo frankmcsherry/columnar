@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1](https://github.com/frankmcsherry/columnar/compare/columnar-v0.10.0...columnar-v0.10.1) - 2025-08-15
+
+### Other
+
+- Merge pull request #65 from antiguru/support_char
+- Update lib.rs
+- Support chars
+- Fix name collisions and unprefixed columnar mentions
+- Encode u128/u128 as [u8; 16]
+- Update to Rust 1.89
+
 ## [0.10.0](https://github.com/frankmcsherry/columnar/compare/columnar-v0.9.0...columnar-v0.10.0) - 2025-08-05
 
 ### Other
