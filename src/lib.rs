@@ -1146,6 +1146,86 @@ pub mod primitive {
         }
     }
 
+    pub use chars::{Chars};
+    /// Columnar stores for `u128` and `i128`, stored as [u8; 16] bits.
+    mod chars {
+
+        use crate::{Clear, Columnar, Container, Len, Index, IndexAs, Push, HeapSize};
+        use crate::common::PushIndexAs;
+
+        type Encoded = u32;
+
+        #[derive(Copy, Clone, Default)]
+        pub struct Chars<CV = Vec<Encoded>> { pub values: CV }
+
+        impl Columnar for char {
+            fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self { other }
+            type Container = Chars;
+        }
+
+        impl<CV: PushIndexAs<Encoded>> Container for Chars<CV> {
+            type Ref<'a> = char;
+            type Borrowed<'a> = Chars<CV::Borrowed<'a>> where CV: 'a;
+            fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
+                Chars { values: self.values.borrow() }
+            }
+            #[inline(always)]
+            fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> where CV: 'a {
+                Chars { values: CV::reborrow(thing.values) }
+            }
+            #[inline(always)]
+            fn reborrow_ref<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
+
+            #[inline(always)]
+            fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+                self.values.extend_from_self(other.values, range)
+            }
+
+            fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
+                self.values.reserve_for(selves.map(|x| x.values))
+            }
+        }
+
+        impl<CV: Len> Len for Chars<CV> { fn len(&self) -> usize { self.values.len() }}
+        impl<CV: IndexAs<Encoded>> Index for Chars<CV> {
+            type Ref = char;
+            #[inline(always)] fn get(&self, index: usize) -> Self::Ref { char::from_u32(self.values.index_as(index)).unwrap() }
+        }
+        impl<CV: IndexAs<Encoded>> Index for &Chars<CV> {
+            type Ref = char;
+            #[inline(always)] fn get(&self, index: usize) -> Self::Ref { char::from_u32(self.values.index_as(index)).unwrap() }
+        }
+        impl<CV: for<'a> Push<&'a Encoded>> Push<char> for Chars<CV> {
+            #[inline]
+            fn push(&mut self, item: char) { self.values.push(&u32::from(item)) }
+        }
+        impl Push<&char> for Chars {
+            #[inline]
+            fn push(&mut self, item: &char) { self.values.push(u32::from(*item)) }
+        }
+        impl<CV: Clear> Clear for Chars<CV> { fn clear(&mut self) { self.values.clear() }}
+
+        impl<CV: HeapSize> HeapSize for Chars<CV> {
+            fn heap_size(&self) -> (usize, usize) {
+                self.values.heap_size()
+            }
+        }
+
+        impl<'a, CV: crate::AsBytes<'a>> crate::AsBytes<'a> for Chars<CV> {
+            #[inline(always)]
+            fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
+                self.values.as_bytes()
+            }
+        }
+
+        impl<'a, CV: crate::FromBytes<'a>> crate::FromBytes<'a> for Chars<CV> {
+            #[inline(always)]
+            fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+                Self { values: CV::from_bytes(bytes) }
+            }
+        }
+    }
+
     pub use larges::{U128s, I128s};
     /// Columnar stores for `u128` and `i128`, stored as [u8; 16] bits.
     mod larges {
