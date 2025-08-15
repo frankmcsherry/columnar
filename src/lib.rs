@@ -12,6 +12,8 @@ pub use columnar_derive::Columnar;
 
 pub mod adts;
 
+pub use bytemuck;
+
 /// A type that can be represented in columnar form.
 ///
 /// For a running example, a type like `(A, Vec<B>)`.
