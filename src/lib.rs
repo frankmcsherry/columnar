@@ -1147,7 +1147,7 @@ pub mod primitive {
     }
 
     pub use chars::{Chars};
-    /// Columnar stores for `u128` and `i128`, stored as [u8; 16] bits.
+    /// Columnar store for `char`, stored as a `u32`.
     mod chars {
 
         use crate::{Clear, Columnar, Container, Len, Index, IndexAs, Push, HeapSize};
