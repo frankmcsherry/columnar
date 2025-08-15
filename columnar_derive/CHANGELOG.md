@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1](https://github.com/frankmcsherry/columnar/compare/columnar_derive-v0.10.0...columnar_derive-v0.10.1) - 2025-08-15
+
+### Other
+
+- Export bytemuck crate
+- Fix name collisions and unprefixed columnar mentions
+
 ## [0.10.0](https://github.com/frankmcsherry/columnar/compare/columnar_derive-v0.3.0...columnar_derive-v0.10.0) - 2025-08-05
 
 ### Other
