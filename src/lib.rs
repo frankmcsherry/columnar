@@ -11,6 +11,7 @@ extern crate columnar_derive;
 pub use columnar_derive::Columnar;
 
 pub mod adts;
+pub mod boxed;
 
 pub use bytemuck;
 
@@ -128,8 +129,6 @@ pub trait Container : Len + Clear + for<'a> Push<Self::Ref<'a>> + Clone + Defaul
         self.extend(range.map(|i| other.get(i)))
     }
 }
-
-mod boxed;
 
 impl<T: Clone + Send + 'static> Container for Vec<T> {
     type Ref<'a> = &'a T;
