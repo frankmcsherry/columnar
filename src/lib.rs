@@ -2227,26 +2227,6 @@ pub mod vector {
         type Container = Vecs<T::Container>;
     }
 
-    impl<T: Columnar> Columnar for Box<[T]> {
-        #[inline(always)]
-        fn copy_from<'a>(&mut self, other: crate::Ref<'a, Self>) {
-            let mut this = Vec::from(std::mem::take(self));
-            this.truncate(other.len());
-            let mut other_iter = other.into_iter();
-            for (s, o) in this.iter_mut().zip(&mut other_iter) {
-                T::copy_from(s, o);
-            }
-            for o in other_iter {
-                this.push(T::into_owned(o));
-            }
-        }
-        #[inline(always)]
-        fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self {
-            other.into_iter().map(|x| T::into_owned(x)).collect()
-        }
-        type Container = Vecs<T::Container>;
-    }
-
     impl<T: Columnar, const N: usize> Columnar for [T; N] {
         #[inline(always)]
         fn copy_from<'a>(&mut self, other: crate::Ref<'a, Self>) {
