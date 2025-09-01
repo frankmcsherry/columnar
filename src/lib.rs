@@ -129,6 +129,8 @@ pub trait Container : Len + Clear + for<'a> Push<Self::Ref<'a>> + Clone + Defaul
     }
 }
 
+mod boxed;
+
 impl<T: Clone + Send + 'static> Container for Vec<T> {
     type Ref<'a> = &'a T;
     type Borrowed<'a> = &'a [T];
@@ -2024,6 +2026,19 @@ pub mod string {
         type Container = Strings;
     }
 
+    impl Columnar for Box<str> {
+        #[inline(always)]
+        fn copy_from<'a>(&mut self, other: crate::Ref<'a, Self>) {
+            let mut s = String::from(std::mem::take(self));
+            s.clear();
+            s.push_str(other);
+            *self = s.into_boxed_str();
+        }
+        #[inline(always)]
+        fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self { Self::from(other) }
+        type Container = Strings;
+    }
+
     impl<BC: crate::common::PushIndexAs<u64>> Container for Strings<BC, Vec<u8>> {
         type Ref<'a> = &'a str;
         type Borrowed<'a> = Strings<BC::Borrowed<'a>, &'a [u8]> where BC: 'a;
@@ -2141,6 +2156,13 @@ pub mod string {
             self.bounds.push(&(self.values.len() as u64));
         }
     }
+    impl<BC: for<'a> Push<&'a u64>> Push<&Box<str>> for Strings<BC> {
+        #[inline]
+        fn push(&mut self, item: &Box<str>) {
+            self.values.extend_from_slice(item.as_bytes());
+            self.bounds.push(&(self.values.len() as u64));
+        }
+    }
     impl<'a, BC: for<'b> Push<&'b u64>> Push<std::fmt::Arguments<'a>> for Strings<BC> {
         #[inline]
         fn push(&mut self, item: std::fmt::Arguments<'a>) {
@@ -2197,6 +2219,26 @@ pub mod vector {
             }
             for o in other_iter {
                 self.push(T::into_owned(o));
+            }
+        }
+        #[inline(always)]
+        fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self {
+            other.into_iter().map(|x| T::into_owned(x)).collect()
+        }
+        type Container = Vecs<T::Container>;
+    }
+
+    impl<T: Columnar> Columnar for Box<[T]> {
+        #[inline(always)]
+        fn copy_from<'a>(&mut self, other: crate::Ref<'a, Self>) {
+            let mut this = Vec::from(std::mem::take(self));
+            this.truncate(other.len());
+            let mut other_iter = other.into_iter();
+            for (s, o) in this.iter_mut().zip(&mut other_iter) {
+                T::copy_from(s, o);
+            }
+            for o in other_iter {
+                this.push(T::into_owned(o));
             }
         }
         #[inline(always)]
