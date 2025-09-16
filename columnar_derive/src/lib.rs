@@ -361,28 +361,30 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
                 type Container = #c_ident < #(<#types as ::columnar::Columnar>::Container ),* >;
             }
 
-            impl < #( #container_types: ::columnar::Container ),* > ::columnar::Container for #c_ident < #( #container_types ),* > {
-                type Ref<'a> = #r_ident < #(<#container_types as ::columnar::Container>::Ref<'a>,)* > where #(#container_types: 'a,)*;
-                type Borrowed<'a> = #c_ident < #(<#container_types as ::columnar::Container>::Borrowed<'a> ),* > where #(#container_types: 'a,)*;
+            impl < #( #container_types: ::columnar::Borrow ),* > ::columnar::Borrow for #c_ident < #( #container_types ),* > {
+                type Ref<'a> = #r_ident < #(<#container_types as ::columnar::Borrow>::Ref<'a>,)* > where #(#container_types: 'a,)*;
+                type Borrowed<'a> = #c_ident < #(<#container_types as ::columnar::Borrow>::Borrowed<'a> ),* > where #(#container_types: 'a,)*;
                 #[inline(always)]
                 fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
                     #c_ident {
-                        #( #names: <#container_types as ::columnar::Container>::borrow(&self.#names), )*
+                        #( #names: <#container_types as ::columnar::Borrow>::borrow(&self.#names), )*
                     }
                 }
                 #[inline(always)]
                 fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> {
                     #c_ident {
-                        #( #names: <#container_types as ::columnar::Container>::reborrow(thing.#names), )*
+                        #( #names: <#container_types as ::columnar::Borrow>::reborrow(thing.#names), )*
                     }
                 }
                 #[inline(always)]
                 fn reborrow_ref<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> {
                     #r_ident {
-                        #( #names: <#container_types as ::columnar::Container>::reborrow_ref(thing.#names), )*
+                        #( #names: <#container_types as ::columnar::Borrow>::reborrow_ref(thing.#names), )*
                     }
                 }
+            }
 
+            impl < #( #container_types: ::columnar::Container ),* > ::columnar::Container for #c_ident < #( #container_types ),* > {
                 #[inline(always)]
                 fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
                     #( self.#names.extend_from_self(other.#names, range.clone()); )*
@@ -512,7 +514,7 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
             type Container = #c_ident;
         }
 
-        impl ::columnar::Container for #c_ident {
+        impl ::columnar::Borrow for #c_ident {
             type Ref<'a> = #name;
             type Borrowed<'a> = #c_ident < &'a u64 >;
             #[inline(always)]
@@ -525,7 +527,9 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
             }
             #[inline(always)]
             fn reborrow_ref<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> { thing }
+        }
 
+        impl ::columnar::Container for #c_ident {
             #[inline(always)]
             fn extend_from_self(&mut self, _other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
                 self.count += range.len() as u64;
@@ -970,7 +974,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         let reborrow_ref = variants.iter().enumerate().zip(container_names.iter()).map(|((index, (variant, types)), cname)| {
             quote! {
                 #r_ident::#variant(( potato )) => {
-                    #r_ident::#variant((  < (#cname) as ::columnar::Container >::reborrow_ref::<'b, 'a>( potato ) ))
+                    #r_ident::#variant((  < (#cname) as ::columnar::Borrow >::reborrow_ref::<'b, 'a>( potato ) ))
                 },
             }
         }).collect::<Vec<_>>();
@@ -993,9 +997,9 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                 type Container = #c_ident < #(#container_types),* >;
             }
 
-            impl < #(#container_names : ::columnar::Container ),* > ::columnar::Container for #c_ident < #(#container_names),* > {
-                type Ref<'a> = #r_ident < #( <#container_names as ::columnar::Container>::Ref<'a> ,)* > where Self: 'a, #(#container_names: 'a,)*;
-                type Borrowed<'a> = #c_ident < #( < #container_names as ::columnar::Container >::Borrowed<'a>, )* &'a [u8], &'a [u64] > where #(#container_names: 'a,)*;
+            impl < #(#container_names : ::columnar::Borrow ),* > ::columnar::Borrow for #c_ident < #(#container_names),* > {
+                type Ref<'a> = #r_ident < #( <#container_names as ::columnar::Borrow>::Ref<'a> ,)* > where Self: 'a, #(#container_names: 'a,)*;
+                type Borrowed<'a> = #c_ident < #( < #container_names as ::columnar::Borrow >::Borrowed<'a>, )* &'a [u8], &'a [u64] > where #(#container_names: 'a,)*;
                 #[inline(always)]
                 fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
                     #c_ident {
@@ -1007,9 +1011,9 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                 #[inline(always)]
                 fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> {
                     #c_ident {
-                        #(#names: <#container_names as ::columnar::Container>::reborrow(thing.#names),)*
-                        variant: <Vec<u8> as ::columnar::Container>::reborrow(thing.variant),
-                        offset: <Vec<u64> as ::columnar::Container>::reborrow(thing.offset),
+                        #(#names: <#container_names as ::columnar::Borrow>::reborrow(thing.#names),)*
+                        variant: <Vec<u8> as ::columnar::Borrow>::reborrow(thing.variant),
+                        offset: <Vec<u64> as ::columnar::Borrow>::reborrow(thing.offset),
                     }
                 }
                 #[inline(always)]
@@ -1018,7 +1022,9 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                         #( #reborrow_ref )*
                     }
                 }
+            }
 
+            impl < #(#container_names : ::columnar::Container ),* > ::columnar::Container for #c_ident < #(#container_names),* > {
                 // TODO: implement `extend_from_self`.
 
                 fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
@@ -1161,7 +1167,7 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
             type Container = #c_ident;
         }
 
-        impl<CV: ::columnar::common::PushIndexAs<u8>> ::columnar::Container for #c_ident <CV> {
+        impl<CV: ::columnar::common::BorrowIndexAs<u8>> ::columnar::Borrow for #c_ident <CV> {
             type Ref<'a> = #name;
             type Borrowed<'a> = #c_ident < CV::Borrowed<'a> > where CV: 'a;
             #[inline(always)]
@@ -1173,12 +1179,14 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
             #[inline(always)]
             fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> {
                 #c_ident {
-                    variant: <CV as ::columnar::Container>::reborrow(thing.variant),
+                    variant: <CV as ::columnar::Borrow>::reborrow(thing.variant),
                 }
             }
             #[inline(always)]
             fn reborrow_ref<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> { thing }
+        }
 
+        impl<CV: ::columnar::common::PushIndexAs<u8>> ::columnar::Container for #c_ident <CV> {
             // TODO: implement `extend_from_self`.
 
             fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {

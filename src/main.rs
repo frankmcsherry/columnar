@@ -1,4 +1,4 @@
-use columnar::{Columnar, Container, ContainerBytes};
+use columnar::{Columnar, ContainerBytes, Borrow};
 
 #[derive(Columnar)]
 enum Group<T> {
