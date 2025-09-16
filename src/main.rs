@@ -187,4 +187,9 @@ mod test {
     // Test names that collide with the prelude.
     #[derive(Columnar, Debug, Copy, Clone)]
     enum Strange { None, Some }
+
+    #[derive(Columnar, Debug, Clone)]
+    struct BoxedStr {
+        value: Box<str>,
+    }
 }
