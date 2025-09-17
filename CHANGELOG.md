@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.2](https://github.com/frankmcsherry/columnar/compare/columnar-v0.10.1...columnar-v0.10.2) - 2025-09-16
+
+### Other
+
+- Rust 1.79 compat
+- pub mod
+- Just a single newtype
+- Support boxed types
+
 ## [0.10.1](https://github.com/frankmcsherry/columnar/compare/columnar-v0.10.0...columnar-v0.10.1) - 2025-08-15
 
 ### Other
