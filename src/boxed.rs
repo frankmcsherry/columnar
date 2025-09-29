@@ -6,7 +6,7 @@
 //! We need this wrapper to distinguish which [`Push`] implementation to use, otherwise
 //! the implementations would conflict.
 
-use crate::{AsBytes, Clear, Columnar, Container, FromBytes, HeapSize, Index, IndexMut, Len, Push, Ref};
+use crate::{AsBytes, Borrow, Clear, Columnar, Container, FromBytes, HeapSize, Index, IndexMut, Len, Push, Ref};
 
 impl<T: Columnar> Columnar for Box<T> {
     type Container = Boxed<T::Container>;
@@ -25,12 +25,14 @@ impl<T> std::ops::Deref for Boxed<T> {
 impl<T> std::ops::DerefMut for Boxed<T> {
     #[inline(always)] fn deref_mut(&mut self) -> &mut T { &mut self.0 }
 }
-impl<C: Container> Container for Boxed<C> {
+impl<C: Borrow> Borrow for Boxed<C> {
     type Ref<'a> = Boxed<C::Ref<'a>>;
     type Borrowed<'a> = Boxed<C::Borrowed<'a>>;
     #[inline(always)] fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { Boxed(self.0.borrow()) }
     #[inline(always)] fn reborrow<'b, 'a: 'b>(item: Self::Borrowed<'a>) -> Self::Borrowed<'b> where Self: 'a { Boxed(C::reborrow(item.0)) }
     #[inline(always)] fn reborrow_ref<'b, 'a: 'b>(item: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { Boxed(C::reborrow_ref(item.0)) }
+}
+impl<C: Container> Container for Boxed<C> {
     #[inline(always)] fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) { self.0.extend_from_self(other.0, range) }
     #[inline(always)] fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone { self.0.reserve_for(selves.map(|x| x.0)) }
 }
