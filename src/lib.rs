@@ -76,7 +76,7 @@ pub type ContainerOf<T> = <T as Columnar>::Container;
 
 /// For a lifetime, the reference type of columnar type `T`.
 ///
-/// Equivalent to `<ContainerOf<T> as ReadContainer>::Ref<'a>`.
+/// Equivalent to `<ContainerOf<T> as Borrow>::Ref<'a>`.
 pub type Ref<'a, T> = <ContainerOf<T> as Borrow>::Ref<'a>;
 
 /// A type that can be borrowed into a preferred reference type.
