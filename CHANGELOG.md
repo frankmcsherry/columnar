@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0](https://github.com/frankmcsherry/columnar/compare/columnar-v0.10.2...columnar-v0.11.0) - 2025-09-29
+
+### Other
+
+- Merge pull request #62 from frankmcsherry/dependabot/github_actions/actions/checkout-5
+- Update src/lib.rs
+- Introduce Borrow trait
+
 ## [0.10.2](https://github.com/frankmcsherry/columnar/compare/columnar-v0.10.1...columnar-v0.10.2) - 2025-09-16
 
 ### Other
