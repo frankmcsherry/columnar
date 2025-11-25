@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1](https://github.com/frankmcsherry/columnar/compare/columnar-v0.11.0...columnar-v0.11.1) - 2025-11-25
+
+### Other
+
+- Bump actions/checkout from 5 to 6
+
 ## [0.11.0](https://github.com/frankmcsherry/columnar/compare/columnar-v0.10.2...columnar-v0.11.0) - 2025-09-29
 
 ### Other
