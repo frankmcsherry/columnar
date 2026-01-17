@@ -915,6 +915,115 @@ pub mod bytes {
         }
     }
 
+    /// A container of either typed columns, or serialized bytes that can be borrowed as the former.
+    pub mod stash {
+
+        use crate::{Len, FromBytes};
+        use crate::bytes::{EncodeDecode, Indexed};
+
+        /// A container of either typed columns, or serialized bytes that can be borrowed as the former.
+        ///
+        /// When `B` dereferences to a byte slice, the container can be borrowed as if the container type `C`.
+        /// This container inherents the readable properties of `C` through borrowing, but does not implement
+        /// the traits itself.
+        ///
+        /// The container can be cleared and pushed into. When cleared it reverts to a typed variant, and when
+        /// pushed into if the typed variant it will accept the item, and if not it will panic.
+        #[derive(Clone)]
+        pub enum Stash<C, B> {
+            /// The typed variant of the container.
+            Typed(C),
+            /// The bytes variant of the container.
+            Bytes(B),
+            /// Relocated, aligned binary data, if `Bytes` doesn't work for some reason.
+            ///
+            /// Most commonly this works around misaligned binary data, but it can also be useful if the `B`
+            /// type is a scarce resource that should be released.
+            Align(Box<[u64]>),
+        }
+
+        impl<C: Default, B> Default for Stash<C, B> { fn default() -> Self { Self::Typed(Default::default()) } }
+
+        impl<C: crate::ContainerBytes, B: std::ops::Deref<Target=[u8]> + Clone + 'static> crate::Borrow for Stash<C, B> {
+
+            type Ref<'a> = <C as crate::Borrow>::Ref<'a>;
+            type Borrowed<'a> = <C as crate::Borrow>::Borrowed<'a>;
+
+            #[inline(always)] fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { self.borrow() }
+            #[inline(always)] fn reborrow<'b, 'a: 'b>(item: Self::Borrowed<'a>) -> Self::Borrowed<'b> where Self: 'a { <C as crate::Borrow>::reborrow(item) }
+            #[inline(always)] fn reborrow_ref<'b, 'a: 'b>(item: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { <C as crate::Borrow>::reborrow_ref(item) }
+        }
+
+        impl<C: crate::ContainerBytes, B: std::ops::Deref<Target=[u8]>> Len for Stash<C, B> {
+            #[inline(always)] fn len(&self) -> usize { self.borrow().len() }
+        }
+
+        impl<C: crate::ContainerBytes, B: std::ops::Deref<Target=[u8]>> Stash<C, B> {
+            /// Borrows the contents, either from a typed container or by decoding serialized bytes.
+            ///
+            /// This method is relatively cheap but is not free.
+            #[inline(always)] pub fn borrow<'a>(&'a self) -> <C as crate::Borrow>::Borrowed<'a> {
+                match self {
+                    Stash::Typed(t) => t.borrow(),
+                    Stash::Bytes(b) => <C::Borrowed<'_> as FromBytes>::from_bytes(&mut Indexed::decode(bytemuck::cast_slice(b))),
+                    Stash::Align(a) => <C::Borrowed<'_> as FromBytes>::from_bytes(&mut Indexed::decode(a)),
+                }
+            }
+            /// The number of bytes needed to write the contents using the `Indexed` encoder.
+            pub fn length_in_bytes(&self) -> usize {
+                match self {
+                    // We'll need one u64 for the length, then the length rounded up to a multiple of 8.
+                    Stash::Typed(t) => 8 * Indexed::length_in_words(&t.borrow()),
+                    Stash::Bytes(b) => b.len(),
+                    Stash::Align(a) => 8 * a.len(),
+                }
+            }
+            /// Write the contents into a `std::io::Write` using the `Indexed` encoder.
+            pub fn into_bytes<W: ::std::io::Write>(&self, writer: &mut W) {
+                match self {
+                    Stash::Typed(t) => { Indexed::write(writer, &t.borrow()).unwrap() },
+                    Stash::Bytes(b) => writer.write_all(&b[..]).unwrap(),
+                    Stash::Align(a) => writer.write_all(bytemuck::cast_slice(&a[..])).unwrap(),
+                }
+            }
+        }
+
+        impl<T, C: crate::Container + crate::Push<T>, B> crate::Push<T> for Stash<C, B> {
+            fn push(&mut self, item: T) {
+                match self {
+                    Stash::Typed(t) => t.push(item),
+                    Stash::Bytes(_) | Stash::Align(_) => unimplemented!(),
+                }
+            }
+        }
+
+        impl<C: crate::Clear + Default, B> crate::Clear for Stash<C, B> {
+            fn clear(&mut self) {
+                match self {
+                    Stash::Typed(t) => t.clear(),
+                    Stash::Bytes(_) | Stash::Align(_) => {
+                        *self = Stash::Typed(Default::default());
+                    }
+                }
+            }
+        }
+
+        impl<C: crate::Container, B: std::ops::Deref<Target = [u8]>> From<B> for Stash<C, B> {
+            fn from(bytes: B) -> Self {
+                assert!(bytes.len() % 8 == 0);
+                if bytemuck::try_cast_slice::<_, u64>(&bytes).is_ok() {
+                    Self::Bytes(bytes)
+                }
+                else {
+                    // Re-locating bytes for alignment reasons.
+                    let mut alloc: Vec<u64> = vec![0; bytes.len() / 8];
+                    bytemuck::cast_slice_mut(&mut alloc[..]).copy_from_slice(&bytes[..]);
+                    Self::Align(alloc.into())
+                }
+            }
+        }
+    }
+
     #[cfg(test)]
     mod test {
         use crate::ContainerOf;
