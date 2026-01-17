@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1](https://github.com/frankmcsherry/columnar/compare/columnar-v0.11.0...columnar-v0.11.1) - 2026-01-17
+
+### Other
+
+- Re-add broken roaring, to avoid semver break
+- Split lib.rs into many files
+- Remove bytes.rs
+- Remove rmp-serde as problematic
+- Introduce Stash container
+- Bump actions/checkout from 5 to 6
+
 ## [0.11.0](https://github.com/frankmcsherry/columnar/compare/columnar-v0.10.2...columnar-v0.11.0) - 2025-09-29
 
 ### Other
