@@ -117,7 +117,7 @@ mod serialization {
             if let Some(length) = self.store.first() {
                 let length = *length as usize;
                 self.store = &self.store[1..];
-                let whole_words = if length % 8 == 0 { length / 8 } else { length / 8 + 1 };
+                let whole_words = if length.is_multiple_of(8) { length / 8 } else { length / 8 + 1 };
                 let bytes: &[u8] = bytemuck::try_cast_slice(&self.store[..whole_words]).expect("&[u64] should convert to &[u8]");
                 self.store = &self.store[whole_words..];
                 Some(&bytes[..length])
@@ -244,7 +244,7 @@ pub mod serialization_neu {
 
     /// Decodes an encoded sequence of byte slices. Each result will be `u64` aligned.
     pub fn decode(store: &[u64]) -> impl Iterator<Item=&[u8]> {
-        assert!(store[0] % 8 == 0);
+        assert!(store[0].is_multiple_of(8));
         let slices = (store[0] / 8) - 1;
         (0 .. slices).map(|i| decode_index(store, i))
     }
@@ -384,7 +384,7 @@ pub mod stash {
 
     impl<C: crate::Container, B: std::ops::Deref<Target = [u8]>> From<B> for Stash<C, B> {
         fn from(bytes: B) -> Self {
-            assert!(bytes.len() % 8 == 0);
+            assert!(bytes.len().is_multiple_of(8));
             if bytemuck::try_cast_slice::<_, u64>(&bytes).is_ok() {
                 Self::Bytes(bytes)
             }

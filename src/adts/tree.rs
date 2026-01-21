@@ -66,6 +66,12 @@ impl<'a, T: PartialEq> PartialEq<Tree<T>> for TreesRef<'a, T> {
     }
 }
 
+impl<T> Default for Trees<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> Trees<T> {
     // Pushes a tree containing data onto `self`.
     pub fn push(&mut self, tree: Tree<T>) {

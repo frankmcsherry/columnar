@@ -502,7 +502,7 @@ pub mod offsets {
             #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref { (index as u64 + 1) * K }
         }
-        impl<'a, const K: u64, CC> Index for &'a Fixeds<K, CC> {
+        impl<const K: u64, CC> Index for &Fixeds<K, CC> {
             type Ref = u64;
             #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref { (index as u64 + 1) * K }
