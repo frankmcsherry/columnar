@@ -266,6 +266,170 @@ pub mod serialization_neu {
         &bytes[lower .. upper]
     }
 
+    // Assembly inspection functions for from_byte_slices vs from_bytes optimization.
+    #[cfg(not(test))]
+    mod inspect {
+        use crate::Strings;
+
+        type TupleBorrowed<'a> = (&'a [u64], Strings<&'a [u64], &'a [u8]>, crate::Vecs<&'a [u32], &'a [u64]>);
+
+        /// Reconstruct a (u64, String, Vec<u32>) container from byte slices and get the first field at index i.
+        #[no_mangle]
+        pub fn inspect_from_byte_slices_field0(slices: &[&[u8]], index: usize) -> u64 {
+            use crate::{FromBytes, Index};
+            let container = TupleBorrowed::from_byte_slices(slices);
+            let (a, _b, _c) = container.get(index);
+            *a
+        }
+
+        /// Same but via from_bytes iterator.
+        #[no_mangle]
+        pub fn inspect_from_bytes_field0(slices: &[&[u8]], index: usize) -> u64 {
+            use crate::{FromBytes, Index};
+            let container = TupleBorrowed::from_bytes(&mut slices.iter().copied());
+            let (a, _b, _c) = container.get(index);
+            *a
+        }
+
+        /// Get the second field (String) via from_byte_slices.
+        #[no_mangle]
+        pub fn inspect_from_byte_slices_field1<'a>(slices: &[&'a [u8]], index: usize) -> &'a str {
+            use crate::{FromBytes, Index};
+            let container = TupleBorrowed::from_byte_slices(slices);
+            let (_a, b, _c) = container.get(index);
+            b
+        }
+
+        /// Get the second field (String) via from_bytes.
+        #[no_mangle]
+        pub fn inspect_from_bytes_field1<'a>(slices: &[&'a [u8]], index: usize) -> &'a str {
+            use crate::{FromBytes, Index};
+            let container = TupleBorrowed::from_bytes(&mut slices.iter().copied());
+            let (_a, b, _c) = container.get(index);
+            b
+        }
+
+        // Pure tuple: all &[u64] fields, no validation side effects.
+        type PureTuple<'a> = (&'a [u64], &'a [u64], &'a [u64]);
+
+        /// Pure tuple, get field 0 only.
+        #[no_mangle]
+        pub fn inspect_pure_field0(slices: &[&[u8]], index: usize) -> u64 {
+            use crate::{FromBytes, Index};
+            let container = PureTuple::from_byte_slices(slices);
+            let (a, _b, _c) = container.get(index);
+            *a
+        }
+
+        /// Pure tuple, get field 1 only.
+        #[no_mangle]
+        pub fn inspect_pure_field1(slices: &[&[u8]], index: usize) -> u64 {
+            use crate::{FromBytes, Index};
+            let container = PureTuple::from_byte_slices(slices);
+            let (_a, b, _c) = container.get(index);
+            *b
+        }
+
+        /// Pure tuple, get all fields.
+        #[no_mangle]
+        pub fn inspect_pure_all(slices: &[&[u8]], index: usize) -> (u64, u64, u64) {
+            use crate::{FromBytes, Index};
+            let container = PureTuple::from_byte_slices(slices);
+            let (a, b, c) = container.get(index);
+            (*a, *b, *c)
+        }
+
+        /// Unsafe: cast &[u8] to &[u64] with no validation.
+        #[inline(always)]
+        unsafe fn cast_u64(bytes: &[u8]) -> &[u64] {
+            std::slice::from_raw_parts(bytes.as_ptr() as *const u64, bytes.len() / 8)
+        }
+
+        /// Hand-written field0 access: no panics, no validation.
+        #[no_mangle]
+        pub unsafe fn inspect_unsafe_field0(slices: &[&[u8]], index: usize) -> u64 {
+            let field0 = cast_u64(slices.get_unchecked(0));
+            *field0.get_unchecked(index)
+        }
+
+        /// Hand-written field1 access: no panics, no validation.
+        #[no_mangle]
+        pub unsafe fn inspect_unsafe_field1(slices: &[&[u8]], index: usize) -> u64 {
+            let field1 = cast_u64(slices.get_unchecked(1));
+            *field1.get_unchecked(index)
+        }
+
+        /// Hand-written all 3 fields: no panics, no validation.
+        #[no_mangle]
+        pub unsafe fn inspect_unsafe_all(slices: &[&[u8]], index: usize) -> (u64, u64, u64) {
+            let f0 = cast_u64(slices.get_unchecked(0));
+            let f1 = cast_u64(slices.get_unchecked(1));
+            let f2 = cast_u64(slices.get_unchecked(2));
+            (*f0.get_unchecked(index), *f1.get_unchecked(index), *f2.get_unchecked(index))
+        }
+
+        /// Safe cast, but manually skip constructing unused fields.
+        #[no_mangle]
+        pub fn inspect_manual_field0(slices: &[&[u8]], index: usize) -> u64 {
+            let field0: &[u64] = bytemuck::try_cast_slice(slices[0]).unwrap();
+            field0[index]
+        }
+
+        /// Safe cast, manually access field 1 only.
+        #[no_mangle]
+        pub fn inspect_manual_field1(slices: &[&[u8]], index: usize) -> u64 {
+            let field1: &[u64] = bytemuck::try_cast_slice(slices[1]).unwrap();
+            field1[index]
+        }
+
+        /// The real pattern: from_byte_slices already done, container passed in, access .0[i].
+        /// This is what it looks like when you separate construction from access.
+        #[no_mangle]
+        pub fn inspect_dotfield_0(container: (&[u64], &[u64], &[u64]), index: usize) -> u64 {
+            container.0[index]
+        }
+
+        /// Same for field 1.
+        #[no_mangle]
+        pub fn inspect_dotfield_1(container: (&[u64], &[u64], &[u64]), index: usize) -> u64 {
+            container.1[index]
+        }
+
+        /// All three fields from pre-constructed container.
+        #[no_mangle]
+        pub fn inspect_dotfield_all(container: (&[u64], &[u64], &[u64]), index: usize) -> (u64, u64, u64) {
+            (container.0[index], container.1[index], container.2[index])
+        }
+
+        // Boss level: full pipeline from Indexed-encoded &[u64] store.
+        // Indexed::decode → from_bytes → .0[index]
+        type Triple<'a> = (&'a [u64], &'a [u64], &'a [u64]);
+
+        /// Full pipeline: decode store, from_bytes, access .0[index].
+        #[no_mangle]
+        pub fn inspect_boss_field0(store: &[u64], index: usize) -> u64 {
+            use crate::FromBytes;
+            let container = Triple::from_bytes(&mut super::decode(store));
+            container.0[index]
+        }
+
+        /// Full pipeline: decode store, from_byte_slices, access .0[index].
+        #[no_mangle]
+        pub fn inspect_boss_slices_field0(store: &[u64], index: usize) -> u64 {
+            use crate::FromBytes;
+            let slices: Vec<&[u8]> = super::decode(store).collect();
+            let container = Triple::from_byte_slices(&slices);
+            container.0[index]
+        }
+
+        /// Full pipeline via decode_index: just the first slice, field 0.
+        #[no_mangle]
+        pub fn inspect_boss_decode_index_field0(store: &[u64], index: usize) -> u64 {
+            let field0: &[u64] = bytemuck::try_cast_slice(super::decode_index(store, 0)).unwrap();
+            field0[index]
+        }
+    }
+
     #[cfg(test)]
     mod test {
 
@@ -439,5 +603,35 @@ mod test {
             assert_eq!(column3.get(2*i+0), column2.get(2*i+0));
             assert_eq!(column3.get(2*i+1), column2.get(2*i+1));
         }
+
+        // Test from_byte_slices round-trip.
+        let byte_vec: Vec<&[u8]> = column.borrow().as_bytes().map(|(_, bytes)| bytes).collect();
+        let column4 = crate::Results::<&[u64], &[u64], &[u64], &[u64], &u64>::from_byte_slices(&byte_vec);
+        for i in 0..100 {
+            assert_eq!(column.get(2*i+0), column4.get(2*i+0).copied().map_err(|e| *e));
+            assert_eq!(column.get(2*i+1), column4.get(2*i+1).copied().map_err(|e| *e));
+        }
     }
+
+    /// Test from_byte_slices for tuples.
+    #[test]
+    fn from_byte_slices_tuple() {
+        use crate::common::{Push, Index};
+        use crate::{Borrow, AsBytes, FromBytes, ContainerOf};
+
+        let mut column: ContainerOf<(u64, String, Vec<u32>)> = Default::default();
+        for i in 0..50u64 {
+            column.push(&(i, format!("hello {i}"), vec![i as u32; i as usize]));
+        }
+
+        let byte_vec: Vec<&[u8]> = column.borrow().as_bytes().map(|(_, bytes)| bytes).collect();
+        type Borrowed<'a> = <ContainerOf<(u64, String, Vec<u32>)> as crate::Borrow>::Borrowed<'a>;
+        let reconstructed = Borrowed::from_byte_slices(&byte_vec);
+        for i in 0..50 {
+            let (a, b, _c) = reconstructed.get(i);
+            assert_eq!(*a, i as u64);
+            assert_eq!(b, &*format!("hello {i}"));
+        }
+    }
+
 }

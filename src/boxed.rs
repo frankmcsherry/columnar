@@ -59,7 +59,9 @@ impl<'a, C: AsBytes<'a>> AsBytes<'a> for Boxed<C> {
     #[inline(always)] fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> { self.0.as_bytes() }
 }
 impl<'a, C: FromBytes<'a>> FromBytes<'a> for Boxed<C> {
+    const SLICE_COUNT: usize = C::SLICE_COUNT;
     #[inline(always)] fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self { Self(C::from_bytes(bytes)) }
+    #[inline(always)] fn from_byte_slices(bytes: &[&'a [u8]]) -> Self { Self(C::from_byte_slices(bytes)) }
 }
 impl<C: Index> Index for Boxed<C> {
     type Ref = Boxed<C::Ref>;

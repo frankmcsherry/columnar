@@ -317,9 +317,19 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
 
         quote! {
             impl #impl_gen ::columnar::FromBytes<'columnar> for #c_ident #ty_gen #where_clause {
+                const SLICE_COUNT: usize = 0 #(+ <#container_types>::SLICE_COUNT)*;
                 #[inline(always)]
                 fn from_bytes(bytes: &mut impl Iterator<Item=&'columnar [u8]>) -> Self {
                     Self { #(#names: ::columnar::FromBytes::from_bytes(bytes),)* }
+                }
+                #[inline(always)]
+                fn from_byte_slices(bytes: &[&'columnar [u8]]) -> Self {
+                    let mut _offset = 0;
+                    #(
+                        let #names = <#container_types>::from_byte_slices(&bytes[_offset .. _offset + <#container_types>::SLICE_COUNT]);
+                        _offset += <#container_types>::SLICE_COUNT;
+                    )*
+                    Self { #(#names,)* }
                 }
             }
         }
@@ -500,9 +510,14 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
         }
 
         impl<'columnar> ::columnar::FromBytes<'columnar> for #c_ident <&'columnar u64> {
+            const SLICE_COUNT: usize = 1;
             #[inline(always)]
             fn from_bytes(bytes: &mut impl Iterator<Item=&'columnar [u8]>) -> Self {
                 Self { count: &::columnar::bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0] }
+            }
+            #[inline(always)]
+            fn from_byte_slices(bytes: &[&'columnar [u8]]) -> Self {
+                Self { count: &::columnar::bytemuck::try_cast_slice(bytes[0]).unwrap()[0] }
             }
         }
 
@@ -884,6 +899,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         quote! {
             #[allow(non_snake_case)]
             impl #impl_gen ::columnar::FromBytes<'columnar> for #c_ident #ty_gen #where_clause {
+                const SLICE_COUNT: usize = 0 #(+ <#container_types>::SLICE_COUNT)* + CVar::SLICE_COUNT + COff::SLICE_COUNT;
                 #[inline(always)]
                 fn from_bytes(bytes: &mut impl Iterator<Item=&'columnar [u8]>) -> Self {
                     Self {
@@ -891,6 +907,18 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                         variant: ::columnar::FromBytes::from_bytes(bytes),
                         offset: ::columnar::FromBytes::from_bytes(bytes),
                     }
+                }
+                #[inline(always)]
+                fn from_byte_slices(bytes: &[&'columnar [u8]]) -> Self {
+                    let mut _offset = 0;
+                    #(
+                        let #names = <#container_types>::from_byte_slices(&bytes[_offset .. _offset + <#container_types>::SLICE_COUNT]);
+                        _offset += <#container_types>::SLICE_COUNT;
+                    )*
+                    let variant = CVar::from_byte_slices(&bytes[_offset .. _offset + CVar::SLICE_COUNT]);
+                    _offset += CVar::SLICE_COUNT;
+                    let offset = COff::from_byte_slices(&bytes[_offset ..]);
+                    Self { #(#names,)* variant, offset }
                 }
             }
         }
@@ -1153,9 +1181,14 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
         }
 
         impl<'columnar, CVar: ::columnar::FromBytes<'columnar>> ::columnar::FromBytes<'columnar> for #c_ident <CVar> {
+            const SLICE_COUNT: usize = CVar::SLICE_COUNT;
             #[inline(always)]
             fn from_bytes(bytes: &mut impl Iterator<Item=&'columnar [u8]>) -> Self {
                 Self { variant: ::columnar::FromBytes::from_bytes(bytes) }
+            }
+            #[inline(always)]
+            fn from_byte_slices(bytes: &[&'columnar [u8]]) -> Self {
+                Self { variant: CVar::from_byte_slices(bytes) }
             }
         }
 

@@ -54,11 +54,19 @@ pub mod rank_select {
         }
     }
     impl<'a, CC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for RankSelect<CC, VC, &'a u64> {
+        const SLICE_COUNT: usize = CC::SLICE_COUNT + <crate::primitive::Bools<VC, &'a u64>>::SLICE_COUNT;
         #[inline(always)]
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
             Self {
                 counts: crate::FromBytes::from_bytes(bytes),
                 values: crate::FromBytes::from_bytes(bytes),
+            }
+        }
+        #[inline(always)]
+        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
+            Self {
+                counts: CC::from_byte_slices(&bytes[..CC::SLICE_COUNT]),
+                values: <crate::primitive::Bools<VC, &'a u64>>::from_byte_slices(&bytes[CC::SLICE_COUNT..]),
             }
         }
     }
@@ -255,12 +263,22 @@ pub mod result {
         }
     }
     impl<'a, SC: crate::FromBytes<'a>, TC: crate::FromBytes<'a>, CC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for Results<SC, TC, CC, VC, &'a u64> {
+        const SLICE_COUNT: usize = <RankSelect<CC, VC, &'a u64>>::SLICE_COUNT + SC::SLICE_COUNT + TC::SLICE_COUNT;
         #[inline(always)]
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
             Self {
                 indexes: crate::FromBytes::from_bytes(bytes),
                 oks: crate::FromBytes::from_bytes(bytes),
                 errs: crate::FromBytes::from_bytes(bytes),
+            }
+        }
+        #[inline(always)]
+        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
+            let ix_count = <RankSelect<CC, VC, &'a u64>>::SLICE_COUNT;
+            Self {
+                indexes: crate::FromBytes::from_byte_slices(&bytes[..ix_count]),
+                oks: SC::from_byte_slices(&bytes[ix_count .. ix_count + SC::SLICE_COUNT]),
+                errs: TC::from_byte_slices(&bytes[ix_count + SC::SLICE_COUNT ..]),
             }
         }
     }
@@ -501,11 +519,20 @@ pub mod option {
     }
 
     impl <'a, TC: crate::FromBytes<'a>, CC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for Options<TC, CC, VC, &'a u64> {
+        const SLICE_COUNT: usize = <RankSelect<CC, VC, &'a u64>>::SLICE_COUNT + TC::SLICE_COUNT;
         #[inline(always)]
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
             Self {
                 indexes: crate::FromBytes::from_bytes(bytes),
                 somes: crate::FromBytes::from_bytes(bytes),
+            }
+        }
+        #[inline(always)]
+        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
+            let ix_count = <RankSelect<CC, VC, &'a u64>>::SLICE_COUNT;
+            Self {
+                indexes: crate::FromBytes::from_byte_slices(&bytes[..ix_count]),
+                somes: TC::from_byte_slices(&bytes[ix_count..]),
             }
         }
     }

@@ -66,10 +66,21 @@ macro_rules! tuple_impl {
             }
         }
         impl<'a, $($name: crate::FromBytes<'a>),*> crate::FromBytes<'a> for ($($name,)*) {
+            const SLICE_COUNT: usize = 0 $(+ $name::SLICE_COUNT)*;
             #[inline(always)]
             #[allow(non_snake_case)]
             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
                 $(let $name = crate::FromBytes::from_bytes(bytes);)*
+                ($($name,)*)
+            }
+            #[inline(always)]
+            #[allow(non_snake_case)]
+            fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
+                let mut _offset = 0;
+                $(
+                    let $name = $name::from_byte_slices(&bytes[_offset .. _offset + $name::SLICE_COUNT]);
+                    _offset += $name::SLICE_COUNT;
+                )*
                 ($($name,)*)
             }
         }
