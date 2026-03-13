@@ -841,12 +841,21 @@ pub mod discriminant {
 
     // FromBytes for borrowed form
     impl<'a> crate::FromBytes<'a> for Discriminant<&'a [u8], &'a [u64], &'a u64> {
+        const SLICE_COUNT: usize = 2 + <&'a [u8]>::SLICE_COUNT + <&'a [u64]>::SLICE_COUNT;
         #[inline(always)]
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
             let tag = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
             let count = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
             let variant = crate::FromBytes::from_bytes(bytes);
             let offset = crate::FromBytes::from_bytes(bytes);
+            Self { tag, count, variant, offset }
+        }
+        #[inline(always)]
+        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
+            let tag = &bytemuck::try_cast_slice(bytes[0]).unwrap()[0];
+            let count = &bytemuck::try_cast_slice(bytes[1]).unwrap()[0];
+            let variant = <&'a [u8]>::from_byte_slices(&bytes[2..2 + <&'a [u8]>::SLICE_COUNT]);
+            let offset = <&'a [u64]>::from_byte_slices(&bytes[2 + <&'a [u8]>::SLICE_COUNT..]);
             Self { tag, count, variant, offset }
         }
     }

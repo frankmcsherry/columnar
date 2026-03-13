@@ -892,7 +892,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         quote! {
             #[allow(non_snake_case)]
             impl #impl_gen ::columnar::FromBytes<'columnar> for #c_ident #ty_gen #where_clause {
-                const SLICE_COUNT: usize = 0 #(+ <#container_types>::SLICE_COUNT)* + CVar::SLICE_COUNT + COff::SLICE_COUNT;
+                const SLICE_COUNT: usize = 0 #(+ <#container_types>::SLICE_COUNT)* + <::columnar::Discriminant<CVar, COff, CC>>::SLICE_COUNT;
                 #[inline(always)]
                 fn from_bytes(bytes: &mut impl Iterator<Item=&'columnar [u8]>) -> Self {
                     Self {
@@ -907,10 +907,8 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                         let #names = <#container_types>::from_byte_slices(&bytes[_offset .. _offset + <#container_types>::SLICE_COUNT]);
                         _offset += <#container_types>::SLICE_COUNT;
                     )*
-                    let variant = CVar::from_byte_slices(&bytes[_offset .. _offset + CVar::SLICE_COUNT]);
-                    _offset += CVar::SLICE_COUNT;
-                    let offset = COff::from_byte_slices(&bytes[_offset ..]);
-                    Self { #(#names,)* variant, offset }
+                    let indexes = <::columnar::Discriminant<CVar, COff, CC>>::from_byte_slices(&bytes[_offset ..]);
+                    Self { #(#names,)* indexes }
                 }
             }
         }
