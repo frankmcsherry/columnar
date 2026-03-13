@@ -396,6 +396,14 @@ pub mod result {
             assert!(self.oks.is_empty());
             self.errs
         }
+        /// Returns ok values if no errors exist, or `None`.
+        pub fn try_unwrap(self) -> Option<SC> where TC: Len {
+            if self.errs.is_empty() { Some(self.oks) } else { None }
+        }
+        /// Returns error values if no oks exist, or `None`.
+        pub fn try_unwrap_err(self) -> Option<TC> where SC: Len {
+            if self.oks.is_empty() { Some(self.errs) } else { None }
+        }
     }
     #[cfg(test)]
     mod test {
@@ -606,6 +614,17 @@ pub mod option {
         }
     }
 
+    impl<TC, CC, VC, WC> Options<TC, CC, VC, WC> {
+        /// Returns the inner container if all elements are `Some`, or `None`.
+        pub fn try_unwrap(self) -> Option<TC> where TC: Len, VC: Len, WC: CopyAs<u64> {
+            if self.somes.len() == self.indexes.len() { Some(self.somes) } else { None }
+        }
+        /// True if all elements are `None`.
+        pub fn is_all_none(&self) -> bool where TC: Len {
+            self.somes.is_empty()
+        }
+    }
+
     impl<TC: Clear> Clear for Options<TC> {
         fn clear(&mut self) {
             self.indexes.clear();
@@ -653,6 +672,251 @@ pub mod option {
             assert_eq!(store.len(), 100);
             assert!((&store).index_iter().zip(0..100).all(|(a, b)| a == if b % 2 == 0 { Some(&b) } else { None }));
             assert_eq!(store.heap_size(), (208, 288));
+        }
+    }
+}
+
+pub mod discriminant {
+
+    use crate::common::index::CopyAs;
+    use crate::{Clear, Container, Len, Index, IndexAs, HeapSize, Borrow};
+
+    /// Tracks variant discriminants and offsets for enum containers.
+    ///
+    /// When all elements share a single variant (homogeneous), avoids allocating
+    /// per-element discriminant and offset arrays. The `tag` field distinguishes:
+    /// - `0`: heterogeneous (or empty), discriminants and offsets in `variant`/`offset`
+    /// - `N > 0`: all elements are variant `N - 1`, with `count` elements total
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct Discriminant<CVar = Vec<u8>, COff = Vec<u64>, CC = u64> {
+        /// `0` for heterogeneous; `variant + 1` for homogeneous.
+        pub tag: CC,
+        /// Element count (homogeneous) or zero (heterogeneous).
+        pub count: CC,
+        /// Per-element variant discriminants; empty when homogeneous.
+        pub variant: CVar,
+        /// Per-element offsets into variant containers; empty when homogeneous.
+        pub offset: COff,
+    }
+
+    impl<CVar: Copy, COff: Copy, CC: Copy> Copy for Discriminant<CVar, COff, CC> {}
+
+    impl Discriminant {
+        /// Push a variant discriminant and the offset into its variant container.
+        #[inline]
+        pub fn push(&mut self, variant: u8, offset: u64) {
+            let expected = variant as u64 + 1;
+            if self.tag == expected {
+                // Same variant as before; stay homogeneous.
+                self.count += 1;
+            } else if self.tag == 0 && self.variant.is_empty() {
+                // Empty container; start homogeneous.
+                self.tag = expected;
+                self.count = 1;
+            } else if self.tag != 0 {
+                // Different variant; transition to heterogeneous.
+                let prev = (self.tag - 1) as u8;
+                self.variant.reserve(self.count as usize + 1);
+                self.offset.reserve(self.count as usize + 1);
+                for i in 0..self.count {
+                    self.variant.push(prev);
+                    self.offset.push(i);
+                }
+                self.variant.push(variant);
+                self.offset.push(offset);
+                self.tag = 0;
+                self.count = 0;
+            } else {
+                // Already heterogeneous.
+                self.variant.push(variant);
+                self.offset.push(offset);
+            }
+        }
+
+        /// Pre-allocate for the given borrowed discriminants.
+        pub fn reserve_for<'a>(&mut self, selves: impl Iterator<Item = Discriminant<&'a [u8], &'a [u64], &'a u64>> + Clone) {
+            self.variant.reserve_for(selves.clone().map(|x| x.variant));
+            self.offset.reserve_for(selves.map(|x| x.offset));
+        }
+    }
+
+    impl<CVar, COff, CC: CopyAs<u64>> Discriminant<CVar, COff, CC> {
+        /// Returns `Some(variant)` if all elements share a single variant.
+        #[inline]
+        pub fn homogeneous(&self) -> Option<u8> {
+            let tag: u64 = self.tag.copy_as();
+            if tag != 0 { Some((tag - 1) as u8) } else { None }
+        }
+        /// Returns `(variant, offset)` for the element at `index`.
+        #[inline(always)]
+        pub fn get(&self, index: usize) -> (u8, u64) where CVar: IndexAs<u8>, COff: IndexAs<u64> {
+            let tag: u64 = self.tag.copy_as();
+            if tag != 0 {
+                ((tag - 1) as u8, index as u64)
+            } else {
+                (self.variant.index_as(index), self.offset.index_as(index))
+            }
+        }
+    }
+
+    // Len: element count from either `count` (homogeneous) or `variant.len()` (heterogeneous).
+    impl<CVar: Len, COff, CC: CopyAs<u64>> Len for Discriminant<CVar, COff, CC> {
+        #[inline(always)]
+        fn len(&self) -> usize {
+            let tag: u64 = self.tag.copy_as();
+            if tag != 0 { self.count.copy_as() as usize } else { self.variant.len() }
+        }
+    }
+
+    // Index for the borrowed form: returns (variant, offset).
+    impl<'a> Index for Discriminant<&'a [u8], &'a [u64], &'a u64> {
+        type Ref = (u8, u64);
+        #[inline(always)]
+        fn get(&self, index: usize) -> (u8, u64) {
+            let tag = *self.tag;
+            if tag != 0 {
+                ((tag - 1) as u8, index as u64)
+            } else {
+                (self.variant.index_as(index), self.offset.index_as(index))
+            }
+        }
+    }
+
+    // Borrow
+    impl Borrow for Discriminant {
+        type Ref<'a> = (u8, u64);
+        type Borrowed<'a> = Discriminant<&'a [u8], &'a [u64], &'a u64>;
+        #[inline(always)]
+        fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
+            Discriminant {
+                tag: &self.tag,
+                count: &self.count,
+                variant: &self.variant[..],
+                offset: &self.offset[..],
+            }
+        }
+        #[inline(always)]
+        fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> {
+            Discriminant {
+                tag: thing.tag,
+                count: thing.count,
+                variant: thing.variant,
+                offset: thing.offset,
+            }
+        }
+        #[inline(always)]
+        fn reborrow_ref<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> { thing }
+    }
+
+    impl<CVar: Clear, COff: Clear> Clear for Discriminant<CVar, COff> {
+        #[inline(always)]
+        fn clear(&mut self) {
+            self.tag = 0;
+            self.count = 0;
+            self.variant.clear();
+            self.offset.clear();
+        }
+    }
+
+    impl<CVar: HeapSize, COff: HeapSize> HeapSize for Discriminant<CVar, COff> {
+        fn heap_size(&self) -> (usize, usize) {
+            let (l0, c0) = self.variant.heap_size();
+            let (l1, c1) = self.offset.heap_size();
+            (l0 + l1, c0 + c1)
+        }
+    }
+
+    // AsBytes for borrowed form
+    impl<'a> crate::AsBytes<'a> for Discriminant<&'a [u8], &'a [u64], &'a u64> {
+        #[inline(always)]
+        fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
+            let tag = std::iter::once((8u64, bytemuck::cast_slice(std::slice::from_ref(self.tag))));
+            let count = std::iter::once((8u64, bytemuck::cast_slice(std::slice::from_ref(self.count))));
+            let variant = self.variant.as_bytes();
+            let offset = self.offset.as_bytes();
+            crate::chain(crate::chain(tag, count), crate::chain(variant, offset))
+        }
+    }
+
+    // FromBytes for borrowed form
+    impl<'a> crate::FromBytes<'a> for Discriminant<&'a [u8], &'a [u64], &'a u64> {
+        #[inline(always)]
+        fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+            let tag = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
+            let count = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
+            let variant = crate::FromBytes::from_bytes(bytes);
+            let offset = crate::FromBytes::from_bytes(bytes);
+            Self { tag, count, variant, offset }
+        }
+    }
+
+    #[cfg(test)]
+    mod test {
+        use crate::Len;
+
+        #[test]
+        fn homogeneous_push() {
+            let mut d = super::Discriminant::default();
+            d.push(2, 0);
+            d.push(2, 1);
+            d.push(2, 2);
+            assert_eq!(d.len(), 3);
+            assert_eq!(d.homogeneous(), Some(2));
+            assert!(d.variant.is_empty());
+            assert!(d.offset.is_empty());
+        }
+
+        #[test]
+        fn heterogeneous_transition() {
+            let mut d = super::Discriminant::default();
+            d.push(0, 0);
+            d.push(0, 1);
+            d.push(1, 0); // transition
+            assert_eq!(d.len(), 3);
+            assert_eq!(d.homogeneous(), None);
+            assert_eq!(d.variant, vec![0, 0, 1]);
+            assert_eq!(d.offset, vec![0, 1, 0]);
+        }
+
+        #[test]
+        fn clear_resets() {
+            use crate::Clear;
+            let mut d = super::Discriminant::default();
+            d.push(1, 0);
+            d.push(1, 1);
+            d.clear();
+            assert_eq!(d.len(), 0);
+            // After clear, first push starts homogeneous again.
+            d.push(3, 0);
+            assert_eq!(d.homogeneous(), Some(3));
+            assert_eq!(d.len(), 1);
+        }
+
+        #[test]
+        fn borrow_index() {
+            use crate::Borrow;
+            let mut d = super::Discriminant::default();
+            d.push(2, 0);
+            d.push(2, 1);
+            d.push(2, 2);
+            let b = d.borrow();
+            assert_eq!(b.get(0), (2, 0));
+            assert_eq!(b.get(1), (2, 1));
+            assert_eq!(b.get(2), (2, 2));
+        }
+
+        #[test]
+        fn borrow_index_heterogeneous() {
+            use crate::Borrow;
+            let mut d = super::Discriminant::default();
+            d.push(0, 0);
+            d.push(1, 0);
+            d.push(0, 1);
+            let b = d.borrow();
+            assert_eq!(b.get(0), (0, 0));
+            assert_eq!(b.get(1), (1, 0));
+            assert_eq!(b.get(2), (0, 1));
         }
     }
 }
