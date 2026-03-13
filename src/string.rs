@@ -94,11 +94,19 @@ impl<'a, BC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for 
     }
 }
 impl<'a, BC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for Strings<BC, VC> {
+    const SLICE_COUNT: usize = BC::SLICE_COUNT + VC::SLICE_COUNT;
     #[inline(always)]
     fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
         Self {
             bounds: crate::FromBytes::from_bytes(bytes),
             values: crate::FromBytes::from_bytes(bytes),
+        }
+    }
+    #[inline(always)]
+    fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
+        Self {
+            bounds: BC::from_byte_slices(&bytes[..BC::SLICE_COUNT]),
+            values: VC::from_byte_slices(&bytes[BC::SLICE_COUNT..]),
         }
     }
 }

@@ -21,10 +21,15 @@ macro_rules! implement_columnable {
             }
         }
         impl<'a> crate::FromBytes<'a> for &'a [$index_type] {
+            const SLICE_COUNT: usize = 1;
             #[inline(always)]
             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
                 // We use `unwrap()` here in order to panic with the `bytemuck` error, which may be informative.
                 bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()
+            }
+            #[inline(always)]
+            fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
+                bytemuck::try_cast_slice(bytes[0]).unwrap()
             }
         }
         impl<'a, const N: usize> crate::AsBytes<'a> for &'a [[$index_type; N]] {
@@ -34,10 +39,15 @@ macro_rules! implement_columnable {
             }
         }
         impl<'a, const N: usize> crate::FromBytes<'a> for &'a [[$index_type; N]] {
+            const SLICE_COUNT: usize = 1;
             #[inline(always)]
             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
                 // We use `unwrap()` here in order to panic with the `bytemuck` error, which may be informative.
                 bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()
+            }
+            #[inline(always)]
+            fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
+                bytemuck::try_cast_slice(bytes[0]).unwrap()
             }
         }
     )* }
@@ -126,9 +136,14 @@ mod sizes {
     }
 
     impl<'a, CV: crate::FromBytes<'a>> crate::FromBytes<'a> for crate::primitive::Usizes<CV> {
+        const SLICE_COUNT: usize = CV::SLICE_COUNT;
         #[inline(always)]
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
             Self { values: CV::from_bytes(bytes) }
+        }
+        #[inline(always)]
+        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
+            Self { values: CV::from_byte_slices(bytes) }
         }
     }
 
@@ -203,9 +218,14 @@ mod sizes {
     }
 
     impl<'a, CV: crate::FromBytes<'a>> crate::FromBytes<'a> for crate::primitive::Isizes<CV> {
+        const SLICE_COUNT: usize = CV::SLICE_COUNT;
         #[inline(always)]
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
             Self { values: CV::from_bytes(bytes) }
+        }
+        #[inline(always)]
+        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
+            Self { values: CV::from_byte_slices(bytes) }
         }
     }
 }
@@ -285,9 +305,14 @@ mod chars {
     }
 
     impl<'a, CV: crate::FromBytes<'a>> crate::FromBytes<'a> for Chars<CV> {
+        const SLICE_COUNT: usize = CV::SLICE_COUNT;
         #[inline(always)]
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
             Self { values: CV::from_bytes(bytes) }
+        }
+        #[inline(always)]
+        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
+            Self { values: CV::from_byte_slices(bytes) }
         }
     }
 }
@@ -367,9 +392,14 @@ mod larges {
     }
 
     impl<'a, CV: crate::FromBytes<'a>> crate::FromBytes<'a> for U128s<CV> {
+        const SLICE_COUNT: usize = CV::SLICE_COUNT;
         #[inline(always)]
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
             Self { values: CV::from_bytes(bytes) }
+        }
+        #[inline(always)]
+        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
+            Self { values: CV::from_byte_slices(bytes) }
         }
     }
 
@@ -439,9 +469,14 @@ mod larges {
     }
 
     impl<'a, CV: crate::FromBytes<'a>> crate::FromBytes<'a> for I128s<CV> {
+        const SLICE_COUNT: usize = CV::SLICE_COUNT;
         #[inline(always)]
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
             Self { values: CV::from_bytes(bytes) }
+        }
+        #[inline(always)]
+        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
+            Self { values: CV::from_byte_slices(bytes) }
         }
     }
 }
@@ -534,9 +569,14 @@ pub mod offsets {
             }
         }
         impl<'a, const K: u64> crate::FromBytes<'a> for Fixeds<K, &'a u64> {
+            const SLICE_COUNT: usize = 1;
             #[inline(always)]
             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
                 Self { count: &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0] }
+            }
+            #[inline(always)]
+            fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
+                Self { count: &bytemuck::try_cast_slice(bytes[0]).unwrap()[0] }
             }
         }
 
@@ -622,11 +662,19 @@ pub mod offsets {
             }
         }
         impl<'a, BC: FromBytes<'a>> FromBytes<'a> for Strides<BC, &'a u64> {
+            const SLICE_COUNT: usize = 2 + BC::SLICE_COUNT;
             #[inline(always)]
             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
                 let stride = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
                 let length = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
                 let bounds = BC::from_bytes(bytes);
+                Self { stride, length, bounds }
+            }
+            #[inline(always)]
+            fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
+                let stride = &bytemuck::try_cast_slice(bytes[0]).unwrap()[0];
+                let length = &bytemuck::try_cast_slice(bytes[1]).unwrap()[0];
+                let bounds = BC::from_byte_slices(&bytes[2..]);
                 Self { stride, length, bounds }
             }
         }
@@ -809,9 +857,14 @@ mod empty {
         }
     }
     impl<'a> crate::FromBytes<'a> for crate::primitive::Empties<&'a u64> {
+        const SLICE_COUNT: usize = 1;
         #[inline(always)]
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
             Self { count: &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0], empty: () }
+        }
+        #[inline(always)]
+        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
+            Self { count: &bytemuck::try_cast_slice(bytes[0]).unwrap()[0], empty: () }
         }
     }
 }
@@ -882,11 +935,19 @@ mod boolean {
     }
 
     impl<'a, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for crate::primitive::Bools<VC, &'a u64> {
+        const SLICE_COUNT: usize = VC::SLICE_COUNT + 2;
         #[inline(always)]
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
             let values = crate::FromBytes::from_bytes(bytes);
             let last_word = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
             let last_bits = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
+            Self { values, last_word, last_bits }
+        }
+        #[inline(always)]
+        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
+            let values = VC::from_byte_slices(&bytes[..VC::SLICE_COUNT]);
+            let last_word = &bytemuck::try_cast_slice(bytes[VC::SLICE_COUNT]).unwrap()[0];
+            let last_bits = &bytemuck::try_cast_slice(bytes[VC::SLICE_COUNT + 1]).unwrap()[0];
             Self { values, last_word, last_bits }
         }
     }
@@ -1016,11 +1077,19 @@ mod duration {
         }
     }
     impl<'a, SC: crate::FromBytes<'a>, NC: crate::FromBytes<'a>> crate::FromBytes<'a> for crate::primitive::Durations<SC, NC> {
+        const SLICE_COUNT: usize = SC::SLICE_COUNT + NC::SLICE_COUNT;
         #[inline(always)]
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
             Self {
                 seconds: crate::FromBytes::from_bytes(bytes),
                 nanoseconds: crate::FromBytes::from_bytes(bytes),
+            }
+        }
+        #[inline(always)]
+        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
+            Self {
+                seconds: SC::from_byte_slices(&bytes[..SC::SLICE_COUNT]),
+                nanoseconds: NC::from_byte_slices(&bytes[SC::SLICE_COUNT..]),
             }
         }
     }

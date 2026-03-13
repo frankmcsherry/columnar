@@ -619,6 +619,11 @@ pub mod common {
     /// Implementors of this trait almost certainly reference the lifetime `'a` themselves,
     /// unless they actively deserialize the bytes (vs sit on the slices, as if zero-copy).
     pub trait FromBytes<'a> {
+        /// The number of byte slices this type consumes when reconstructed.
+        ///
+        /// This enables `from_byte_slices`, which can index directly into a slice
+        /// of byte slices rather than consuming from an iterator sequentially.
+        const SLICE_COUNT: usize;
         /// Reconstructs `self` from a sequence of correctly aligned and sized bytes slices.
         ///
         /// The implementation is expected to consume the right number of items from the iterator,
@@ -631,6 +636,14 @@ pub mod common {
         /// they are inlined. A single non-inlined function on a tree of `from_bytes` calls
         /// can cause the performance to drop significantly.
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self;
+        /// Reconstructs `self` from a slice of byte slices, using direct indexing.
+        ///
+        /// The slice should contain exactly `Self::SLICE_COUNT` elements.
+        /// This avoids the iterator chain overhead of `from_bytes`.
+        #[inline(always)]
+        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self where Self: Sized {
+            Self::from_bytes(&mut bytes.iter().copied())
+        }
     }
 
 }

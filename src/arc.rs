@@ -23,7 +23,9 @@ impl<'a, T: AsBytes<'a>> AsBytes<'a> for Arc<T> {
     #[inline(always)] fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> { self.as_ref().as_bytes() }
 }
 impl<'a, T: FromBytes<'a>> FromBytes<'a> for Arc<T> {
+    const SLICE_COUNT: usize = T::SLICE_COUNT;
     #[inline(always)] fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self { Arc::new(T::from_bytes(bytes)) }
+    #[inline(always)] fn from_byte_slices(bytes: &[&'a [u8]]) -> Self { Arc::new(T::from_byte_slices(bytes)) }
 }
 
 #[cfg(test)]
