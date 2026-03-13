@@ -710,11 +710,11 @@ pub mod discriminant {
             if self.tag == expected {
                 // Same variant as before; stay homogeneous.
                 self.count += 1;
-            } else if self.tag == 0 && self.variant.is_empty() {
+            } else if self.is_heterogeneous() && self.variant.is_empty() {
                 // Empty container; start homogeneous.
                 self.tag = expected;
                 self.count = 1;
-            } else if self.tag != 0 {
+            } else if !self.is_heterogeneous() {
                 // Different variant; transition to heterogeneous.
                 let prev = (self.tag - 1) as u8;
                 self.variant.reserve(self.count as usize + 1);
@@ -742,6 +742,11 @@ pub mod discriminant {
     }
 
     impl<CVar, COff, CC: CopyAs<u64>> Discriminant<CVar, COff, CC> {
+        /// True if elements have mixed variants, with per-element discriminants and offsets.
+        #[inline]
+        pub fn is_heterogeneous(&self) -> bool {
+            self.tag.copy_as() == 0
+        }
         /// Returns `Some(variant)` if all elements share a single variant.
         #[inline]
         pub fn homogeneous(&self) -> Option<u8> {
@@ -751,21 +756,19 @@ pub mod discriminant {
         /// Returns `(variant, offset)` for the element at `index`.
         #[inline(always)]
         pub fn get(&self, index: usize) -> (u8, u64) where CVar: IndexAs<u8>, COff: IndexAs<u64> {
-            let tag: u64 = self.tag.copy_as();
-            if tag != 0 {
-                ((tag - 1) as u8, index as u64)
-            } else {
+            if self.is_heterogeneous() {
                 (self.variant.index_as(index), self.offset.index_as(index))
+            } else {
+                let tag: u64 = self.tag.copy_as();
+                ((tag - 1) as u8, index as u64)
             }
         }
     }
 
-    // Len: element count from either `count` (homogeneous) or `variant.len()` (heterogeneous).
     impl<CVar: Len, COff, CC: CopyAs<u64>> Len for Discriminant<CVar, COff, CC> {
         #[inline(always)]
         fn len(&self) -> usize {
-            let tag: u64 = self.tag.copy_as();
-            if tag != 0 { self.count.copy_as() as usize } else { self.variant.len() }
+            if self.is_heterogeneous() { self.variant.len() } else { self.count.copy_as() as usize }
         }
     }
 
@@ -774,11 +777,10 @@ pub mod discriminant {
         type Ref = (u8, u64);
         #[inline(always)]
         fn get(&self, index: usize) -> (u8, u64) {
-            let tag = *self.tag;
-            if tag != 0 {
-                ((tag - 1) as u8, index as u64)
-            } else {
+            if self.is_heterogeneous() {
                 (self.variant.index_as(index), self.offset.index_as(index))
+            } else {
+                ((*self.tag - 1) as u8, index as u64)
             }
         }
     }
