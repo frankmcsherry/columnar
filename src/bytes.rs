@@ -243,20 +243,26 @@ pub mod serialization_neu {
     }
 
     /// Decodes an encoded sequence of byte slices. Each result will be `u64` aligned.
+    #[inline(always)]
     pub fn decode(store: &[u64]) -> impl Iterator<Item=&[u8]> {
-        assert!(store[0] % 8 == 0);
-        let slices = (store[0] / 8) - 1;
-        (0 .. slices).map(|i| decode_index(store, i))
+        let slices = store[0] as usize / 8 - 1;
+        let index = &store[..slices + 1];
+        let last = index[slices] as usize;
+        let bytes: &[u8] = &bytemuck::cast_slice(store)[..last];
+        (0 .. slices).map(move |i| {
+            let upper = (index[i + 1] as usize).min(last);
+            let lower = (((index[i] as usize) + 7) & !7).min(upper);
+            &bytes[lower .. upper]
+        })
     }
 
     /// Decodes a specific byte slice by index. It will be `u64` aligned.
     #[inline(always)]
     pub fn decode_index(store: &[u64], index: u64) -> &[u8] {
-        debug_assert!(index + 1 < store[0]/8);
-        let index: usize = index.try_into().unwrap();
-        let lower: usize = ((store[index] + 7) & !7).try_into().unwrap();
-        let upper: usize = (store[index + 1]).try_into().unwrap();
-        let bytes: &[u8] = bytemuck::try_cast_slice(store).expect("&[u64] should convert to &[u8]");
+        let index = index as usize;
+        let bytes: &[u8] = bytemuck::cast_slice(store);
+        let upper = (store[index + 1] as usize).min(bytes.len());
+        let lower = (((store[index] as usize) + 7) & !7).min(upper);
         &bytes[lower .. upper]
     }
 
