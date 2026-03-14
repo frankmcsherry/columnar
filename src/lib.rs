@@ -665,11 +665,11 @@ pub mod common {
         ///
         /// Implementors should override this to report their actual element sizes.
         /// For example, `&[u32]` pushes `4`, while a tuple delegates to each field.
-        /// The default implementation pushes `1` for each slice (accepting any byte length).
-        fn element_sizes(sizes: &mut Vec<usize>) {
-            for _ in 0..Self::SLICE_COUNT {
-                sizes.push(1);
-            }
+        /// The default returns `Err`, so that [`validate`](Self::validate) rejects
+        /// data for types that have not implemented this method.
+        fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+            let _ = sizes;
+            Err(format!("element_sizes not implemented for this type (SLICE_COUNT = {})", Self::SLICE_COUNT))
         }
         /// Validates that the given slices are compatible with this type.
         ///
@@ -683,7 +683,7 @@ pub mod common {
                 return Err(format!("expected {} slices but got {}", Self::SLICE_COUNT, slices.len()));
             }
             let mut sizes = Vec::new();
-            Self::element_sizes(&mut sizes);
+            Self::element_sizes(&mut sizes)?;
             for (i, elem_size) in sizes.iter().enumerate() {
                 let (words, tail) = &slices[i];
                 let byte_len = words.len() * 8 - ((8 - *tail as usize) % 8);

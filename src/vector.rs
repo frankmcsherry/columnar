@@ -140,9 +140,10 @@ impl<'a, TC: crate::FromBytes<'a>, BC: crate::FromBytes<'a>> crate::FromBytes<'a
             values: TC::from_store(store, offset),
         }
     }
-    fn element_sizes(sizes: &mut Vec<usize>) {
-        BC::element_sizes(sizes);
-        TC::element_sizes(sizes);
+    fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+        BC::element_sizes(sizes)?;
+        TC::element_sizes(sizes)?;
+        Ok(())
     }
 }
 

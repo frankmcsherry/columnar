@@ -109,9 +109,10 @@ impl<'a, BC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a
             values: VC::from_store(store, offset),
         }
     }
-    fn element_sizes(sizes: &mut Vec<usize>) {
-        BC::element_sizes(sizes);
-        VC::element_sizes(sizes);
+    fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+        BC::element_sizes(sizes)?;
+        VC::element_sizes(sizes)?;
+        Ok(())
     }
 }
 

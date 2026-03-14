@@ -35,8 +35,9 @@ macro_rules! implement_columnable {
                 let trim = ((8 - tail as usize) % 8) / std::mem::size_of::<$index_type>();
                 all.get(..all.len().wrapping_sub(trim)).unwrap_or(&[])
             }
-            fn element_sizes(sizes: &mut Vec<usize>) {
+            fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
                 sizes.push(std::mem::size_of::<$index_type>());
+                Ok(())
             }
         }
         impl<'a, const N: usize> crate::AsBytes<'a> for &'a [[$index_type; N]] {
@@ -60,8 +61,9 @@ macro_rules! implement_columnable {
                 let trim = ((8 - tail as usize) % 8) / (std::mem::size_of::<$index_type>() * N);
                 all.get(..all.len().wrapping_sub(trim)).unwrap_or(&[])
             }
-            fn element_sizes(sizes: &mut Vec<usize>) {
+            fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
                 sizes.push(std::mem::size_of::<$index_type>() * N);
+                Ok(())
             }
         }
     )* }
