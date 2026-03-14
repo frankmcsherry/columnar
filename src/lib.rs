@@ -659,11 +659,11 @@ pub mod common {
                 &bytes[..len]
             }))
         }
-        /// Implementation detail of [`Self::validate`]: reports element sizes (in bytes) for each slice.
+        /// Reports the element sizes (in bytes) for each slice this type consumes.
         ///
-        /// Override this for types with element sizes other than 1.
-        /// Prefer calling [`Self::validate`] rather than using this directly.
-        #[doc(hidden)]
+        /// Implementors should override this to report their actual element sizes.
+        /// For example, `&[u32]` pushes `4`, while a tuple delegates to each field.
+        /// The default implementation pushes `1` for each slice (accepting any byte length).
         fn element_sizes(sizes: &mut Vec<usize>) {
             for _ in 0..Self::SLICE_COUNT {
                 sizes.push(1);
@@ -675,6 +675,8 @@ pub mod common {
         /// compatibility (each slice's byte length is a multiple of its element size).
         /// Call this once at the boundary when receiving data from an untrusted source,
         /// before using the non-panicking `from_u64s` path.
+        ///
+        /// Built from [`Self::element_sizes`]; generally should not need to be overridden.
         fn validate(store: &[u64]) -> Result<(), String> where Self: Sized {
             let mut sizes = Vec::new();
             Self::element_sizes(&mut sizes);
