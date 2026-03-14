@@ -6,7 +6,7 @@
 
 use columnar::*;
 use columnar::common::{Push, Index};
-use columnar::bytes::Indexed;
+use columnar::bytes::indexed as Indexed;
 
 use std::hint::black_box;
 use std::time::Instant;

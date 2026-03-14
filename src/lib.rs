@@ -661,7 +661,7 @@ pub mod common {
         }
         /// Reports the element sizes (in bytes) for each slice this type consumes.
         ///
-        /// Used by `validate_typed` to check that each slice's byte length is a multiple
+        /// Used by [`Self::validate`] to check that each slice's byte length is a multiple
         /// of the corresponding element size. For example, a `&[u32]` slice must have a
         /// byte length that is a multiple of 4.
         ///
@@ -671,6 +671,31 @@ pub mod common {
             for _ in 0..Self::SLICE_COUNT {
                 sizes.push(1);
             }
+        }
+        /// Validates that `store` contains well-formed encoded data compatible with this type.
+        ///
+        /// Checks both structural integrity (valid offsets, correct slice count) and type
+        /// compatibility (each slice's byte length is a multiple of its element size).
+        /// Call this once at the boundary when receiving data from an untrusted source,
+        /// before using the non-panicking `from_u64s` path.
+        fn validate(store: &[u64]) -> Result<(), String> where Self: Sized {
+            let mut sizes = Vec::new();
+            Self::element_sizes(&mut sizes);
+            crate::bytes::indexed::validate(store, sizes.len())?;
+            let first = store[0] as usize;
+            for (i, elem_size) in sizes.iter().enumerate() {
+                let upper = store[i + 1] as usize;
+                let lower = ((store[i] as usize) + 7) & !7;
+                let byte_len = upper.saturating_sub(lower);
+                if byte_len % elem_size != 0 {
+                    return Err(format!(
+                        "slice {} has {} bytes, not a multiple of element size {}",
+                        i, byte_len, elem_size
+                    ));
+                }
+            }
+            let _ = first;
+            Ok(())
         }
     }
 

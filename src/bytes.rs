@@ -10,61 +10,16 @@
 /// The encoding starts with a sequence of n+1 offsets describing where to find the n slices in the bytes that follow.
 /// Treating the offsets as a byte slice too, each offset indicates the location (in bytes) of the end of its slice.
 /// Each byte slice can be found from a pair of adjacent offsets, where the first is rounded up to a multiple of eight.
-pub use indexed::Indexed;
 pub mod indexed {
 
     use crate::AsBytes;
 
-    /// Encodes and decodes byte sequences, using an index of offsets.
-    ///
-    /// The `Indexed` format prepends `n+1` byte offsets for `n` slices, followed by the
-    /// slice data with `u64` alignment padding. This enables random access to individual
-    /// slices and efficient `u64`-aligned decoding via [`decode_u64s`].
-    pub struct Indexed;
-    impl Indexed {
-        /// Encoded length in number of `u64` words required.
-        pub fn length_in_words<'a, A>(bytes: &A) -> usize where A : AsBytes<'a> {
-            1 + bytes.as_bytes().map(|(_align, bytes)| 1 + bytes.len().div_ceil(8)).sum::<usize>()
-        }
-        /// Encoded length in number of `u8` bytes required.
-        pub fn length_in_bytes<'a, A>(bytes: &A) -> usize where A : AsBytes<'a> { 8 * Self::length_in_words(bytes) }
-        /// Encodes `bytes` into a sequence of `u64`.
-        pub fn encode<'a, A>(store: &mut Vec<u64>, bytes: &A) where A : AsBytes<'a> {
-            encode(store, bytes)
-        }
-        /// Writes `bytes` in the encoded format to an arbitrary writer.
-        pub fn write<'a, A, W: std::io::Write>(writer: W, bytes: &A) -> std::io::Result<()> where A : AsBytes<'a> {
-            write(writer, bytes)
-        }
-        /// Decodes bytes from a sequence of `u64`, returning `&[u8]` slices.
-        pub fn decode(store: &[u64]) -> impl Iterator<Item=&[u8]> {
-            decode(store)
-        }
-        /// Decodes bytes as `u64`-aligned word slices with trailing byte counts.
-        ///
-        /// See the free function [`decode_u64s`] for details.
-        pub fn decode_u64s(store: &[u64]) -> impl Iterator<Item=(&[u64], u8)> {
-            decode_u64s(store)
-        }
-        /// Decodes a specific byte slice by index.
-        ///
-        /// See the free function [`decode_index`] for details.
-        pub fn decode_index(store: &[u64], index: u64) -> &[u8] {
-            decode_index(store, index)
-        }
-        /// Validates structural integrity of encoded data.
-        ///
-        /// See the free function [`validate`] for details.
-        pub fn validate(store: &[u64], expected_slices: usize) -> Result<(), String> {
-            validate(store, expected_slices)
-        }
-        /// Validates structural integrity and type compatibility of encoded data.
-        ///
-        /// See the free function [`validate_typed`] for details.
-        pub fn validate_typed(store: &[u64], elem_sizes: &[usize]) -> Result<(), String> {
-            validate_typed(store, elem_sizes)
-        }
+    /// Encoded length in number of `u64` words required.
+    pub fn length_in_words<'a, A>(bytes: &A) -> usize where A : AsBytes<'a> {
+        1 + bytes.as_bytes().map(|(_align, bytes)| 1 + bytes.len().div_ceil(8)).sum::<usize>()
     }
+    /// Encoded length in number of `u8` bytes required.
+    pub fn length_in_bytes<'a, A>(bytes: &A) -> usize where A : AsBytes<'a> { 8 * length_in_words(bytes) }
 
     /// Encodes `item` into `u64` aligned words.
     ///
@@ -228,30 +183,6 @@ pub mod indexed {
         Ok(())
     }
 
-    /// Validates that `store` is well-formed and that each slice's byte length is compatible
-    /// with the given element sizes.
-    ///
-    /// `elem_sizes` should have one entry per expected slice, giving the byte size of the
-    /// element type for that slice (e.g., 8 for `u64`, 4 for `u32`, 1 for `u8`).
-    /// A slice whose byte length is not a multiple of its element size indicates data corruption.
-    pub fn validate_typed(store: &[u64], elem_sizes: &[usize]) -> Result<(), String> {
-        validate(store, elem_sizes.len())?;
-        let first = store[0] as usize;
-        let slices = first / 8 - 1;
-        for i in 0..slices {
-            let upper = store[i + 1] as usize;
-            let lower = ((store[i] as usize) + 7) & !7;
-            let byte_len = upper.saturating_sub(lower);
-            if byte_len % elem_sizes[i] != 0 {
-                return Err(format!(
-                    "slice {} has {} bytes, not a multiple of element size {}",
-                    i, byte_len, elem_sizes[i]
-                ));
-            }
-        }
-        Ok(())
-    }
-
     /// Decodes a specific byte slice by index. It will be `u64` aligned.
     #[inline(always)]
     pub fn decode_index(store: &[u64], index: u64) -> &[u8] {
@@ -299,15 +230,16 @@ pub mod indexed {
             let mut store = Vec::new();
             encode(&mut store, &column.borrow());
 
-            // Structural validation.
             type B<'a> = <ContainerOf<(u64, u64, u64)> as crate::Borrow>::Borrowed<'a>;
+
+            // Structural validation.
             assert!(super::validate(&store, B::SLICE_COUNT).is_ok());
 
-            // Typed validation.
+            // Typed validation via FromBytes::validate.
             let mut sizes = Vec::new();
             B::element_sizes(&mut sizes);
             assert_eq!(sizes, vec![8, 8, 8]);
-            assert!(super::validate_typed(&store, &sizes).is_ok());
+            assert!(B::validate(&store).is_ok());
 
             // Wrong slice count should fail.
             assert!(super::validate(&store, 5).is_err());
@@ -325,13 +257,14 @@ pub mod indexed {
             encode(&mut store, &column.borrow());
 
             type B<'a> = <ContainerOf<(u64, String, Vec<u32>)> as crate::Borrow>::Borrowed<'a>;
-            assert!(super::validate(&store, B::SLICE_COUNT).is_ok());
 
+            // Element sizes: (u64: 8), (String bounds: 8, String bytes: 1), (Vec<u32> bounds: 8, Vec<u32> values: 4)
             let mut sizes = Vec::new();
             B::element_sizes(&mut sizes);
-            // (u64: 8), (String bounds: 8, String bytes: 1), (Vec<u32> bounds: 8, Vec<u32> values: 4)
             assert_eq!(sizes, vec![8, 8, 1, 8, 4]);
-            assert!(super::validate_typed(&store, &sizes).is_ok());
+
+            // Full validation via FromBytes::validate.
+            assert!(B::validate(&store).is_ok());
         }
     }
 }
@@ -340,8 +273,6 @@ pub mod indexed {
 pub mod stash {
 
     use crate::{Len, FromBytes};
-    use crate::bytes::Indexed;
-
     /// A container of either typed columns, or serialized bytes that can be borrowed as the former.
     ///
     /// When `B` dereferences to a byte slice, the container can be borrowed as if the container type `C`.
@@ -394,7 +325,7 @@ pub mod stash {
         pub fn length_in_bytes(&self) -> usize {
             match self {
                 // We'll need one u64 for the length, then the length rounded up to a multiple of 8.
-                Stash::Typed(t) => 8 * Indexed::length_in_words(&t.borrow()),
+                Stash::Typed(t) => crate::bytes::indexed::length_in_bytes(&t.borrow()),
                 Stash::Bytes(b) => b.len(),
                 Stash::Align(a) => 8 * a.len(),
             }
@@ -402,7 +333,7 @@ pub mod stash {
         /// Write the contents into a `std::io::Write` using the `Indexed` encoder.
         pub fn into_bytes<W: ::std::io::Write>(&self, writer: &mut W) {
             match self {
-                Stash::Typed(t) => { Indexed::write(writer, &t.borrow()).unwrap() },
+                Stash::Typed(t) => { crate::bytes::indexed::write(writer, &t.borrow()).unwrap() },
                 Stash::Bytes(b) => writer.write_all(&b[..]).unwrap(),
                 Stash::Align(a) => writer.write_all(bytemuck::cast_slice(&a[..])).unwrap(),
             }
