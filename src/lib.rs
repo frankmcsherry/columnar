@@ -644,6 +644,34 @@ pub mod common {
         fn from_byte_slices(bytes: &[&'a [u8]]) -> Self where Self: Sized {
             Self::from_bytes(&mut bytes.iter().copied())
         }
+        /// Reconstructs `self` from `u64`-aligned word slices with trailing byte counts.
+        ///
+        /// Each pair `(&[u64], u8)` provides a word slice and the number of valid bytes
+        /// in the last word (0 means all 8 bytes are valid, or the slice is empty).
+        /// Since all columnar data originates from `&[u64]` storage, this avoids the
+        /// alignment checks that `from_bytes` must perform when casting `&[u8]` back to
+        /// typed slices.
+        #[inline(always)]
+        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self where Self: Sized {
+            Self::from_bytes(&mut words.map(|(w, tail)| {
+                let bytes: &[u8] = bytemuck::cast_slice(w);
+                let len = if tail == 0 { bytes.len() } else { bytes.len() - (8 - tail as usize) };
+                &bytes[..len]
+            }))
+        }
+        /// Reports the element sizes (in bytes) for each slice this type consumes.
+        ///
+        /// Used by `validate_typed` to check that each slice's byte length is a multiple
+        /// of the corresponding element size. For example, a `&[u32]` slice must have a
+        /// byte length that is a multiple of 4.
+        ///
+        /// The default implementation reports 1 (byte-level) for each slice, which
+        /// accepts any byte length. Override this for types with stricter requirements.
+        fn element_sizes(sizes: &mut Vec<usize>) {
+            for _ in 0..Self::SLICE_COUNT {
+                sizes.push(1);
+            }
+        }
     }
 
 }

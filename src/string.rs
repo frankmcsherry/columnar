@@ -109,6 +109,17 @@ impl<'a, BC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a
             values: VC::from_byte_slices(&bytes[BC::SLICE_COUNT..]),
         }
     }
+    #[inline(always)]
+    fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
+        Self {
+            bounds: BC::from_u64s(words),
+            values: VC::from_u64s(words),
+        }
+    }
+    fn element_sizes(sizes: &mut Vec<usize>) {
+        BC::element_sizes(sizes);
+        VC::element_sizes(sizes);
+    }
 }
 
 impl<BC: Len, VC> Len for Strings<BC, VC> {

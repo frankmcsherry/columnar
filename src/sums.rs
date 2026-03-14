@@ -69,6 +69,13 @@ pub mod rank_select {
                 values: <crate::primitive::Bools<VC, &'a u64>>::from_byte_slices(&bytes[CC::SLICE_COUNT..]),
             }
         }
+        #[inline(always)]
+        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
+            Self {
+                counts: CC::from_u64s(words),
+                values: <crate::primitive::Bools<VC, &'a u64>>::from_u64s(words),
+            }
+        }
     }
 
 
@@ -279,6 +286,14 @@ pub mod result {
                 indexes: crate::FromBytes::from_byte_slices(&bytes[..ix_count]),
                 oks: SC::from_byte_slices(&bytes[ix_count .. ix_count + SC::SLICE_COUNT]),
                 errs: TC::from_byte_slices(&bytes[ix_count + SC::SLICE_COUNT ..]),
+            }
+        }
+        #[inline(always)]
+        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
+            Self {
+                indexes: crate::FromBytes::from_u64s(words),
+                oks: SC::from_u64s(words),
+                errs: TC::from_u64s(words),
             }
         }
     }
@@ -541,6 +556,13 @@ pub mod option {
             Self {
                 indexes: crate::FromBytes::from_byte_slices(&bytes[..ix_count]),
                 somes: TC::from_byte_slices(&bytes[ix_count..]),
+            }
+        }
+        #[inline(always)]
+        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
+            Self {
+                indexes: crate::FromBytes::from_u64s(words),
+                somes: TC::from_u64s(words),
             }
         }
     }

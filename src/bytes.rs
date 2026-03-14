@@ -256,6 +256,91 @@ pub mod serialization_neu {
         })
     }
 
+    /// Decodes an encoded sequence as `u64`-aligned word slices with trailing byte counts.
+    ///
+    /// Each item is `(&[u64], u8)` where the `u8` indicates how many bytes in the last
+    /// word are valid (0 means all 8 are valid, or the slice is empty).
+    /// This preserves alignment information from the original `&[u64]` store, avoiding
+    /// the need for alignment checks when casting back to typed slices.
+    #[inline(always)]
+    pub fn decode_u64s(store: &[u64]) -> impl Iterator<Item=(&[u64], u8)> {
+        let slices = store[0] as usize / 8 - 1;
+        let index = &store[..slices + 1];
+        let last = index[slices] as usize;
+        let last_w = (last + 7) / 8;
+        let words = &store[..last_w];
+        (0 .. slices).map(move |i| {
+            // Non-panicking index access: returns 0 for out-of-bounds,
+            // which .min(last) will clamp to produce an empty slice.
+            let upper = (*index.get(i + 1).unwrap_or(&0) as usize).min(last);
+            let lower = (((*index.get(i).unwrap_or(&0) as usize) + 7) & !7).min(upper);
+            let upper_w = ((upper + 7) / 8).min(words.len());
+            let lower_w = (lower / 8).min(upper_w);
+            let tail = (upper % 8) as u8;
+            (&words[lower_w..upper_w], tail)
+        })
+    }
+
+    /// Validates that `store` contains well-formed Indexed-encoded data with `expected_slices` byte slices.
+    ///
+    /// Returns `Ok(())` if the data is well-formed, or `Err` with a description of the problem.
+    /// Call this once at the boundary (e.g., when receiving data from the network or disk)
+    /// before using the non-panicking `decode_u64s` / `from_u64s` path.
+    pub fn validate(store: &[u64], expected_slices: usize) -> Result<(), String> {
+        if store.is_empty() {
+            return Err("store is empty".into());
+        }
+        let first = store[0] as usize;
+        if first % 8 != 0 {
+            return Err(format!("first offset {} is not a multiple of 8", first));
+        }
+        let slices = first / 8 - 1;
+        if slices + 1 > store.len() {
+            return Err(format!("index requires {} words but store has {}", slices + 1, store.len()));
+        }
+        if slices != expected_slices {
+            return Err(format!("expected {} slices but found {}", expected_slices, slices));
+        }
+        let store_bytes = store.len() * 8;
+        let mut prev_upper = first;
+        for i in 0..slices {
+            let offset = store[i + 1] as usize;
+            if offset > store_bytes {
+                return Err(format!("slice {} offset {} exceeds store size {}", i, offset, store_bytes));
+            }
+            if offset < prev_upper {
+                return Err(format!("slice {} offset {} precedes previous end {}", i, offset, prev_upper));
+            }
+            // Advance prev_upper to the aligned start of the next slice.
+            prev_upper = (offset + 7) & !7;
+        }
+        Ok(())
+    }
+
+    /// Validates that `store` is well-formed and that each slice's byte length is compatible
+    /// with the given element sizes.
+    ///
+    /// `elem_sizes` should have one entry per expected slice, giving the byte size of the
+    /// element type for that slice (e.g., 8 for `u64`, 4 for `u32`, 1 for `u8`).
+    /// A slice whose byte length is not a multiple of its element size indicates data corruption.
+    pub fn validate_typed(store: &[u64], elem_sizes: &[usize]) -> Result<(), String> {
+        validate(store, elem_sizes.len())?;
+        let first = store[0] as usize;
+        let slices = first / 8 - 1;
+        for i in 0..slices {
+            let upper = store[i + 1] as usize;
+            let lower = ((store[i] as usize) + 7) & !7;
+            let byte_len = upper.saturating_sub(lower);
+            if byte_len % elem_sizes[i] != 0 {
+                return Err(format!(
+                    "slice {} has {} bytes, not a multiple of element size {}",
+                    i, byte_len, elem_sizes[i]
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Decodes a specific byte slice by index. It will be `u64` aligned.
     #[inline(always)]
     pub fn decode_index(store: &[u64], index: u64) -> &[u8] {
@@ -269,7 +354,7 @@ pub mod serialization_neu {
     #[cfg(test)]
     mod test {
 
-        use crate::{Borrow, ContainerOf};
+        use crate::{Borrow, ContainerOf, FromBytes};
         use crate::common::Push;
         use crate::AsBytes;
 
@@ -291,6 +376,51 @@ pub mod serialization_neu {
             }
 
             assert_roundtrip(&column.borrow());
+        }
+
+        #[test]
+        fn validate_well_formed() {
+            use crate::common::Push;
+
+            // Simple tuple of u64s.
+            let mut column: ContainerOf<(u64, u64, u64)> = Default::default();
+            for i in 0..100u64 { column.push(&(i, i+1, i+2)); }
+            let mut store = Vec::new();
+            encode(&mut store, &column.borrow());
+
+            // Structural validation.
+            type B<'a> = <ContainerOf<(u64, u64, u64)> as crate::Borrow>::Borrowed<'a>;
+            assert!(super::validate(&store, B::SLICE_COUNT).is_ok());
+
+            // Typed validation.
+            let mut sizes = Vec::new();
+            B::element_sizes(&mut sizes);
+            assert_eq!(sizes, vec![8, 8, 8]);
+            assert!(super::validate_typed(&store, &sizes).is_ok());
+
+            // Wrong slice count should fail.
+            assert!(super::validate(&store, 5).is_err());
+        }
+
+        #[test]
+        fn validate_mixed_types() {
+            use crate::common::Push;
+
+            let mut column: ContainerOf<(u64, String, Vec<u32>)> = Default::default();
+            for i in 0..50u64 {
+                column.push(&(i, format!("hello {i}"), vec![i as u32; i as usize]));
+            }
+            let mut store = Vec::new();
+            encode(&mut store, &column.borrow());
+
+            type B<'a> = <ContainerOf<(u64, String, Vec<u32>)> as crate::Borrow>::Borrowed<'a>;
+            assert!(super::validate(&store, B::SLICE_COUNT).is_ok());
+
+            let mut sizes = Vec::new();
+            B::element_sizes(&mut sizes);
+            // (u64: 8), (String bounds: 8, String bytes: 1), (Vec<u32> bounds: 8, Vec<u32> values: 4)
+            assert_eq!(sizes, vec![8, 8, 1, 8, 4]);
+            assert!(super::validate_typed(&store, &sizes).is_ok());
         }
     }
 }
@@ -345,8 +475,8 @@ pub mod stash {
         #[inline(always)] pub fn borrow<'a>(&'a self) -> <C as crate::Borrow>::Borrowed<'a> {
             match self {
                 Stash::Typed(t) => t.borrow(),
-                Stash::Bytes(b) => <C::Borrowed<'_> as FromBytes>::from_bytes(&mut Indexed::decode(bytemuck::cast_slice(b))),
-                Stash::Align(a) => <C::Borrowed<'_> as FromBytes>::from_bytes(&mut Indexed::decode(a)),
+                Stash::Bytes(b) => <C::Borrowed<'_> as FromBytes>::from_u64s(&mut crate::bytes::serialization_neu::decode_u64s(bytemuck::cast_slice(b))),
+                Stash::Align(a) => <C::Borrowed<'_> as FromBytes>::from_u64s(&mut crate::bytes::serialization_neu::decode_u64s(a)),
             }
         }
         /// The number of bytes needed to write the contents using the `Indexed` encoder.

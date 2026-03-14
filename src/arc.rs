@@ -26,6 +26,7 @@ impl<'a, T: FromBytes<'a>> FromBytes<'a> for Arc<T> {
     const SLICE_COUNT: usize = T::SLICE_COUNT;
     #[inline(always)] fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self { Arc::new(T::from_bytes(bytes)) }
     #[inline(always)] fn from_byte_slices(bytes: &[&'a [u8]]) -> Self { Arc::new(T::from_byte_slices(bytes)) }
+    #[inline(always)] fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self { Arc::new(T::from_u64s(words)) }
 }
 
 #[cfg(test)]
