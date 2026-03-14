@@ -134,17 +134,10 @@ impl<'a, TC: crate::FromBytes<'a>, BC: crate::FromBytes<'a>> crate::FromBytes<'a
         }
     }
     #[inline(always)]
-    fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
+    fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
         Self {
-            bounds: BC::from_byte_slices(&bytes[..BC::SLICE_COUNT]),
-            values: TC::from_byte_slices(&bytes[BC::SLICE_COUNT..]),
-        }
-    }
-    #[inline(always)]
-    fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
-        Self {
-            bounds: BC::from_u64s(words),
-            values: TC::from_u64s(words),
+            bounds: BC::from_store(store, offset),
+            values: TC::from_store(store, offset),
         }
     }
     fn element_sizes(sizes: &mut Vec<usize>) {

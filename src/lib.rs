@@ -618,11 +618,18 @@ pub mod common {
     ///
     /// Implementors of this trait almost certainly reference the lifetime `'a` themselves,
     /// unless they actively deserialize the bytes (vs sit on the slices, as if zero-copy).
+    ///
+    /// # Overriding methods
+    ///
+    /// The only required method is [`from_bytes`](Self::from_bytes). However, the default
+    /// implementation of [`from_store`](Self::from_store) falls back through `from_bytes`,
+    /// which contains panicking operations that prevent LLVM from eliminating unused fields.
+    /// Implementors should override `from_store` and [`element_sizes`](Self::element_sizes)
+    /// to ensure optimal codegen. Missing overrides are functionally correct but silently
+    /// degrade performance. The `#[derive(Columnar)]` macro generates all overrides
+    /// automatically.
     pub trait FromBytes<'a> {
         /// The number of byte slices this type consumes when reconstructed.
-        ///
-        /// This enables `from_byte_slices`, which can index directly into a slice
-        /// of byte slices rather than consuming from an iterator sequentially.
         const SLICE_COUNT: usize;
         /// Reconstructs `self` from a sequence of correctly aligned and sized bytes slices.
         ///
@@ -636,24 +643,19 @@ pub mod common {
         /// they are inlined. A single non-inlined function on a tree of `from_bytes` calls
         /// can cause the performance to drop significantly.
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self;
-        /// Reconstructs `self` from a slice of byte slices, using direct indexing.
+        /// Reconstructs `self` from a [`DecodedStore`](crate::bytes::indexed::DecodedStore),
+        /// using direct random access at a given offset.
         ///
-        /// The slice should contain exactly `Self::SLICE_COUNT` elements.
-        /// This avoids the iterator chain overhead of `from_bytes`.
+        /// Each field indexes directly into the store at its compile-time-known offset,
+        /// with no iterator state or sequential dependency. This enables LLVM to fully
+        /// eliminate unused fields.
         #[inline(always)]
-        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self where Self: Sized {
-            Self::from_bytes(&mut bytes.iter().copied())
-        }
-        /// Reconstructs `self` from `u64`-aligned word slices with trailing byte counts.
-        ///
-        /// Each pair `(&[u64], u8)` provides a word slice and the number of valid bytes
-        /// in the last word (0 means all 8 bytes are valid, or the slice is empty).
-        /// Since all columnar data originates from `&[u64]` storage, this avoids the
-        /// alignment checks that `from_bytes` must perform when casting `&[u8]` back to
-        /// typed slices.
-        #[inline(always)]
-        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self where Self: Sized {
-            Self::from_bytes(&mut words.map(|(w, tail)| {
+        fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self where Self: Sized {
+            // Default: decode each slice from the store and delegate to from_bytes.
+            let start = *offset;
+            *offset += Self::SLICE_COUNT;
+            Self::from_bytes(&mut (start..*offset).map(|i| {
+                let (w, tail) = store.get(i);
                 let bytes: &[u8] = bytemuck::cast_slice(w);
                 let len = if tail == 0 { bytes.len() } else { bytes.len() - (8 - tail as usize) };
                 &bytes[..len]
@@ -671,7 +673,7 @@ pub mod common {
         }
         /// Validates that the given slices are compatible with this type.
         ///
-        /// The input matches the shape of `from_u64s`: each `(&[u64], u8)` is a word slice
+        /// The input provides `(&[u64], u8)` pairs: each is a word slice
         /// and trailing byte count. This type consumes `Self::SLICE_COUNT` entries and checks
         /// that each slice's byte length is a multiple of its element size.
         ///

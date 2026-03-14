@@ -323,17 +323,8 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
                     Self { #(#names: ::columnar::FromBytes::from_bytes(bytes),)* }
                 }
                 #[inline(always)]
-                fn from_byte_slices(bytes: &[&'columnar [u8]]) -> Self {
-                    let mut _offset = 0;
-                    #(
-                        let #names = <#container_types>::from_byte_slices(&bytes[_offset .. _offset + <#container_types>::SLICE_COUNT]);
-                        _offset += <#container_types>::SLICE_COUNT;
-                    )*
-                    Self { #(#names,)* }
-                }
-                #[inline(always)]
-                fn from_u64s(words: &mut impl Iterator<Item=(&'columnar [u64], u8)>) -> Self {
-                    Self { #(#names: ::columnar::FromBytes::from_u64s(words),)* }
+                fn from_store(store: &::columnar::bytes::indexed::DecodedStore<'columnar>, offset: &mut usize) -> Self {
+                    Self { #(#names: ::columnar::FromBytes::from_store(store, offset),)* }
                 }
             }
         }
@@ -520,13 +511,10 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
                 Self { count: &::columnar::bytemuck::try_cast_slice(bytes.next().unwrap()).unwrap()[0] }
             }
             #[inline(always)]
-            fn from_byte_slices(bytes: &[&'columnar [u8]]) -> Self {
-                Self { count: &::columnar::bytemuck::try_cast_slice(bytes[0]).unwrap()[0] }
-            }
-            #[inline(always)]
-            fn from_u64s(words: &mut impl Iterator<Item=(&'columnar [u64], u8)>) -> Self {
-                let (w, _tail) = words.next().expect("Iterator exhausted prematurely");
-                Self { count: &w[0] }
+            fn from_store(store: &::columnar::bytes::indexed::DecodedStore<'columnar>, offset: &mut usize) -> Self {
+                let (w, _tail) = store.get(*offset);
+                *offset += 1;
+                Self { count: w.first().unwrap_or(&0) }
             }
         }
 
@@ -910,20 +898,10 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                     }
                 }
                 #[inline(always)]
-                fn from_byte_slices(bytes: &[&'columnar [u8]]) -> Self {
-                    let mut _offset = 0;
-                    #(
-                        let #names = <#container_types>::from_byte_slices(&bytes[_offset .. _offset + <#container_types>::SLICE_COUNT]);
-                        _offset += <#container_types>::SLICE_COUNT;
-                    )*
-                    let indexes = <::columnar::Discriminant<CVar, COff, CC>>::from_byte_slices(&bytes[_offset ..]);
-                    Self { #(#names,)* indexes }
-                }
-                #[inline(always)]
-                fn from_u64s(words: &mut impl Iterator<Item=(&'columnar [u64], u8)>) -> Self {
+                fn from_store(store: &::columnar::bytes::indexed::DecodedStore<'columnar>, offset: &mut usize) -> Self {
                     Self {
-                        #(#names: ::columnar::FromBytes::from_u64s(words),)*
-                        indexes: ::columnar::FromBytes::from_u64s(words),
+                        #(#names: ::columnar::FromBytes::from_store(store, offset),)*
+                        indexes: ::columnar::FromBytes::from_store(store, offset),
                     }
                 }
             }
@@ -1216,12 +1194,8 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
                 Self { variant: ::columnar::FromBytes::from_bytes(bytes) }
             }
             #[inline(always)]
-            fn from_byte_slices(bytes: &[&'columnar [u8]]) -> Self {
-                Self { variant: CVar::from_byte_slices(bytes) }
-            }
-            #[inline(always)]
-            fn from_u64s(words: &mut impl Iterator<Item=(&'columnar [u64], u8)>) -> Self {
-                Self { variant: ::columnar::FromBytes::from_u64s(words) }
+            fn from_store(store: &::columnar::bytes::indexed::DecodedStore<'columnar>, offset: &mut usize) -> Self {
+                Self { variant: ::columnar::FromBytes::from_store(store, offset) }
             }
         }
 
