@@ -669,23 +669,22 @@ pub mod common {
                 sizes.push(1);
             }
         }
-        /// Validates that `store` contains well-formed encoded data compatible with this type.
+        /// Validates that the given slices are compatible with this type.
         ///
-        /// Checks both structural integrity (valid offsets, correct slice count) and type
-        /// compatibility (each slice's byte length is a multiple of its element size).
-        /// Call this once at the boundary when receiving data from an untrusted source,
-        /// before using the non-panicking `from_u64s` path.
+        /// The input matches the shape of `from_u64s`: each `(&[u64], u8)` is a word slice
+        /// and trailing byte count. This type consumes `Self::SLICE_COUNT` entries and checks
+        /// that each slice's byte length is a multiple of its element size.
         ///
         /// Built from [`Self::element_sizes`]; generally should not need to be overridden.
-        fn validate(store: &[u64]) -> Result<(), String> where Self: Sized {
+        fn validate(slices: &[(&[u64], u8)]) -> Result<(), String> where Self: Sized {
+            if slices.len() < Self::SLICE_COUNT {
+                return Err(format!("expected {} slices but got {}", Self::SLICE_COUNT, slices.len()));
+            }
             let mut sizes = Vec::new();
             Self::element_sizes(&mut sizes);
-            crate::bytes::indexed::validate(store, sizes.len())?;
-            let first = store[0] as usize;
             for (i, elem_size) in sizes.iter().enumerate() {
-                let upper = store[i + 1] as usize;
-                let lower = ((store[i] as usize) + 7) & !7;
-                let byte_len = upper.saturating_sub(lower);
+                let (words, tail) = &slices[i];
+                let byte_len = words.len() * 8 - ((8 - *tail as usize) % 8);
                 if byte_len % elem_size != 0 {
                     return Err(format!(
                         "slice {} has {} bytes, not a multiple of element size {}",
@@ -693,7 +692,6 @@ pub mod common {
                     ));
                 }
             }
-            let _ = first;
             Ok(())
         }
     }

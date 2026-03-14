@@ -183,6 +183,29 @@ pub mod indexed {
         Ok(())
     }
 
+    /// Validates that `store` contains well-formed data compatible with type `T`.
+    ///
+    /// This combines structural validation ([`validate`]) with type-level validation
+    /// ([`FromBytes::validate`]) in a single call. Use this at trust boundaries when
+    /// receiving encoded data before passing it to `from_u64s`.
+    ///
+    /// The `from_u64s` decode path performs no further validation at access time:
+    /// it will not panic on malformed data, but may return incorrect results.
+    /// There is no undefined behavior in any case. Call this method once before
+    /// using `from_u64s` to ensure the data is well-formed.
+    ///
+    /// ```ignore
+    /// type B<'a> = <MyContainer as Borrow>::Borrowed<'a>;
+    /// indexed::validate_typed::<B>(&store)?;
+    /// // Now safe to use the non-panicking path:
+    /// let borrowed = B::from_u64s(&mut indexed::decode_u64s(&store));
+    /// ```
+    pub fn validate_typed<'a, T: crate::FromBytes<'a>>(store: &[u64]) -> Result<(), String> {
+        validate(store, T::SLICE_COUNT)?;
+        let slices: Vec<_> = decode_u64s(store).collect();
+        T::validate(&slices)
+    }
+
     /// Decodes a specific byte slice by index. It will be `u64` aligned.
     #[inline(always)]
     pub fn decode_index(store: &[u64], index: u64) -> &[u8] {
@@ -230,9 +253,9 @@ pub mod indexed {
             encode(&mut store, &column.borrow());
 
             type B<'a> = <ContainerOf<(u64, u64, u64)> as crate::Borrow>::Borrowed<'a>;
-            assert!(B::validate(&store).is_ok());
+            assert!(super::validate_typed::<B>(&store).is_ok());
 
-            // Wrong slice count should fail.
+            // Wrong slice count should fail structural validation.
             assert!(super::validate(&store, 5).is_err());
         }
 
@@ -248,7 +271,7 @@ pub mod indexed {
             encode(&mut store, &column.borrow());
 
             type B<'a> = <ContainerOf<(u64, String, Vec<u32>)> as crate::Borrow>::Borrowed<'a>;
-            assert!(B::validate(&store).is_ok());
+            assert!(super::validate_typed::<B>(&store).is_ok());
         }
     }
 }
