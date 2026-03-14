@@ -1,6 +1,6 @@
 use bencher::{benchmark_group, benchmark_main, Bencher};
 use columnar::{Columnar, Container, Clear, FromBytes};
-use columnar::bytes::{EncodeDecode, Sequence};
+use columnar::bytes::indexed;
 use serde::{Serialize, Deserialize};
 
 fn goser_new(b: &mut Bencher) {
@@ -19,7 +19,7 @@ fn goser_push(b: &mut Bencher) {
         container.push(&log);
     }
     let mut words = vec![];
-    Sequence::encode(&mut words, &container.borrow());
+    indexed::encode(&mut words, &container.borrow());
     b.bytes = 8 * words.len() as u64;
     b.iter(|| {
         container.clear();
@@ -50,11 +50,11 @@ fn goser_encode(b: &mut Bencher) {
         container.push(&log);
     }
     let mut words = vec![];
-    Sequence::encode(&mut words, &container.borrow());
+    indexed::encode(&mut words, &container.borrow());
     b.bytes = 8 * words.len() as u64;
     b.iter(|| {
         words.clear();
-        Sequence::encode(&mut words, &container.borrow());
+        indexed::encode(&mut words, &container.borrow());
         bencher::black_box(&words);
     });
 }
@@ -67,10 +67,10 @@ fn goser_decode(b: &mut Bencher) {
     for _ in 0..1024 {
         container.push(&log);
     }
-    Sequence::encode(&mut words, &container.borrow());
+    indexed::encode(&mut words, &container.borrow());
     b.bytes = 8 * words.len() as u64;
     b.iter(|| {
-        let mut slices = Sequence::decode(&mut words);
+        let mut slices = indexed::decode(&mut words);
         let foo = <<Log as Columnar>::Container as Container>::Borrowed::from_bytes(&mut slices);
         bencher::black_box(foo);
     });
