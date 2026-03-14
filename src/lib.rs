@@ -659,14 +659,11 @@ pub mod common {
                 &bytes[..len]
             }))
         }
-        /// Reports the element sizes (in bytes) for each slice this type consumes.
+        /// Implementation detail of [`Self::validate`]: reports element sizes (in bytes) for each slice.
         ///
-        /// Used by [`Self::validate`] to check that each slice's byte length is a multiple
-        /// of the corresponding element size. For example, a `&[u32]` slice must have a
-        /// byte length that is a multiple of 4.
-        ///
-        /// The default implementation reports 1 (byte-level) for each slice, which
-        /// accepts any byte length. Override this for types with stricter requirements.
+        /// Override this for types with element sizes other than 1.
+        /// Prefer calling [`Self::validate`] rather than using this directly.
+        #[doc(hidden)]
         fn element_sizes(sizes: &mut Vec<usize>) {
             for _ in 0..Self::SLICE_COUNT {
                 sizes.push(1);

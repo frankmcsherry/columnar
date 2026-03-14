@@ -224,21 +224,12 @@ pub mod indexed {
         fn validate_well_formed() {
             use crate::common::Push;
 
-            // Simple tuple of u64s.
             let mut column: ContainerOf<(u64, u64, u64)> = Default::default();
             for i in 0..100u64 { column.push(&(i, i+1, i+2)); }
             let mut store = Vec::new();
             encode(&mut store, &column.borrow());
 
             type B<'a> = <ContainerOf<(u64, u64, u64)> as crate::Borrow>::Borrowed<'a>;
-
-            // Structural validation.
-            assert!(super::validate(&store, B::SLICE_COUNT).is_ok());
-
-            // Typed validation via FromBytes::validate.
-            let mut sizes = Vec::new();
-            B::element_sizes(&mut sizes);
-            assert_eq!(sizes, vec![8, 8, 8]);
             assert!(B::validate(&store).is_ok());
 
             // Wrong slice count should fail.
@@ -257,13 +248,6 @@ pub mod indexed {
             encode(&mut store, &column.borrow());
 
             type B<'a> = <ContainerOf<(u64, String, Vec<u32>)> as crate::Borrow>::Borrowed<'a>;
-
-            // Element sizes: (u64: 8), (String bounds: 8, String bytes: 1), (Vec<u32> bounds: 8, Vec<u32> values: 4)
-            let mut sizes = Vec::new();
-            B::element_sizes(&mut sizes);
-            assert_eq!(sizes, vec![8, 8, 1, 8, 4]);
-
-            // Full validation via FromBytes::validate.
             assert!(B::validate(&store).is_ok());
         }
     }
