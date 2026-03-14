@@ -122,32 +122,8 @@ pub mod indexed {
         })
     }
 
-    /// Decodes an encoded sequence as `u64`-aligned word slices with trailing byte counts.
-    ///
-    /// Each item is `(&[u64], u8)` where the `u8` indicates how many bytes in the last
-    /// word are valid (0 means all 8 are valid, or the slice is empty).
-    /// This preserves alignment information from the original `&[u64]` store, avoiding
-    /// the need for alignment checks when casting back to typed slices.
-    #[inline(always)]
-    pub fn decode_u64s(store: &[u64]) -> impl Iterator<Item=(&[u64], u8)> {
-        let slices = store[0] as usize / 8 - 1;
-        let index = &store[..slices + 1];
-        let last = index[slices] as usize;
-        let last_w = (last + 7) / 8;
-        let words = &store[..last_w];
-        (0 .. slices).map(move |i| {
-            // Non-panicking index access: returns 0 for out-of-bounds,
-            // which .min(last) will clamp to produce an empty slice.
-            let upper = (*index.get(i + 1).unwrap_or(&0) as usize).min(last);
-            let lower = (((*index.get(i).unwrap_or(&0) as usize) + 7) & !7).min(upper);
-            let upper_w = ((upper + 7) / 8).min(words.len());
-            let lower_w = (lower / 8).min(upper_w);
-            let tail = (upper % 8) as u8;
-            (&words[lower_w..upper_w], tail)
-        })
-    }
 
-    /// A zero-allocation view into Indexed-encoded data, providing random access to individual slices.
+    /// A zero-allocation view into indexed-encoded data, providing random access to individual slices.
     ///
     /// Constructed from `&[u64]` in O(1), this wraps the offset index and data region
     /// and provides `get(k)` to retrieve the k-th slice as `(&[u64], u8)`.
@@ -163,7 +139,7 @@ pub mod indexed {
     }
 
     impl<'a> DecodedStore<'a> {
-        /// Creates a decoded view of an Indexed-encoded `&[u64]` store.
+        /// Creates a decoded view of an indexed-encoded `&[u64]` store.
         ///
         /// This is O(1) — it just reads the first offset to locate the index
         /// and data regions. No allocation, no iteration.
@@ -198,7 +174,7 @@ pub mod indexed {
         }
     }
 
-    /// Validates the internal structure of Indexed-encoded data.
+    /// Validates the internal structure of indexed-encoded data.
     ///
     /// Checks that offsets are well-formed, in bounds, and that the slice count matches
     /// `expected_slices`. This is a building block for [`validate`]; prefer calling
@@ -240,20 +216,22 @@ pub mod indexed {
     /// type-level compatibility (each slice's byte length is a multiple of its element
     /// size). Call this once at trust boundaries when receiving encoded data.
     ///
-    /// The `from_u64s` decode path performs no further validation at access time:
+    /// The `from_store` decode path performs no further validation at access time:
     /// it will not panic on malformed data, but may return incorrect results.
     /// There is no undefined behavior in any case. Call this method once before
-    /// using `from_u64s` to ensure the data is well-formed.
+    /// using `from_store` to ensure the data is well-formed.
     ///
     /// ```ignore
     /// type B<'a> = <MyContainer as Borrow>::Borrowed<'a>;
     /// indexed::validate::<B>(&store)?;
     /// // Now safe to use the non-panicking path:
-    /// let borrowed = B::from_u64s(&mut indexed::decode_u64s(&store));
+    /// let ds = indexed::DecodedStore::new(&store);
+    /// let borrowed = B::from_store(&ds, &mut 0);
     /// ```
     pub fn validate<'a, T: crate::FromBytes<'a>>(store: &[u64]) -> Result<(), String> {
         validate_structure(store, T::SLICE_COUNT)?;
-        let slices: Vec<_> = decode_u64s(store).collect();
+        let ds = DecodedStore::new(store);
+        let slices: Vec<_> = (0..ds.len()).map(|i| ds.get(i)).collect();
         T::validate(&slices)
     }
 
@@ -385,7 +363,7 @@ pub mod stash {
                 },
             }
         }
-        /// The number of bytes needed to write the contents using the `Indexed` encoder.
+        /// The number of bytes needed to write the contents using the [`indexed`] encoder.
         pub fn length_in_bytes(&self) -> usize {
             match self {
                 // We'll need one u64 for the length, then the length rounded up to a multiple of 8.
@@ -394,7 +372,7 @@ pub mod stash {
                 Stash::Align(a) => 8 * a.len(),
             }
         }
-        /// Write the contents into a `std::io::Write` using the `Indexed` encoder.
+        /// Write the contents into a `std::io::Write` using the [`indexed`] encoder.
         pub fn into_bytes<W: ::std::io::Write>(&self, writer: &mut W) {
             match self {
                 Stash::Typed(t) => { crate::bytes::indexed::write(writer, &t.borrow()).unwrap() },
@@ -476,29 +454,33 @@ mod test {
             assert_eq!(column3.get(2*i+1), column2.get(2*i+1));
         }
 
-        // Test from_byte_slices round-trip.
-        let byte_vec: Vec<&[u8]> = column.borrow().as_bytes().map(|(_, bytes)| bytes).collect();
-        let column4 = crate::Results::<&[u64], &[u64], &[u64], &[u64], &u64>::from_byte_slices(&byte_vec);
+        // Test from_store round-trip.
+        let mut store = Vec::new();
+        crate::bytes::indexed::encode(&mut store, &column.borrow());
+        let ds = crate::bytes::indexed::DecodedStore::new(&store);
+        let column4 = crate::Results::<&[u64], &[u64], &[u64], &[u64], &u64>::from_store(&ds, &mut 0);
         for i in 0..100 {
             assert_eq!(column.get(2*i+0), column4.get(2*i+0).copied().map_err(|e| *e));
             assert_eq!(column.get(2*i+1), column4.get(2*i+1).copied().map_err(|e| *e));
         }
     }
 
-    /// Test from_byte_slices for tuples.
+    /// Test from_store for tuples.
     #[test]
-    fn from_byte_slices_tuple() {
+    fn from_store_tuple() {
         use crate::common::{Push, Index};
-        use crate::{Borrow, AsBytes, FromBytes, ContainerOf};
+        use crate::{Borrow, FromBytes, ContainerOf};
 
         let mut column: ContainerOf<(u64, String, Vec<u32>)> = Default::default();
         for i in 0..50u64 {
             column.push(&(i, format!("hello {i}"), vec![i as u32; i as usize]));
         }
 
-        let byte_vec: Vec<&[u8]> = column.borrow().as_bytes().map(|(_, bytes)| bytes).collect();
+        let mut store = Vec::new();
+        crate::bytes::indexed::encode(&mut store, &column.borrow());
+        let ds = crate::bytes::indexed::DecodedStore::new(&store);
         type Borrowed<'a> = <ContainerOf<(u64, String, Vec<u32>)> as crate::Borrow>::Borrowed<'a>;
-        let reconstructed = Borrowed::from_byte_slices(&byte_vec);
+        let reconstructed = Borrowed::from_store(&ds, &mut 0);
         for i in 0..50 {
             let (a, b, _c) = reconstructed.get(i);
             assert_eq!(*a, i as u64);

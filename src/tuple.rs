@@ -75,22 +75,6 @@ macro_rules! tuple_impl {
             }
             #[inline(always)]
             #[allow(non_snake_case)]
-            fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
-                let mut _offset = 0;
-                $(
-                    let $name = $name::from_byte_slices(&bytes[_offset .. _offset + $name::SLICE_COUNT]);
-                    _offset += $name::SLICE_COUNT;
-                )*
-                ($($name,)*)
-            }
-            #[inline(always)]
-            #[allow(non_snake_case)]
-            fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
-                $(let $name = $name::from_u64s(words);)*
-                ($($name,)*)
-            }
-            #[inline(always)]
-            #[allow(non_snake_case)]
             fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
                 $(let $name = $name::from_store(store, offset);)*
                 ($($name,)*)

@@ -1,4 +1,4 @@
-//! Benchmarks for Indexed::decode improvements.
+//! Benchmarks for indexed decode improvements.
 //!
 //! Measures decode + field access from encoded `[u64]` data,
 //! exercising both simple and complex types, and separating
@@ -21,7 +21,7 @@ fn bench_ns<F: FnMut()>(iters: u64, mut f: F) -> f64 {
     elapsed.as_nanos() as f64 / iters as f64
 }
 
-/// Encode a container into Indexed format, returning the `[u64]` store.
+/// Encode a container into indexed format, returning the `[u64]` store.
 fn encode_indexed<C: Borrow>(container: &C) -> Vec<u64>
 where
     for<'a> C::Borrowed<'a>: AsBytes<'a>,

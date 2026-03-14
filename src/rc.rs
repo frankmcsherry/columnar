@@ -25,8 +25,6 @@ impl<'a, T: AsBytes<'a>> AsBytes<'a> for Rc<T> {
 impl<'a, T: FromBytes<'a>> FromBytes<'a> for Rc<T> {
     const SLICE_COUNT: usize = T::SLICE_COUNT;
     #[inline(always)] fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self { Rc::new(T::from_bytes(bytes)) }
-    #[inline(always)] fn from_byte_slices(bytes: &[&'a [u8]]) -> Self { Rc::new(T::from_byte_slices(bytes)) }
-    #[inline(always)] fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self { Rc::new(T::from_u64s(words)) }
     #[inline(always)] fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self { Rc::new(T::from_store(store, offset)) }
 }
 

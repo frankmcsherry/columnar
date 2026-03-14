@@ -28,19 +28,6 @@ macro_rules! implement_columnable {
                 bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()
             }
             #[inline(always)]
-            fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
-                bytemuck::try_cast_slice(bytes[0]).unwrap()
-            }
-            #[inline(always)]
-            fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
-                let (w, tail) = words.next().unwrap_or((&[], 0));
-                // Cast directly from &[u64] to &[$index_type]. Always succeeds since
-                // u64 alignment (8) >= alignment of any primitive type.
-                let all: &[$index_type] = bytemuck::cast_slice(w);
-                let trim = ((8 - tail as usize) % 8) / std::mem::size_of::<$index_type>();
-                all.get(..all.len().wrapping_sub(trim)).unwrap_or(&[])
-            }
-            #[inline(always)]
             fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
                 let (w, tail) = store.get(*offset);
                 *offset += 1;
@@ -64,17 +51,6 @@ macro_rules! implement_columnable {
             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
                 // We use `unwrap()` here in order to panic with the `bytemuck` error, which may be informative.
                 bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()
-            }
-            #[inline(always)]
-            fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
-                bytemuck::try_cast_slice(bytes[0]).unwrap()
-            }
-            #[inline(always)]
-            fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
-                let (w, tail) = words.next().unwrap_or((&[], 0));
-                let all: &[[$index_type; N]] = bytemuck::cast_slice(w);
-                let trim = ((8 - tail as usize) % 8) / (std::mem::size_of::<$index_type>() * N);
-                all.get(..all.len().wrapping_sub(trim)).unwrap_or(&[])
             }
             #[inline(always)]
             fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
@@ -180,14 +156,6 @@ mod sizes {
             Self { values: CV::from_bytes(bytes) }
         }
         #[inline(always)]
-        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
-            Self { values: CV::from_byte_slices(bytes) }
-        }
-        #[inline(always)]
-        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
-            Self { values: CV::from_u64s(words) }
-        }
-        #[inline(always)]
         fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
             Self { values: CV::from_store(store, offset) }
         }
@@ -268,14 +236,6 @@ mod sizes {
         #[inline(always)]
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
             Self { values: CV::from_bytes(bytes) }
-        }
-        #[inline(always)]
-        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
-            Self { values: CV::from_byte_slices(bytes) }
-        }
-        #[inline(always)]
-        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
-            Self { values: CV::from_u64s(words) }
         }
         #[inline(always)]
         fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
@@ -365,14 +325,6 @@ mod chars {
             Self { values: CV::from_bytes(bytes) }
         }
         #[inline(always)]
-        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
-            Self { values: CV::from_byte_slices(bytes) }
-        }
-        #[inline(always)]
-        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
-            Self { values: CV::from_u64s(words) }
-        }
-        #[inline(always)]
         fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
             Self { values: CV::from_store(store, offset) }
         }
@@ -460,14 +412,6 @@ mod larges {
             Self { values: CV::from_bytes(bytes) }
         }
         #[inline(always)]
-        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
-            Self { values: CV::from_byte_slices(bytes) }
-        }
-        #[inline(always)]
-        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
-            Self { values: CV::from_u64s(words) }
-        }
-        #[inline(always)]
         fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
             Self { values: CV::from_store(store, offset) }
         }
@@ -543,14 +487,6 @@ mod larges {
         #[inline(always)]
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
             Self { values: CV::from_bytes(bytes) }
-        }
-        #[inline(always)]
-        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
-            Self { values: CV::from_byte_slices(bytes) }
-        }
-        #[inline(always)]
-        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
-            Self { values: CV::from_u64s(words) }
         }
         #[inline(always)]
         fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
@@ -653,15 +589,6 @@ pub mod offsets {
                 Self { count: &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0] }
             }
             #[inline(always)]
-            fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
-                Self { count: &bytemuck::try_cast_slice(bytes[0]).unwrap()[0] }
-            }
-            #[inline(always)]
-            fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
-                let (w, _) = words.next().unwrap_or((&[], 0));
-                Self { count: w.first().unwrap_or(&0) }
-            }
-            #[inline(always)]
             fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
                 let (w, _) = store.get(*offset); *offset += 1;
                 Self { count: w.first().unwrap_or(&0) }
@@ -756,22 +683,6 @@ pub mod offsets {
                 let stride = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
                 let length = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
                 let bounds = BC::from_bytes(bytes);
-                Self { stride, length, bounds }
-            }
-            #[inline(always)]
-            fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
-                let stride = &bytemuck::try_cast_slice(bytes[0]).unwrap()[0];
-                let length = &bytemuck::try_cast_slice(bytes[1]).unwrap()[0];
-                let bounds = BC::from_byte_slices(&bytes[2..]);
-                Self { stride, length, bounds }
-            }
-            #[inline(always)]
-            fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
-                let (w1, _) = words.next().unwrap_or((&[], 0));
-                let stride = w1.first().unwrap_or(&0);
-                let (w2, _) = words.next().unwrap_or((&[], 0));
-                let length = w2.first().unwrap_or(&0);
-                let bounds = BC::from_u64s(words);
                 Self { stride, length, bounds }
             }
             #[inline(always)]
@@ -969,15 +880,6 @@ mod empty {
             Self { count: &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0], empty: () }
         }
         #[inline(always)]
-        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
-            Self { count: &bytemuck::try_cast_slice(bytes[0]).unwrap()[0], empty: () }
-        }
-        #[inline(always)]
-        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
-            let (w, _) = words.next().unwrap_or((&[], 0));
-            Self { count: w.first().unwrap_or(&0), empty: () }
-        }
-        #[inline(always)]
         fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
             let (w, _) = store.get(*offset); *offset += 1;
             Self { count: w.first().unwrap_or(&0), empty: () }
@@ -1057,22 +959,6 @@ mod boolean {
             let values = crate::FromBytes::from_bytes(bytes);
             let last_word = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
             let last_bits = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
-            Self { values, last_word, last_bits }
-        }
-        #[inline(always)]
-        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
-            let values = VC::from_byte_slices(&bytes[..VC::SLICE_COUNT]);
-            let last_word = &bytemuck::try_cast_slice(bytes[VC::SLICE_COUNT]).unwrap()[0];
-            let last_bits = &bytemuck::try_cast_slice(bytes[VC::SLICE_COUNT + 1]).unwrap()[0];
-            Self { values, last_word, last_bits }
-        }
-        #[inline(always)]
-        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
-            let values = VC::from_u64s(words);
-            let (w1, _) = words.next().unwrap_or((&[], 0));
-            let last_word = w1.first().unwrap_or(&0);
-            let (w2, _) = words.next().unwrap_or((&[], 0));
-            let last_bits = w2.first().unwrap_or(&0);
             Self { values, last_word, last_bits }
         }
         #[inline(always)]
@@ -1217,20 +1103,6 @@ mod duration {
             Self {
                 seconds: crate::FromBytes::from_bytes(bytes),
                 nanoseconds: crate::FromBytes::from_bytes(bytes),
-            }
-        }
-        #[inline(always)]
-        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
-            Self {
-                seconds: SC::from_byte_slices(&bytes[..SC::SLICE_COUNT]),
-                nanoseconds: NC::from_byte_slices(&bytes[SC::SLICE_COUNT..]),
-            }
-        }
-        #[inline(always)]
-        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
-            Self {
-                seconds: SC::from_u64s(words),
-                nanoseconds: NC::from_u64s(words),
             }
         }
         #[inline(always)]

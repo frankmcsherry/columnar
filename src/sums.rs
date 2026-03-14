@@ -63,20 +63,6 @@ pub mod rank_select {
             }
         }
         #[inline(always)]
-        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
-            Self {
-                counts: CC::from_byte_slices(&bytes[..CC::SLICE_COUNT]),
-                values: <crate::primitive::Bools<VC, &'a u64>>::from_byte_slices(&bytes[CC::SLICE_COUNT..]),
-            }
-        }
-        #[inline(always)]
-        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
-            Self {
-                counts: CC::from_u64s(words),
-                values: <crate::primitive::Bools<VC, &'a u64>>::from_u64s(words),
-            }
-        }
-        #[inline(always)]
         fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
             Self {
                 counts: CC::from_store(store, offset),
@@ -284,23 +270,6 @@ pub mod result {
                 indexes: crate::FromBytes::from_bytes(bytes),
                 oks: crate::FromBytes::from_bytes(bytes),
                 errs: crate::FromBytes::from_bytes(bytes),
-            }
-        }
-        #[inline(always)]
-        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
-            let ix_count = <RankSelect<CC, VC, &'a u64>>::SLICE_COUNT;
-            Self {
-                indexes: crate::FromBytes::from_byte_slices(&bytes[..ix_count]),
-                oks: SC::from_byte_slices(&bytes[ix_count .. ix_count + SC::SLICE_COUNT]),
-                errs: TC::from_byte_slices(&bytes[ix_count + SC::SLICE_COUNT ..]),
-            }
-        }
-        #[inline(always)]
-        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
-            Self {
-                indexes: crate::FromBytes::from_u64s(words),
-                oks: SC::from_u64s(words),
-                errs: TC::from_u64s(words),
             }
         }
         #[inline(always)]
@@ -563,21 +532,6 @@ pub mod option {
             Self {
                 indexes: crate::FromBytes::from_bytes(bytes),
                 somes: crate::FromBytes::from_bytes(bytes),
-            }
-        }
-        #[inline(always)]
-        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
-            let ix_count = <RankSelect<CC, VC, &'a u64>>::SLICE_COUNT;
-            Self {
-                indexes: crate::FromBytes::from_byte_slices(&bytes[..ix_count]),
-                somes: TC::from_byte_slices(&bytes[ix_count..]),
-            }
-        }
-        #[inline(always)]
-        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
-            Self {
-                indexes: crate::FromBytes::from_u64s(words),
-                somes: TC::from_u64s(words),
             }
         }
         #[inline(always)]
@@ -894,24 +848,6 @@ pub mod discriminant {
             let count = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
             let variant = crate::FromBytes::from_bytes(bytes);
             let offset = crate::FromBytes::from_bytes(bytes);
-            Self { tag, count, variant, offset }
-        }
-        #[inline(always)]
-        fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
-            let tag = &bytemuck::try_cast_slice(bytes[0]).unwrap()[0];
-            let count = &bytemuck::try_cast_slice(bytes[1]).unwrap()[0];
-            let variant = <&'a [u8]>::from_byte_slices(&bytes[2..2 + <&'a [u8]>::SLICE_COUNT]);
-            let offset = <&'a [u64]>::from_byte_slices(&bytes[2 + <&'a [u8]>::SLICE_COUNT..]);
-            Self { tag, count, variant, offset }
-        }
-        #[inline(always)]
-        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
-            let (w_tag, _) = words.next().unwrap_or((&[], 0));
-            let tag = w_tag.first().unwrap_or(&0);
-            let (w_count, _) = words.next().unwrap_or((&[], 0));
-            let count = w_count.first().unwrap_or(&0);
-            let variant = crate::FromBytes::from_u64s(words);
-            let offset = crate::FromBytes::from_u64s(words);
             Self { tag, count, variant, offset }
         }
         #[inline(always)]
