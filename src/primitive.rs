@@ -31,6 +31,18 @@ macro_rules! implement_columnable {
             fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
                 bytemuck::try_cast_slice(bytes[0]).unwrap()
             }
+            #[inline(always)]
+            fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
+                let (w, tail) = words.next().unwrap_or((&[], 0));
+                // Cast directly from &[u64] to &[$index_type]. Always succeeds since
+                // u64 alignment (8) >= alignment of any primitive type.
+                let all: &[$index_type] = bytemuck::cast_slice(w);
+                let trim = ((8 - tail as usize) % 8) / std::mem::size_of::<$index_type>();
+                all.get(..all.len().wrapping_sub(trim)).unwrap_or(&[])
+            }
+            fn element_sizes(sizes: &mut Vec<usize>) {
+                sizes.push(std::mem::size_of::<$index_type>());
+            }
         }
         impl<'a, const N: usize> crate::AsBytes<'a> for &'a [[$index_type; N]] {
             #[inline(always)]
@@ -48,6 +60,16 @@ macro_rules! implement_columnable {
             #[inline(always)]
             fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
                 bytemuck::try_cast_slice(bytes[0]).unwrap()
+            }
+            #[inline(always)]
+            fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
+                let (w, tail) = words.next().unwrap_or((&[], 0));
+                let all: &[[$index_type; N]] = bytemuck::cast_slice(w);
+                let trim = ((8 - tail as usize) % 8) / (std::mem::size_of::<$index_type>() * N);
+                all.get(..all.len().wrapping_sub(trim)).unwrap_or(&[])
+            }
+            fn element_sizes(sizes: &mut Vec<usize>) {
+                sizes.push(std::mem::size_of::<$index_type>() * N);
             }
         }
     )* }

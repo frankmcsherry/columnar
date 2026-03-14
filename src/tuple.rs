@@ -83,6 +83,15 @@ macro_rules! tuple_impl {
                 )*
                 ($($name,)*)
             }
+            #[inline(always)]
+            #[allow(non_snake_case)]
+            fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
+                $(let $name = $name::from_u64s(words);)*
+                ($($name,)*)
+            }
+            fn element_sizes(sizes: &mut Vec<usize>) {
+                $($name::element_sizes(sizes);)*
+            }
         }
 
         impl<$($name: Len),*> Len for ($($name,)*) {

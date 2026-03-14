@@ -644,6 +644,56 @@ pub mod common {
         fn from_byte_slices(bytes: &[&'a [u8]]) -> Self where Self: Sized {
             Self::from_bytes(&mut bytes.iter().copied())
         }
+        /// Reconstructs `self` from `u64`-aligned word slices with trailing byte counts.
+        ///
+        /// Each pair `(&[u64], u8)` provides a word slice and the number of valid bytes
+        /// in the last word (0 means all 8 bytes are valid, or the slice is empty).
+        /// Since all columnar data originates from `&[u64]` storage, this avoids the
+        /// alignment checks that `from_bytes` must perform when casting `&[u8]` back to
+        /// typed slices.
+        #[inline(always)]
+        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self where Self: Sized {
+            Self::from_bytes(&mut words.map(|(w, tail)| {
+                let bytes: &[u8] = bytemuck::cast_slice(w);
+                let len = if tail == 0 { bytes.len() } else { bytes.len() - (8 - tail as usize) };
+                &bytes[..len]
+            }))
+        }
+        /// Reports the element sizes (in bytes) for each slice this type consumes.
+        ///
+        /// Implementors should override this to report their actual element sizes.
+        /// For example, `&[u32]` pushes `4`, while a tuple delegates to each field.
+        /// The default implementation pushes `1` for each slice (accepting any byte length).
+        fn element_sizes(sizes: &mut Vec<usize>) {
+            for _ in 0..Self::SLICE_COUNT {
+                sizes.push(1);
+            }
+        }
+        /// Validates that the given slices are compatible with this type.
+        ///
+        /// The input matches the shape of `from_u64s`: each `(&[u64], u8)` is a word slice
+        /// and trailing byte count. This type consumes `Self::SLICE_COUNT` entries and checks
+        /// that each slice's byte length is a multiple of its element size.
+        ///
+        /// Built from [`Self::element_sizes`]; generally should not need to be overridden.
+        fn validate(slices: &[(&[u64], u8)]) -> Result<(), String> where Self: Sized {
+            if slices.len() < Self::SLICE_COUNT {
+                return Err(format!("expected {} slices but got {}", Self::SLICE_COUNT, slices.len()));
+            }
+            let mut sizes = Vec::new();
+            Self::element_sizes(&mut sizes);
+            for (i, elem_size) in sizes.iter().enumerate() {
+                let (words, tail) = &slices[i];
+                let byte_len = words.len() * 8 - ((8 - *tail as usize) % 8);
+                if byte_len % elem_size != 0 {
+                    return Err(format!(
+                        "slice {} has {} bytes, not a multiple of element size {}",
+                        i, byte_len, elem_size
+                    ));
+                }
+            }
+            Ok(())
+        }
     }
 
 }

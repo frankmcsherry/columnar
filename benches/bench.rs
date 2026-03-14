@@ -1,6 +1,6 @@
 use bencher::{benchmark_group, benchmark_main, Bencher};
 use columnar::{Clear, Columnar};
-use columnar::bytes::{EncodeDecode, Sequence};
+use columnar::bytes::indexed;
 
 fn empty_copy(bencher: &mut Bencher) { _bench_copy(bencher, vec![(); 1024]); }
 fn option_copy(bencher: &mut Bencher) { _bench_copy(bencher, vec![Option::<String>::None; 1024]); }
@@ -61,7 +61,7 @@ fn _bench_copy<T: Columnar+Eq>(bencher: &mut Bencher, record: T) where T::Contai
         arena.push(&record);
     }
     use columnar::Borrow;
-    bencher.bytes = Sequence::length_in_bytes(&arena.borrow()) as u64;
+    bencher.bytes = indexed::length_in_bytes(&arena.borrow()) as u64;
     arena.clear();
 
     bencher.iter(|| {
@@ -83,7 +83,7 @@ fn _bench_extend<T: Columnar+Eq>(bencher: &mut Bencher, record: T) where T::Cont
         arena.push(&record);
     }
     use columnar::{Borrow, Container};
-    bencher.bytes = Sequence::length_in_bytes(&arena.borrow()) as u64;
+    bencher.bytes = indexed::length_in_bytes(&arena.borrow()) as u64;
 
     let arena2 = arena.clone();
     

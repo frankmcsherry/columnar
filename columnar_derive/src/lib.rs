@@ -331,6 +331,10 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
                     )*
                     Self { #(#names,)* }
                 }
+                #[inline(always)]
+                fn from_u64s(words: &mut impl Iterator<Item=(&'columnar [u64], u8)>) -> Self {
+                    Self { #(#names: ::columnar::FromBytes::from_u64s(words),)* }
+                }
             }
         }
     };
@@ -518,6 +522,11 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
             #[inline(always)]
             fn from_byte_slices(bytes: &[&'columnar [u8]]) -> Self {
                 Self { count: &::columnar::bytemuck::try_cast_slice(bytes[0]).unwrap()[0] }
+            }
+            #[inline(always)]
+            fn from_u64s(words: &mut impl Iterator<Item=(&'columnar [u64], u8)>) -> Self {
+                let (w, _tail) = words.next().expect("Iterator exhausted prematurely");
+                Self { count: &w[0] }
             }
         }
 
@@ -910,6 +919,13 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                     let indexes = <::columnar::Discriminant<CVar, COff, CC>>::from_byte_slices(&bytes[_offset ..]);
                     Self { #(#names,)* indexes }
                 }
+                #[inline(always)]
+                fn from_u64s(words: &mut impl Iterator<Item=(&'columnar [u64], u8)>) -> Self {
+                    Self {
+                        #(#names: ::columnar::FromBytes::from_u64s(words),)*
+                        indexes: ::columnar::FromBytes::from_u64s(words),
+                    }
+                }
             }
         }
     };
@@ -1202,6 +1218,10 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
             #[inline(always)]
             fn from_byte_slices(bytes: &[&'columnar [u8]]) -> Self {
                 Self { variant: CVar::from_byte_slices(bytes) }
+            }
+            #[inline(always)]
+            fn from_u64s(words: &mut impl Iterator<Item=(&'columnar [u64], u8)>) -> Self {
+                Self { variant: ::columnar::FromBytes::from_u64s(words) }
             }
         }
 
