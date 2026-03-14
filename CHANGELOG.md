@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0](https://github.com/frankmcsherry/columnar/compare/columnar-v0.11.1...columnar-v0.12.0) - 2026-03-14
+
+### Other
+
+- Add Discriminant::is_heterogenous()
+- Rebase on master
+- Enum containers avoid per-element metadata for homogenous collections
+- Remove inspect module
+- Constant numbers of byte slices for FromBytes
+- Improve Indexed::decode codegen
+
 ## [0.11.1](https://github.com/frankmcsherry/columnar/compare/columnar-v0.11.0...columnar-v0.11.1) - 2026-01-17
 
 ### Other
