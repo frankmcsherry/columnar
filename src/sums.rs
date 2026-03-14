@@ -76,6 +76,13 @@ pub mod rank_select {
                 values: <crate::primitive::Bools<VC, &'a u64>>::from_u64s(words),
             }
         }
+        #[inline(always)]
+        fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
+            Self {
+                counts: CC::from_store(store, offset),
+                values: <crate::primitive::Bools<VC, &'a u64>>::from_store(store, offset),
+            }
+        }
     }
 
 
@@ -294,6 +301,14 @@ pub mod result {
                 indexes: crate::FromBytes::from_u64s(words),
                 oks: SC::from_u64s(words),
                 errs: TC::from_u64s(words),
+            }
+        }
+        #[inline(always)]
+        fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
+            Self {
+                indexes: crate::FromBytes::from_store(store, offset),
+                oks: SC::from_store(store, offset),
+                errs: TC::from_store(store, offset),
             }
         }
     }
@@ -563,6 +578,13 @@ pub mod option {
             Self {
                 indexes: crate::FromBytes::from_u64s(words),
                 somes: TC::from_u64s(words),
+            }
+        }
+        #[inline(always)]
+        fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
+            Self {
+                indexes: crate::FromBytes::from_store(store, offset),
+                somes: TC::from_store(store, offset),
             }
         }
     }
@@ -891,6 +913,16 @@ pub mod discriminant {
             let variant = crate::FromBytes::from_u64s(words);
             let offset = crate::FromBytes::from_u64s(words);
             Self { tag, count, variant, offset }
+        }
+        #[inline(always)]
+        fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
+            let (w_tag, _) = store.get(*offset); *offset += 1;
+            let tag = w_tag.first().unwrap_or(&0);
+            let (w_count, _) = store.get(*offset); *offset += 1;
+            let count = w_count.first().unwrap_or(&0);
+            let variant = crate::FromBytes::from_store(store, offset);
+            let offset_field = crate::FromBytes::from_store(store, offset);
+            Self { tag, count, variant, offset: offset_field }
         }
         fn element_sizes(sizes: &mut Vec<usize>) {
             sizes.push(8); // tag

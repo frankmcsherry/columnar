@@ -147,6 +147,57 @@ pub mod indexed {
         })
     }
 
+    /// A zero-allocation view into Indexed-encoded data, providing random access to individual slices.
+    ///
+    /// Constructed from `&[u64]` in O(1), this wraps the offset index and data region
+    /// and provides `get(k)` to retrieve the k-th slice as `(&[u64], u8)`.
+    /// Each access is independent — no iterator state — enabling LLVM to eliminate
+    /// unused field lookups entirely.
+    #[derive(Copy, Clone)]
+    pub struct DecodedStore<'a> {
+        /// The offset index: `index[0]` is the byte offset where data starts,
+        /// `index[k+1]` is the byte offset where slice k ends.
+        index: &'a [u64],
+        /// The data region, pre-sliced to include only valid words.
+        words: &'a [u64],
+    }
+
+    impl<'a> DecodedStore<'a> {
+        /// Creates a decoded view of an Indexed-encoded `&[u64]` store.
+        ///
+        /// This is O(1) — it just reads the first offset to locate the index
+        /// and data regions. No allocation, no iteration.
+        #[inline(always)]
+        pub fn new(store: &'a [u64]) -> Self {
+            let slices = store.first().copied().unwrap_or(0) as usize / 8;
+            let index = store.get(..slices).unwrap_or(&[]);
+            let last = index.last().copied().unwrap_or(0) as usize;
+            let last_w = (last + 7) / 8;
+            let words = store.get(..last_w).unwrap_or(&[]);
+            Self { index, words }
+        }
+        /// Returns the k-th slice as `(&[u64], u8)`.
+        ///
+        /// The `u8` is the number of valid trailing bytes in the last word
+        /// (0 means all 8 are valid). Returns an empty slice for out-of-bounds access.
+        #[inline(always)]
+        pub fn get(&self, k: usize) -> (&'a [u64], u8) {
+            let upper = (*self.index.get(k + 1).unwrap_or(&0) as usize)
+                .min(self.words.len() * 8);
+            let lower = (((*self.index.get(k).unwrap_or(&0) as usize) + 7) & !7)
+                .min(upper);
+            let upper_w = ((upper + 7) / 8).min(self.words.len());
+            let lower_w = (lower / 8).min(upper_w);
+            let tail = (upper % 8) as u8;
+            (self.words.get(lower_w..upper_w).unwrap_or(&[]), tail)
+        }
+        /// The number of slices in the store.
+        #[inline(always)]
+        pub fn len(&self) -> usize {
+            self.index.len().saturating_sub(1)
+        }
+    }
+
     /// Validates the internal structure of Indexed-encoded data.
     ///
     /// Checks that offsets are well-formed, in bounds, and that the slice count matches
@@ -324,8 +375,14 @@ pub mod stash {
         #[inline(always)] pub fn borrow<'a>(&'a self) -> <C as crate::Borrow>::Borrowed<'a> {
             match self {
                 Stash::Typed(t) => t.borrow(),
-                Stash::Bytes(b) => <C::Borrowed<'_> as FromBytes>::from_u64s(&mut crate::bytes::indexed::decode_u64s(bytemuck::cast_slice(b))),
-                Stash::Align(a) => <C::Borrowed<'_> as FromBytes>::from_u64s(&mut crate::bytes::indexed::decode_u64s(a)),
+                Stash::Bytes(b) => {
+                    let store = crate::bytes::indexed::DecodedStore::new(bytemuck::cast_slice(b));
+                    <C::Borrowed<'_> as FromBytes>::from_store(&store, &mut 0)
+                },
+                Stash::Align(a) => {
+                    let store = crate::bytes::indexed::DecodedStore::new(a);
+                    <C::Borrowed<'_> as FromBytes>::from_store(&store, &mut 0)
+                },
             }
         }
         /// The number of bytes needed to write the contents using the `Indexed` encoder.

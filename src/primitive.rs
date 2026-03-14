@@ -40,6 +40,14 @@ macro_rules! implement_columnable {
                 let trim = ((8 - tail as usize) % 8) / std::mem::size_of::<$index_type>();
                 all.get(..all.len().wrapping_sub(trim)).unwrap_or(&[])
             }
+            #[inline(always)]
+            fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
+                let (w, tail) = store.get(*offset);
+                *offset += 1;
+                let all: &[$index_type] = bytemuck::cast_slice(w);
+                let trim = ((8 - tail as usize) % 8) / std::mem::size_of::<$index_type>();
+                all.get(..all.len().wrapping_sub(trim)).unwrap_or(&[])
+            }
             fn element_sizes(sizes: &mut Vec<usize>) {
                 sizes.push(std::mem::size_of::<$index_type>());
             }
@@ -64,6 +72,14 @@ macro_rules! implement_columnable {
             #[inline(always)]
             fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
                 let (w, tail) = words.next().unwrap_or((&[], 0));
+                let all: &[[$index_type; N]] = bytemuck::cast_slice(w);
+                let trim = ((8 - tail as usize) % 8) / (std::mem::size_of::<$index_type>() * N);
+                all.get(..all.len().wrapping_sub(trim)).unwrap_or(&[])
+            }
+            #[inline(always)]
+            fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
+                let (w, tail) = store.get(*offset);
+                *offset += 1;
                 let all: &[[$index_type; N]] = bytemuck::cast_slice(w);
                 let trim = ((8 - tail as usize) % 8) / (std::mem::size_of::<$index_type>() * N);
                 all.get(..all.len().wrapping_sub(trim)).unwrap_or(&[])
@@ -167,6 +183,14 @@ mod sizes {
         fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
             Self { values: CV::from_byte_slices(bytes) }
         }
+        #[inline(always)]
+        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
+            Self { values: CV::from_u64s(words) }
+        }
+        #[inline(always)]
+        fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
+            Self { values: CV::from_store(store, offset) }
+        }
     }
 
 
@@ -248,6 +272,14 @@ mod sizes {
         #[inline(always)]
         fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
             Self { values: CV::from_byte_slices(bytes) }
+        }
+        #[inline(always)]
+        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
+            Self { values: CV::from_u64s(words) }
+        }
+        #[inline(always)]
+        fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
+            Self { values: CV::from_store(store, offset) }
         }
     }
 }
@@ -336,6 +368,14 @@ mod chars {
         fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
             Self { values: CV::from_byte_slices(bytes) }
         }
+        #[inline(always)]
+        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
+            Self { values: CV::from_u64s(words) }
+        }
+        #[inline(always)]
+        fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
+            Self { values: CV::from_store(store, offset) }
+        }
     }
 }
 
@@ -423,6 +463,14 @@ mod larges {
         fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
             Self { values: CV::from_byte_slices(bytes) }
         }
+        #[inline(always)]
+        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
+            Self { values: CV::from_u64s(words) }
+        }
+        #[inline(always)]
+        fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
+            Self { values: CV::from_store(store, offset) }
+        }
     }
 
     #[derive(Copy, Clone, Default)]
@@ -499,6 +547,14 @@ mod larges {
         #[inline(always)]
         fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
             Self { values: CV::from_byte_slices(bytes) }
+        }
+        #[inline(always)]
+        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
+            Self { values: CV::from_u64s(words) }
+        }
+        #[inline(always)]
+        fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
+            Self { values: CV::from_store(store, offset) }
         }
     }
 }
@@ -600,6 +656,16 @@ pub mod offsets {
             fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
                 Self { count: &bytemuck::try_cast_slice(bytes[0]).unwrap()[0] }
             }
+            #[inline(always)]
+            fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
+                let (w, _) = words.next().unwrap_or((&[], 0));
+                Self { count: w.first().unwrap_or(&0) }
+            }
+            #[inline(always)]
+            fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
+                let (w, _) = store.get(*offset); *offset += 1;
+                Self { count: w.first().unwrap_or(&0) }
+            }
         }
 
         use super::Strides;
@@ -697,6 +763,24 @@ pub mod offsets {
                 let stride = &bytemuck::try_cast_slice(bytes[0]).unwrap()[0];
                 let length = &bytemuck::try_cast_slice(bytes[1]).unwrap()[0];
                 let bounds = BC::from_byte_slices(&bytes[2..]);
+                Self { stride, length, bounds }
+            }
+            #[inline(always)]
+            fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
+                let (w1, _) = words.next().unwrap_or((&[], 0));
+                let stride = w1.first().unwrap_or(&0);
+                let (w2, _) = words.next().unwrap_or((&[], 0));
+                let length = w2.first().unwrap_or(&0);
+                let bounds = BC::from_u64s(words);
+                Self { stride, length, bounds }
+            }
+            #[inline(always)]
+            fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
+                let (w1, _) = store.get(*offset); *offset += 1;
+                let stride = w1.first().unwrap_or(&0);
+                let (w2, _) = store.get(*offset); *offset += 1;
+                let length = w2.first().unwrap_or(&0);
+                let bounds = BC::from_store(store, offset);
                 Self { stride, length, bounds }
             }
         }
@@ -888,6 +972,16 @@ mod empty {
         fn from_byte_slices(bytes: &[&'a [u8]]) -> Self {
             Self { count: &bytemuck::try_cast_slice(bytes[0]).unwrap()[0], empty: () }
         }
+        #[inline(always)]
+        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
+            let (w, _) = words.next().unwrap_or((&[], 0));
+            Self { count: w.first().unwrap_or(&0), empty: () }
+        }
+        #[inline(always)]
+        fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
+            let (w, _) = store.get(*offset); *offset += 1;
+            Self { count: w.first().unwrap_or(&0), empty: () }
+        }
     }
 }
 
@@ -970,6 +1064,24 @@ mod boolean {
             let values = VC::from_byte_slices(&bytes[..VC::SLICE_COUNT]);
             let last_word = &bytemuck::try_cast_slice(bytes[VC::SLICE_COUNT]).unwrap()[0];
             let last_bits = &bytemuck::try_cast_slice(bytes[VC::SLICE_COUNT + 1]).unwrap()[0];
+            Self { values, last_word, last_bits }
+        }
+        #[inline(always)]
+        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
+            let values = VC::from_u64s(words);
+            let (w1, _) = words.next().unwrap_or((&[], 0));
+            let last_word = w1.first().unwrap_or(&0);
+            let (w2, _) = words.next().unwrap_or((&[], 0));
+            let last_bits = w2.first().unwrap_or(&0);
+            Self { values, last_word, last_bits }
+        }
+        #[inline(always)]
+        fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
+            let values = VC::from_store(store, offset);
+            let (w1, _) = store.get(*offset); *offset += 1;
+            let last_word = w1.first().unwrap_or(&0);
+            let (w2, _) = store.get(*offset); *offset += 1;
+            let last_bits = w2.first().unwrap_or(&0);
             Self { values, last_word, last_bits }
         }
     }
@@ -1112,6 +1224,20 @@ mod duration {
             Self {
                 seconds: SC::from_byte_slices(&bytes[..SC::SLICE_COUNT]),
                 nanoseconds: NC::from_byte_slices(&bytes[SC::SLICE_COUNT..]),
+            }
+        }
+        #[inline(always)]
+        fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self {
+            Self {
+                seconds: SC::from_u64s(words),
+                nanoseconds: NC::from_u64s(words),
+            }
+        }
+        #[inline(always)]
+        fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
+            Self {
+                seconds: SC::from_store(store, offset),
+                nanoseconds: NC::from_store(store, offset),
             }
         }
     }

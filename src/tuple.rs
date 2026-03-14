@@ -89,6 +89,12 @@ macro_rules! tuple_impl {
                 $(let $name = $name::from_u64s(words);)*
                 ($($name,)*)
             }
+            #[inline(always)]
+            #[allow(non_snake_case)]
+            fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
+                $(let $name = $name::from_store(store, offset);)*
+                ($($name,)*)
+            }
             fn element_sizes(sizes: &mut Vec<usize>) {
                 $($name::element_sizes(sizes);)*
             }

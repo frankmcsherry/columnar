@@ -63,6 +63,7 @@ impl<'a, C: FromBytes<'a>> FromBytes<'a> for Boxed<C> {
     #[inline(always)] fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self { Self(C::from_bytes(bytes)) }
     #[inline(always)] fn from_byte_slices(bytes: &[&'a [u8]]) -> Self { Self(C::from_byte_slices(bytes)) }
     #[inline(always)] fn from_u64s(words: &mut impl Iterator<Item=(&'a [u64], u8)>) -> Self { Self(C::from_u64s(words)) }
+    #[inline(always)] fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self { Self(C::from_store(store, offset)) }
 }
 impl<C: Index> Index for Boxed<C> {
     type Ref = Boxed<C::Ref>;

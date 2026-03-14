@@ -116,6 +116,13 @@ impl<'a, BC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a
             values: VC::from_u64s(words),
         }
     }
+    #[inline(always)]
+    fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
+        Self {
+            bounds: BC::from_store(store, offset),
+            values: VC::from_store(store, offset),
+        }
+    }
     fn element_sizes(sizes: &mut Vec<usize>) {
         BC::element_sizes(sizes);
         VC::element_sizes(sizes);

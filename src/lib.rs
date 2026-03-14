@@ -618,6 +618,15 @@ pub mod common {
     ///
     /// Implementors of this trait almost certainly reference the lifetime `'a` themselves,
     /// unless they actively deserialize the bytes (vs sit on the slices, as if zero-copy).
+    ///
+    /// # Overriding methods
+    ///
+    /// The only required method is [`from_bytes`](Self::from_bytes). However, the default
+    /// implementations of [`from_u64s`](Self::from_u64s), [`from_store`](Self::from_store),
+    /// and [`element_sizes`](Self::element_sizes) fall back through `from_bytes`, which
+    /// contains panicking operations that prevent LLVM from eliminating unused fields.
+    /// Implementors should override all four methods to ensure optimal codegen.
+    /// Missing overrides are functionally correct but silently degrade performance.
     pub trait FromBytes<'a> {
         /// The number of byte slices this type consumes when reconstructed.
         ///
@@ -658,6 +667,19 @@ pub mod common {
                 let len = if tail == 0 { bytes.len() } else { bytes.len() - (8 - tail as usize) };
                 &bytes[..len]
             }))
+        }
+        /// Reconstructs `self` from a [`DecodedStore`](crate::bytes::indexed::DecodedStore),
+        /// using direct random access at a given offset.
+        ///
+        /// Each field indexes directly into the store at its compile-time-known offset,
+        /// with no iterator state or sequential dependency. This enables LLVM to fully
+        /// eliminate unused fields.
+        #[inline(always)]
+        fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self where Self: Sized {
+            // Default: delegate to from_u64s via an iterator over the store.
+            let start = *offset;
+            *offset += Self::SLICE_COUNT;
+            Self::from_u64s(&mut (start..*offset).map(|i| store.get(i)))
         }
         /// Reports the element sizes (in bytes) for each slice this type consumes.
         ///
