@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0](https://github.com/frankmcsherry/columnar/compare/columnar_derive-v0.11.1...columnar_derive-v0.12.0) - 2026-03-14
+
+### Other
+
+- Rebase on master
+- Enum containers avoid per-element metadata for homogenous collections
+- Constant numbers of byte slices for FromBytes
+
 ## [0.11.0](https://github.com/frankmcsherry/columnar/compare/columnar_derive-v0.10.2...columnar_derive-v0.11.0) - 2025-09-29
 
 ### Other
