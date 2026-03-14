@@ -147,12 +147,12 @@ pub mod indexed {
         })
     }
 
-    /// Validates that `store` contains well-formed Indexed-encoded data with `expected_slices` byte slices.
+    /// Validates the internal structure of Indexed-encoded data.
     ///
-    /// Returns `Ok(())` if the data is well-formed, or `Err` with a description of the problem.
-    /// Call this once at the boundary (e.g., when receiving data from the network or disk)
-    /// before using the non-panicking `decode_u64s` / `from_u64s` path.
-    pub fn validate(store: &[u64], expected_slices: usize) -> Result<(), String> {
+    /// Checks that offsets are well-formed, in bounds, and that the slice count matches
+    /// `expected_slices`. This is a building block for [`validate`]; prefer calling
+    /// `validate` directly unless you need structural checks alone.
+    pub fn validate_structure(store: &[u64], expected_slices: usize) -> Result<(), String> {
         if store.is_empty() {
             return Err("store is empty".into());
         }
@@ -185,9 +185,9 @@ pub mod indexed {
 
     /// Validates that `store` contains well-formed data compatible with type `T`.
     ///
-    /// This combines structural validation ([`validate`]) with type-level validation
-    /// ([`FromBytes::validate`]) in a single call. Use this at trust boundaries when
-    /// receiving encoded data before passing it to `from_u64s`.
+    /// Checks both the internal structure of the encoding (offsets, slice count) and
+    /// type-level compatibility (each slice's byte length is a multiple of its element
+    /// size). Call this once at trust boundaries when receiving encoded data.
     ///
     /// The `from_u64s` decode path performs no further validation at access time:
     /// it will not panic on malformed data, but may return incorrect results.
@@ -196,12 +196,12 @@ pub mod indexed {
     ///
     /// ```ignore
     /// type B<'a> = <MyContainer as Borrow>::Borrowed<'a>;
-    /// indexed::validate_typed::<B>(&store)?;
+    /// indexed::validate::<B>(&store)?;
     /// // Now safe to use the non-panicking path:
     /// let borrowed = B::from_u64s(&mut indexed::decode_u64s(&store));
     /// ```
-    pub fn validate_typed<'a, T: crate::FromBytes<'a>>(store: &[u64]) -> Result<(), String> {
-        validate(store, T::SLICE_COUNT)?;
+    pub fn validate<'a, T: crate::FromBytes<'a>>(store: &[u64]) -> Result<(), String> {
+        validate_structure(store, T::SLICE_COUNT)?;
         let slices: Vec<_> = decode_u64s(store).collect();
         T::validate(&slices)
     }
@@ -253,10 +253,10 @@ pub mod indexed {
             encode(&mut store, &column.borrow());
 
             type B<'a> = <ContainerOf<(u64, u64, u64)> as crate::Borrow>::Borrowed<'a>;
-            assert!(super::validate_typed::<B>(&store).is_ok());
+            assert!(super::validate::<B>(&store).is_ok());
 
             // Wrong slice count should fail structural validation.
-            assert!(super::validate(&store, 5).is_err());
+            assert!(super::validate_structure(&store, 5).is_err());
         }
 
         #[test]
@@ -271,7 +271,7 @@ pub mod indexed {
             encode(&mut store, &column.borrow());
 
             type B<'a> = <ContainerOf<(u64, String, Vec<u32>)> as crate::Borrow>::Borrowed<'a>;
-            assert!(super::validate_typed::<B>(&store).is_ok());
+            assert!(super::validate::<B>(&store).is_ok());
         }
     }
 }
