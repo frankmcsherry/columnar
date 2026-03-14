@@ -860,11 +860,12 @@ pub mod discriminant {
             let offset_field = crate::FromBytes::from_store(store, offset);
             Self { tag, count, variant, offset: offset_field }
         }
-        fn element_sizes(sizes: &mut Vec<usize>) {
+        fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
             sizes.push(8); // tag
             sizes.push(8); // count
-            <&[u8]>::element_sizes(sizes);
-            <&[u64]>::element_sizes(sizes);
+            <&[u8]>::element_sizes(sizes)?;
+            <&[u64]>::element_sizes(sizes)?;
+            Ok(())
         }
     }
 
