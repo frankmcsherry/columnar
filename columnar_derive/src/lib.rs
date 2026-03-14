@@ -923,8 +923,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                 fn from_u64s(words: &mut impl Iterator<Item=(&'columnar [u64], u8)>) -> Self {
                     Self {
                         #(#names: ::columnar::FromBytes::from_u64s(words),)*
-                        variant: ::columnar::FromBytes::from_u64s(words),
-                        offset: ::columnar::FromBytes::from_u64s(words),
+                        indexes: ::columnar::FromBytes::from_u64s(words),
                     }
                 }
             }
