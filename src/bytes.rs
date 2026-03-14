@@ -219,7 +219,7 @@ pub mod indexed {
     #[cfg(test)]
     mod test {
 
-        use crate::{Borrow, ContainerOf, FromBytes};
+        use crate::{Borrow, ContainerOf};
         use crate::common::Push;
         use crate::AsBytes;
 
