@@ -281,7 +281,7 @@ pub mod indexed {
             let mut store = Vec::new();
             encode(&mut store, &column.borrow());
 
-            type B<'a> = <ContainerOf<(u64, u64, u64)> as crate::Borrow>::Borrowed<'a>;
+            type B<'a> = crate::BorrowedOf<'a, (u64, u64, u64)>;
             assert!(super::validate::<B>(&store).is_ok());
 
             // Wrong slice count should fail structural validation.
@@ -299,7 +299,7 @@ pub mod indexed {
             let mut store = Vec::new();
             encode(&mut store, &column.borrow());
 
-            type B<'a> = <ContainerOf<(u64, String, Vec<u32>)> as crate::Borrow>::Borrowed<'a>;
+            type B<'a> = crate::BorrowedOf<'a, (u64, String, Vec<u32>)>;
             assert!(super::validate::<B>(&store).is_ok());
         }
     }
@@ -479,7 +479,7 @@ mod test {
         let mut store = Vec::new();
         crate::bytes::indexed::encode(&mut store, &column.borrow());
         let ds = crate::bytes::indexed::DecodedStore::new(&store);
-        type Borrowed<'a> = <ContainerOf<(u64, String, Vec<u32>)> as crate::Borrow>::Borrowed<'a>;
+        type Borrowed<'a> = crate::BorrowedOf<'a, (u64, String, Vec<u32>)>;
         let reconstructed = Borrowed::from_store(&ds, &mut 0);
         for i in 0..50 {
             let (a, b, _c) = reconstructed.get(i);

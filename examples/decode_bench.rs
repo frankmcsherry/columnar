@@ -75,7 +75,7 @@ fn exp2_vec_u8(n: usize, iters: u64) {
     // Decode + access
     let ns_decode_access = bench_ns(iters, || {
         let mut slices = Indexed::decode(&store);
-        type B<'a> = <ContainerOf<Vec<u8>> as Borrow>::Borrowed<'a>;
+        type B<'a> = BorrowedOf<'a, Vec<u8>>;
         let borrowed = B::from_bytes(&mut slices);
         black_box(borrowed.get(idx));
     });
@@ -83,7 +83,7 @@ fn exp2_vec_u8(n: usize, iters: u64) {
     // Access only
     let slices_vec: Vec<&[u8]> = Indexed::decode(&store).collect();
     let mut slices_iter = slices_vec.iter().copied();
-    type B2<'a> = <ContainerOf<Vec<u8>> as Borrow>::Borrowed<'a>;
+    type B2<'a> = BorrowedOf<'a, Vec<u8>>;
     let borrowed_once = B2::from_bytes(&mut slices_iter);
     let ns_access_only = bench_ns(iters, || {
         black_box(borrowed_once.get(idx));
@@ -155,7 +155,7 @@ fn exp4_tuple1(n: usize, iters: u64) {
 
     let ns = bench_ns(iters, || {
         let mut slices = Indexed::decode(&store);
-        type B<'a> = <ContainerOf<(u64,)> as Borrow>::Borrowed<'a>;
+        type B<'a> = BorrowedOf<'a, (u64,)>;
         let b = B::from_bytes(&mut slices);
         black_box(b.get(idx));
     });
@@ -170,7 +170,7 @@ fn exp4_tuple2(n: usize, iters: u64) {
 
     let ns = bench_ns(iters, || {
         let mut slices = Indexed::decode(&store);
-        type B<'a> = <ContainerOf<(u64, u64)> as Borrow>::Borrowed<'a>;
+        type B<'a> = BorrowedOf<'a, (u64, u64)>;
         let b = B::from_bytes(&mut slices);
         let (_a, b_val) = b.get(idx);
         black_box(b_val);
@@ -186,7 +186,7 @@ fn exp4_tuple3(n: usize, iters: u64) {
 
     let ns = bench_ns(iters, || {
         let mut slices = Indexed::decode(&store);
-        type B<'a> = <ContainerOf<(u64, u64, u64)> as Borrow>::Borrowed<'a>;
+        type B<'a> = BorrowedOf<'a, (u64, u64, u64)>;
         let b = B::from_bytes(&mut slices);
         let (_a, _b, c_val) = b.get(idx);
         black_box(c_val);
@@ -202,7 +202,7 @@ fn exp4_tuple5(n: usize, iters: u64) {
 
     let ns = bench_ns(iters, || {
         let mut slices = Indexed::decode(&store);
-        type B<'a> = <ContainerOf<(u64, u64, u64, u64, u64)> as Borrow>::Borrowed<'a>;
+        type B<'a> = BorrowedOf<'a, (u64, u64, u64, u64, u64)>;
         let b = B::from_bytes(&mut slices);
         let (_a, _b, _c, _d, e_val) = b.get(idx);
         black_box(e_val);
@@ -218,7 +218,7 @@ fn exp4_tuple8(n: usize, iters: u64) {
 
     let ns = bench_ns(iters, || {
         let mut slices = Indexed::decode(&store);
-        type B<'a> = <ContainerOf<(u64, u64, u64, u64, u64, u64, u64, u64)> as Borrow>::Borrowed<'a>;
+        type B<'a> = BorrowedOf<'a, (u64, u64, u64, u64, u64, u64, u64, u64)>;
         let b = B::from_bytes(&mut slices);
         let (_a, _b, _c, _d, _e, _f, _g, h_val) = b.get(idx);
         black_box(h_val);

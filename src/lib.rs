@@ -86,6 +86,11 @@ pub trait Columnar : 'static {
 /// Equivalent to `<T as Columnar>::Container`.
 pub type ContainerOf<T> = <T as Columnar>::Container;
 
+/// The borrowed container type of columnar type `T`.
+///
+/// Equivalent to `<<T as Columnar>::Container> as Borrow>::Borrowed<'a>`.
+pub type BorrowedOf<'a, T> = <ContainerOf<T> as Borrow>::Borrowed<'a>;
+
 /// For a lifetime, the reference type of columnar type `T`.
 ///
 /// Equivalent to `<ContainerOf<T> as Borrow>::Ref<'a>`.
