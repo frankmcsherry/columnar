@@ -107,7 +107,7 @@ fn exp3_stash_u64(n: usize, iters: u64) {
     let mut bytes_buf: Vec<u8> = Vec::new();
     Indexed::write(&mut bytes_buf, &container.borrow()).unwrap();
 
-    let stash: Stash<ContainerOf<u64>, Vec<u8>> = Stash::from(bytes_buf);
+    let stash: Stash<ContainerOf<u64>, Vec<u8>> = Stash::try_from_bytes(bytes_buf).unwrap();
 
     let idx = n / 2;
     let ns = bench_ns(iters, || {
@@ -128,7 +128,7 @@ fn exp3_stash_vec_u8(n: usize, iters: u64) {
     let mut bytes_buf: Vec<u8> = Vec::new();
     Indexed::write(&mut bytes_buf, &container.borrow()).unwrap();
 
-    let stash: Stash<ContainerOf<Vec<u8>>, Vec<u8>> = Stash::from(bytes_buf);
+    let stash: Stash<ContainerOf<Vec<u8>>, Vec<u8>> = Stash::try_from_bytes(bytes_buf).unwrap();
 
     let idx = n / 2;
     let ns = bench_ns(iters, || {
