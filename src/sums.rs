@@ -853,8 +853,10 @@ pub mod discriminant {
         #[inline(always)]
         fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
             let (w_tag, _) = store.get(*offset); *offset += 1;
+            debug_assert!(!w_tag.is_empty(), "Discriminant::from_store: empty tag slice");
             let tag = w_tag.first().unwrap_or(&0);
             let (w_count, _) = store.get(*offset); *offset += 1;
+            debug_assert!(!w_count.is_empty(), "Discriminant::from_store: empty count slice");
             let count = w_count.first().unwrap_or(&0);
             let variant = crate::FromBytes::from_store(store, offset);
             let offset_field = crate::FromBytes::from_store(store, offset);
@@ -865,6 +867,18 @@ pub mod discriminant {
             sizes.push(8); // count
             <&[u8]>::element_sizes(sizes)?;
             <&[u64]>::element_sizes(sizes)?;
+            Ok(())
+        }
+        fn validate(slices: &[(&[u64], u8)]) -> Result<(), String> {
+            if slices.len() < Self::SLICE_COUNT {
+                return Err(format!("Discriminant: expected {} slices but got {}", Self::SLICE_COUNT, slices.len()));
+            }
+            if slices[0].0.is_empty() || slices[1].0.is_empty() {
+                return Err("Discriminant: tag and count slices must be non-empty".into());
+            }
+            // Validate the variant and offset sub-slices.
+            <&[u8]>::validate(&slices[2..])?;
+            <&[u64]>::validate(&slices[2 + <&[u8]>::SLICE_COUNT..])?;
             Ok(())
         }
     }

@@ -146,9 +146,11 @@ pub mod indexed {
         #[inline(always)]
         pub fn new(store: &'a [u64]) -> Self {
             let slices = store.first().copied().unwrap_or(0) as usize / 8;
+            debug_assert!(slices <= store.len(), "DecodedStore::new: slice count {slices} exceeds store length {}", store.len());
             let index = store.get(..slices).unwrap_or(&[]);
             let last = index.last().copied().unwrap_or(0) as usize;
             let last_w = (last + 7) / 8;
+            debug_assert!(last_w <= store.len(), "DecodedStore::new: last word offset {last_w} exceeds store length {}", store.len());
             let words = store.get(..last_w).unwrap_or(&[]);
             Self { index, words }
         }
@@ -158,6 +160,7 @@ pub mod indexed {
         /// (0 means all 8 are valid). Returns an empty slice for out-of-bounds access.
         #[inline(always)]
         pub fn get(&self, k: usize) -> (&'a [u64], u8) {
+            debug_assert!(k + 1 < self.index.len(), "DecodedStore::get: index {k} out of bounds (len {})", self.index.len().saturating_sub(1));
             let upper = (*self.index.get(k + 1).unwrap_or(&0) as usize)
                 .min(self.words.len() * 8);
             let lower = (((*self.index.get(k).unwrap_or(&0) as usize) + 7) & !7)
