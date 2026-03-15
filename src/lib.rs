@@ -278,6 +278,14 @@ pub mod common {
         /// This trait may be challenging to implement for owning containers,
         /// for example `Vec<_>`, which would need their `Ref` type to depend
         /// on the lifetime of the `&self` borrow in the `get()` function.
+        ///
+        /// # Performance
+        ///
+        /// A call to `get(index)` will attempt to access member slices at `index`,
+        /// and as these could panic the optimizer cannot eliminate them even if you
+        /// do not then go on to examine the values. If you plan to access a field
+        /// (for tuples or structs) or variant match (for enums) you should perform
+        /// this before calling `get(index)` when able.
         pub trait Index {
             /// The type returned by the `get` method.
             ///
