@@ -184,6 +184,46 @@ mod test {
     }
 
 
+    #[test]
+    fn extend_from_self_enum() {
+        use columnar::{Borrow, Container, Index, Len, Push};
+
+        // Test data enum with multiple variants.
+        let mut columns = <Test3<u8> as Columnar>::Container::default();
+        columns.push(Test3::<u8>::Foo(vec![1, 2], 10));
+        columns.push(Test3::<u8>::Bar(20));
+        columns.push(Test3::<u8>::Foo(vec![3], 30));
+        columns.push(Test3::<u8>::Void);
+
+        let mut dest = <Test3<u8> as Columnar>::Container::default();
+        dest.extend_from_self(columns.borrow(), 1..3);
+        assert_eq!(dest.len(), 2);
+        match dest.borrow().get(0) {
+            Test3Reference::Bar(x) => assert_eq!(*x, 20),
+            other => panic!("Expected Bar, got {:?}", other),
+        }
+        match dest.borrow().get(1) {
+            Test3Reference::Foo((v, x)) => {
+                assert_eq!(v.len(), 1);
+                assert_eq!(*x, 30);
+            },
+            other => panic!("Expected Foo, got {:?}", other),
+        }
+
+        // Test unit enum.
+        let mut tags = <Test4 as Columnar>::Container::default();
+        tags.push(Test4::Foo);
+        tags.push(Test4::Bar);
+        tags.push(Test4::Foo);
+
+        let mut dest_tags = <Test4 as Columnar>::Container::default();
+        dest_tags.extend_from_self(tags.borrow(), 0..3);
+        assert_eq!(dest_tags.len(), 3);
+        assert!(matches!(dest_tags.borrow().get(0), Test4::Foo));
+        assert!(matches!(dest_tags.borrow().get(1), Test4::Bar));
+        assert!(matches!(dest_tags.borrow().get(2), Test4::Foo));
+    }
+
     // Test names that collide with the prelude.
     #[derive(Columnar, Debug, Copy, Clone)]
     enum Strange { None, Some }
