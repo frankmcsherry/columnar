@@ -991,6 +991,12 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
             }
         }).collect::<Vec<_>>();
 
+        // Helper identifiers for `extend_from_self` local variables.
+        let len_idents = &names.iter().map(|n| syn::Ident::new(&format!("len_{}", n.to_string().to_lowercase()), n.span())).collect::<Vec<_>>();
+        let count_idents = &names.iter().map(|n| syn::Ident::new(&format!("count_{}", n.to_string().to_lowercase()), n.span())).collect::<Vec<_>>();
+        let start_idents = &names.iter().map(|n| syn::Ident::new(&format!("start_{}", n.to_string().to_lowercase()), n.span())).collect::<Vec<_>>();
+        let variant_indices = &(0..variants.len()).map(|i| i as u8).collect::<Vec<_>>();
+
         quote! {
             impl #impl_gen ::columnar::Columnar for #name #ty_gen #where_clause2 {
                 #[inline(always)]
@@ -1034,8 +1040,33 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                 }
             }
 
-            impl < #(#container_names : ::columnar::Container ),* > ::columnar::Container for #c_ident < #(#container_names),* > {
-                // TODO: implement `extend_from_self`.
+            impl < #(#container_names : ::columnar::Container + ::columnar::Len),* > ::columnar::Container for #c_ident < #(#container_names),* > {
+                #[inline(always)]
+                fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+                    if !range.is_empty() {
+                        #( let #len_idents = ::columnar::Len::len(&self.#names); )*
+                        #( let mut #count_idents = 0usize; )*
+                        #( let mut #start_idents = 0u64; )*
+                        for index in range.clone() {
+                            let (variant, offset) = other.indexes.get(index);
+                            match variant {
+                                #(
+                                    #variant_indices => {
+                                        if #count_idents == 0 { #start_idents = offset; }
+                                        self.indexes.push(#variant_indices, (#len_idents + #count_idents) as u64);
+                                        #count_idents += 1;
+                                    }
+                                )*
+                                _ => unreachable!(),
+                            }
+                        }
+                        #(
+                            if #count_idents > 0 {
+                                self.#names.extend_from_self(other.#names, #start_idents as usize .. #start_idents as usize + #count_idents);
+                            }
+                        )*
+                    }
+                }
 
                 fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
                     #( self.#names.reserve_for(selves.clone().map(|x| x.#names)); )*
@@ -1227,7 +1258,10 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
         }
 
         impl<CV: ::columnar::common::PushIndexAs<u8>> ::columnar::Container for #c_ident <CV> {
-            // TODO: implement `extend_from_self`.
+            #[inline(always)]
+            fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+                self.variant.extend_from_self(other.variant, range);
+            }
 
             fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
                 self.variant.reserve_for(selves.map(|x| x.variant));
