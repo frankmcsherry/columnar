@@ -1,5 +1,5 @@
 use bencher::{benchmark_group, benchmark_main, Bencher};
-use columnar::{Columnar, Container, Clear, FromBytes};
+use columnar::{Columnar, BorrowedOf, Borrow, Clear};
 use columnar::bytes::indexed;
 use serde::{Serialize, Deserialize};
 
@@ -70,8 +70,8 @@ fn goser_decode(b: &mut Bencher) {
     indexed::encode(&mut words, &container.borrow());
     b.bytes = 8 * words.len() as u64;
     b.iter(|| {
-        let mut slices = indexed::decode(&mut words);
-        let foo = <<Log as Columnar>::Container as Container>::Borrowed::from_bytes(&mut slices);
+        type B<'a> = BorrowedOf<'a, Log>;
+        let foo = indexed::decode::<B>(&words);
         bencher::black_box(foo);
     });
 }
