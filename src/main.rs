@@ -170,6 +170,63 @@ mod test {
 
     }
 
+    // Tests derived implementations for an enum with named fields.
+    #[derive(Columnar, Debug)]
+    pub enum Test7 {
+        Click { x: u64, y: u64 },
+        Scroll(i64),
+        Idle,
+    }
+
+    #[test]
+    fn named_enum_fields() {
+        use columnar::{Borrow, Index, Len, Push, Columnar};
+
+        let items = vec![
+            Test7::Click { x: 10, y: 20 },
+            Test7::Scroll(-5),
+            Test7::Idle,
+            Test7::Click { x: 30, y: 40 },
+        ];
+
+        let columns = Columnar::as_columns(items.iter());
+        assert_eq!(columns.len(), 4);
+
+        // Check indexing.
+        match (&columns).get(0) {
+            Test7Reference::Click((x, y)) => { assert_eq!(x, 10); assert_eq!(y, 20); },
+            _ => panic!("expected Click"),
+        }
+        match (&columns).get(1) {
+            Test7Reference::Scroll(d) => { assert_eq!(d, -5); },
+            _ => panic!("expected Scroll"),
+        }
+        match (&columns).get(2) {
+            Test7Reference::Idle(_) => {},
+            _ => panic!("expected Idle"),
+        }
+        match (&columns).get(3) {
+            Test7Reference::Click((x, y)) => { assert_eq!(x, 30); assert_eq!(y, 40); },
+            _ => panic!("expected Click"),
+        }
+
+        // Check into_owned round-trip.
+        let borrowed = columns.borrow();
+        let owned: Test7 = Columnar::into_owned(borrowed.get(0));
+        match owned {
+            Test7::Click { x, y } => { assert_eq!(x, 10); assert_eq!(y, 20); },
+            _ => panic!("expected Click"),
+        }
+
+        // Check push by reference.
+        let mut columns2: columnar::ContainerOf<Test7> = Default::default();
+        columns2.push(&Test7::Click { x: 99, y: 100 });
+        match (&columns2).get(0) {
+            Test7Reference::Click((x, y)) => { assert_eq!(x, 99); assert_eq!(y, 100); },
+            _ => panic!("expected Click"),
+        }
+    }
+
     #[test]
     fn iterators_formatters() {
 

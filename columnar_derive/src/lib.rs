@@ -577,7 +577,6 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
     let r_ident = syn::Ident::new(&r_name, name.span());
 
     // Record everything we know about the variants.
-    // TODO: Distinguish between unit and 0-tuple variants.
     let variants: Vec<(&syn::Ident, Vec<_>)> =
     data_enum
         .variants
@@ -655,7 +654,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
         let push = variants.iter().enumerate().map(|(index, (variant, types))| {
 
-            match data_enum.variants[index].fields {
+            match &data_enum.variants[index].fields {
                 syn::Fields::Unit => {
                     quote! {
                         #name::#variant => {
@@ -677,8 +676,15 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                         },
                     }
                 }
-                syn::Fields::Named(_) => {
-                    unimplemented!("Named fields in enum variants are not supported by Columnar");
+                syn::Fields::Named(fields) => {
+                    let field_names = &fields.named.iter().map(|f| f.ident.as_ref().unwrap()).collect::<Vec<_>>();
+
+                    quote! {
+                        #name::#variant { #(#field_names),* } => {
+                            self.indexes.push(#index as u8, self.#variant.len() as u64);
+                            self.#variant.push((#(#field_names),*));
+                        },
+                    }
                 }
             }
         });
@@ -708,7 +714,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
         let push = variants.iter().enumerate().map(|(index, (variant, types))| {
 
-            match data_enum.variants[index].fields {
+            match &data_enum.variants[index].fields {
                 syn::Fields::Unit => {
                     quote! {
                         #name::#variant => {
@@ -730,8 +736,15 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                         },
                     }
                 }
-                syn::Fields::Named(_) => {
-                    unimplemented!("Named fields in enum variants are not supported by Columnar");
+                syn::Fields::Named(fields) => {
+                    let field_names = &fields.named.iter().map(|f| f.ident.as_ref().unwrap()).collect::<Vec<_>>();
+
+                    quote! {
+                        #name::#variant { #(#field_names),* } => {
+                            self.indexes.push(#index as u8, self.#variant.len() as u64);
+                            self.#variant.push((#(#field_names),*));
+                        },
+                    }
                 }
             }
         });
@@ -967,8 +980,16 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                     syn::Ident::new(&new_name, variant.span())
                 }).collect::<Vec<_>>();
 
+                let destructure = match &data_enum.variants[index].fields {
+                    syn::Fields::Named(fields) => {
+                        let field_names: Vec<_> = fields.named.iter().map(|f| f.ident.as_ref().unwrap()).collect();
+                        quote! { #name::#variant { #(#field_names: #temp_names1),* } }
+                    }
+                    _ => quote! { #name::#variant( #(#temp_names1),* ) }
+                };
+
                 quote! {
-                    (#name::#variant( #( #temp_names1 ),* ), #r_ident::#variant( ( #( #temp_names2 ),* ) )) => {
+                    (#destructure, #r_ident::#variant( ( #( #temp_names2 ),* ) )) => {
                         #( ::columnar::Columnar::copy_from(#temp_names1, #temp_names2); )*
                     }
                 }
@@ -987,9 +1008,17 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                     syn::Ident::new(&new_name, variant.span())
                 }).collect::<Vec<_>>();
 
+                let reconstruct = match &data_enum.variants[index].fields {
+                    syn::Fields::Named(fields) => {
+                        let field_names: Vec<_> = fields.named.iter().map(|f| f.ident.as_ref().unwrap()).collect();
+                        quote! { #name::#variant { #(#field_names: ::columnar::Columnar::into_owned(#temp_names)),* } }
+                    }
+                    _ => quote! { #name::#variant( #( ::columnar::Columnar::into_owned(#temp_names) ),* ) }
+                };
+
                 quote! {
                     #r_ident::#variant(( #( #temp_names ),* )) => {
-                        #name::#variant( #( ::columnar::Columnar::into_owned(#temp_names) ),* )
+                        #reconstruct
                     },
                 }
             }
