@@ -1,4 +1,5 @@
-#![allow(non_snake_case)]
+use alloc::{vec::Vec, string::String};
+#[allow(non_snake_case)]
 
 use crate::{Columnar, Container, Borrow, Len, Clear, Index, IndexMut, Push};
 
@@ -43,7 +44,7 @@ macro_rules! tuple_impl {
         }
         impl<$($name2: Container,)*> Container for ($($name2,)*) {
             #[inline(always)]
-            fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+            fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
                 let ($($name,)*) = self;
                 let ($($name2,)*) = other;
                 $( $name.extend_from_self($name2, range.clone()); )*
@@ -155,6 +156,7 @@ tuple_impl!(A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5 G,GG,6 H,HH,7 I,II,8 J,JJ,
 
 #[cfg(test)]
 mod test {
+    use alloc::{vec, vec::Vec, string::{String, ToString}};
     #[test]
     fn round_trip() {
 

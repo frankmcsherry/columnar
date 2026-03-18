@@ -6,6 +6,13 @@
 //! a real `T` lying around to return as a reference. Instead, we will
 //! use Generic Associated Types (GATs) to provide alternate references.
 
+#![no_std]
+#[macro_use]
+extern crate alloc;
+#[cfg(feature = "std")]
+extern crate std;
+use alloc::{vec::Vec, string::String, string::ToString, boxed::Box};
+
 // Re-export derive crate.
 extern crate columnar_derive;
 pub use columnar_derive::Columnar;
@@ -149,7 +156,7 @@ pub trait Container : Borrow + Clear + for<'a> Push<Self::Ref<'a>> + Default + S
     /// As an example, lists of lists are often backed by contiguous elements, all of which can be memcopied,
     /// with only the offsets into them (the bounds) to push either before or after (rather than during).
     #[inline(always)]
-    fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+    fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
         self.extend(range.map(|i| other.get(i)))
     }
 }
@@ -163,7 +170,7 @@ impl<T: Clone + 'static> Borrow for Vec<T> {
 }
 
 impl<T: Clone + Send + 'static> Container for Vec<T> {
-    fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+    fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
         self.extend_from_slice(&other[range])
     }
     fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
@@ -178,6 +185,8 @@ impl<C: Container + for<'a> Borrow<Borrowed<'a> : AsBytes<'a> + FromBytes<'a>>> 
 pub use common::{Clear, Len, Push, IndexMut, Index, IndexAs, Slice, AsBytes, FromBytes};
 /// Common traits and types that are re-used throughout the module.
 pub mod common {
+
+    use alloc::{vec::Vec, string::String};
 
     /// A type with a length.
     pub trait Len {
@@ -220,7 +229,7 @@ pub mod common {
 
         #[inline(always)]
         fn extend(&mut self, iter: impl IntoIterator<Item=T>) {
-            std::iter::Extend::extend(self, iter)
+            core::iter::Extend::extend(self, iter)
         }
     }
     impl<'a, T: Clone> Push<&'a T> for Vec<T> {
@@ -228,7 +237,7 @@ pub mod common {
 
         #[inline(always)]
         fn extend(&mut self, iter: impl IntoIterator<Item=&'a T>) {
-            std::iter::Extend::extend(self, iter.into_iter().cloned())
+            core::iter::Extend::extend(self, iter.into_iter().cloned())
         }
     }
     impl<'a, T: Clone> Push<&'a [T]> for Vec<T> {
@@ -244,6 +253,7 @@ pub mod common {
     /// There is a third trait `IndexMut` that allows mutable access, that may be less commonly implemented.
     pub mod index {
 
+        use alloc::vec::Vec;
         use crate::Len;
         use crate::common::IterOwn;
 
@@ -420,8 +430,8 @@ pub mod common {
         pub slice: S,
     }
 
-    impl<S> std::hash::Hash for Slice<S> where Self: Index<Ref: std::hash::Hash> {
-        fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+    impl<S> core::hash::Hash for Slice<S> where Self: Index<Ref: core::hash::Hash> {
+        fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
             self.len().hash(state);
             for i in 0 .. self.len() {
                 self.get(i).hash(state);
@@ -430,16 +440,16 @@ pub mod common {
     }
 
     impl<S> Slice<S> {
-        pub fn slice<R: std::ops::RangeBounds<usize>>(self, range: R) -> Self {
-            use std::ops::Bound;
+        pub fn slice<R: core::ops::RangeBounds<usize>>(self, range: R) -> Self {
+            use core::ops::Bound;
             let lower = match range.start_bound() {
-                Bound::Included(s) => std::cmp::max(self.lower, *s),
-                Bound::Excluded(s) => std::cmp::max(self.lower, *s+1),
+                Bound::Included(s) => core::cmp::max(self.lower, *s),
+                Bound::Excluded(s) => core::cmp::max(self.lower, *s+1),
                 Bound::Unbounded => self.lower,
             };
             let upper = match range.end_bound() {
-                Bound::Included(s) => std::cmp::min(self.upper, *s+1),
-                Bound::Excluded(s) => std::cmp::min(self.upper, *s),
+                Bound::Included(s) => core::cmp::min(self.upper, *s+1),
+                Bound::Excluded(s) => core::cmp::min(self.upper, *s),
                 Bound::Unbounded => self.upper,
             };
             assert!(lower <= upper);
@@ -492,9 +502,9 @@ pub mod common {
     impl<S: Index> Eq for Slice<S> where S::Ref: Eq { }
 
     impl<S: Index> PartialOrd for Slice<S> where S::Ref: PartialOrd {
-        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-            use std::cmp::Ordering;
-            let len = std::cmp::min(self.len(), other.len());
+        fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+            use core::cmp::Ordering;
+            let len = core::cmp::min(self.len(), other.len());
 
             for i in 0 .. len {
                 match self.get(i).partial_cmp(&other.get(i)) {
@@ -508,9 +518,9 @@ pub mod common {
     }
 
     impl<S: Index> Ord for Slice<S> where S::Ref: Ord + Eq {
-        fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-            use std::cmp::Ordering;
-            let len = std::cmp::min(self.len(), other.len());
+        fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+            use core::cmp::Ordering;
+            let len = core::cmp::min(self.len(), other.len());
 
             for i in 0 .. len {
                 match self.get(i).cmp(&other.get(i)) {
@@ -696,6 +706,7 @@ pub mod common {
 /// Roaring bitmap (and similar) containers.
 pub mod roaring {
 
+    use alloc::vec::Vec;
     use crate::Results;
 
     /// A container for `bool` that uses techniques from Roaring bitmaps.

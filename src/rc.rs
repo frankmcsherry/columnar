@@ -1,5 +1,5 @@
 //! Implementations of traits for `Rc<T>`
-use std::rc::Rc;
+use alloc::rc::Rc;
 
 use crate::{Len, Borrow, AsBytes, FromBytes};
 
@@ -24,7 +24,8 @@ impl<'a, T: FromBytes<'a>> FromBytes<'a> for Rc<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
+    use alloc::rc::Rc;
+    use alloc::{vec, vec::Vec, string::{String, ToString}};
     use crate::{Borrow, Len, AsBytes, FromBytes};
 
     #[test]

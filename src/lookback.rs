@@ -2,6 +2,7 @@
 //!
 //! This has the potential to be more efficient than a list of `T` when many values repeat in
 //! close proximity. Values must be equatable, and the degree of lookback can be configured.
+use alloc::{vec::Vec, string::String};
 
 use crate::{Options, Results, Push, Index, Len, Clear, Borrow, Container, IndexAs};
 
@@ -86,7 +87,7 @@ where
     for<'a> TC::Ref<'a>: PartialEq,
     for<'a, 'b> <&'a TC as Index>::Ref: PartialEq<TC::Ref<'b>>,
 {
-    fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+    fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
         if !range.is_empty() {
             // Push the first element, resolving any `None` to its actual value.
             self.push(other.get(range.start));
@@ -250,6 +251,7 @@ impl<'a, TC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>, CC: crate::FromByte
 #[cfg(test)]
 mod test {
 
+    use alloc::{vec, vec::Vec, string::{String, ToString}};
     use crate::common::{Push, Index, Len, Clear};
     use crate::{Borrow, Container, AsBytes, FromBytes};
     use crate::bytes::stash::Stash;

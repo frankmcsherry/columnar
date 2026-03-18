@@ -1,5 +1,5 @@
 //! Implementations of traits for `Arc<T>`
-use std::sync::Arc;
+use alloc::sync::Arc;
 
 use crate::{Len, Borrow, AsBytes, FromBytes};
 
@@ -24,7 +24,8 @@ impl<'a, T: FromBytes<'a>> FromBytes<'a> for Arc<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use alloc::sync::Arc;
+    use alloc::{vec, vec::Vec, string::{String, ToString}};
     use crate::{Borrow, Len, AsBytes, FromBytes};
 
     #[test]

@@ -2,6 +2,7 @@
 //!
 //! A `Tree<T>` is a node with a value of type `T` and a list of children.
 //! `Trees<TC>` stores a collection of trees with columnar storage for node values.
+use alloc::{vec::Vec, string::String, collections::VecDeque};
 
 use crate::{Borrow, Index, IndexAs, Len, Clear, Push};
 
@@ -173,7 +174,7 @@ impl<TC: Clear> Clear for Trees<TC> {
 impl<TC: Len> Trees<TC> {
     /// Pushes a tree into the container, storing nodes in BFS order.
     pub fn push_tree<T>(&mut self, tree: Tree<T>) where TC: for<'a> Push<&'a T> {
-        let mut todo = std::collections::VecDeque::default();
+        let mut todo = alloc::collections::VecDeque::default();
         todo.push_back(tree);
         while let Some(node) = todo.pop_front() {
             let cursor = self.values.len() + todo.len() + 1;
@@ -240,6 +241,7 @@ mod louds {
 #[cfg(test)]
 mod test {
 
+    use alloc::{vec, vec::Vec, string::{String, ToString}};
     use crate::common::{Index, Len, Clear};
     use crate::{Borrow, AsBytes, FromBytes};
     use super::{Tree, Trees};
