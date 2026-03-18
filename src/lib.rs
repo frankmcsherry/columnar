@@ -11,7 +11,7 @@
 extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
-use alloc::{vec::Vec, string::String, string::ToString, boxed::Box};
+use alloc::vec::Vec;
 
 // Re-export derive crate.
 extern crate columnar_derive;

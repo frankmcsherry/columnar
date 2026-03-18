@@ -2,7 +2,7 @@
 //!
 //! A `Tree<T>` is a node with a value of type `T` and a list of children.
 //! `Trees<TC>` stores a collection of trees with columnar storage for node values.
-use alloc::{vec::Vec, string::String, collections::VecDeque};
+use alloc::{vec::Vec, string::String};
 
 use crate::{Borrow, Index, IndexAs, Len, Clear, Push};
 

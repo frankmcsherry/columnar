@@ -475,7 +475,7 @@ mod larges {
 /// inter-offset spacing, and relatively short runs (compared to a `RankSelect`).
 pub mod offsets {
 
-    use alloc::{vec::Vec, string::String, boxed::Box};
+
     pub use array::Fixeds;
     pub use stride::Strides;
 

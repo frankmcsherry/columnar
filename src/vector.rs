@@ -1,4 +1,4 @@
-use alloc::{vec, vec::Vec, string::String, format};
+use alloc::{vec::Vec, string::String};
 use super::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, Slice, Borrow};
 
 /// A stand-in for `Vec<Vec<T>>` for complex `T`.

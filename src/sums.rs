@@ -2,7 +2,6 @@
 //!
 //! The main work of these types is storing a discriminant and index efficiently,
 //! as containers for each of the variant types can hold the actual data.
-use alloc::{vec::Vec, string::String};
 
 /// Stores for maintaining discriminants, and associated sequential indexes.
 ///

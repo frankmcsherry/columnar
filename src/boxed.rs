@@ -5,7 +5,7 @@
 //!
 //! We need this wrapper to distinguish which [`Push`] implementation to use, otherwise
 //! the implementations would conflict.
-use alloc::{vec::Vec, boxed::Box};
+use alloc::boxed::Box;
 
 use crate::{AsBytes, Borrow, Clear, Columnar, Container, FromBytes, Index, IndexMut, Len, Push, Ref};
 

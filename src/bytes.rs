@@ -8,7 +8,6 @@
 //! The most reliable entry point to the read side of this functionality is the `Stash` type,
 //! which can be formed from any type that implements `Deref<Target=[u8]>`. Doing so will check
 //! `u64` alignment, copy the contents if misaligned, and perform some structural validation.
-use alloc::{vec::Vec, string::String, string::ToString, boxed::Box};
 
 /// A trait for writing bytes, usable in `no_std` environments.
 ///
@@ -31,7 +30,7 @@ impl<W: std::io::Write> WriteBytes for W {
 }
 
 #[cfg(not(feature = "std"))]
-impl WriteBytes for Vec<u8> {
+impl WriteBytes for alloc::vec::Vec<u8> {
     type Error = core::convert::Infallible;
     #[inline(always)]
     fn write_all(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
@@ -49,7 +48,7 @@ impl WriteBytes for Vec<u8> {
 /// This means that slices that are not multiples of eight bytes may leave unread bytes at their end, which is fine.
 pub mod indexed {
 
-    use alloc::{vec::Vec, string::String, boxed::Box};
+    use alloc::{vec::Vec, string::String};
     use crate::AsBytes;
 
     /// Encoded length in number of `u64` words required.
