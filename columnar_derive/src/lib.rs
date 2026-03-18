@@ -326,6 +326,10 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
                 fn from_store(store: &::columnar::bytes::indexed::DecodedStore<'columnar>, offset: &mut usize) -> Self {
                     Self { #(#names: ::columnar::FromBytes::from_store(store, offset),)* }
                 }
+                fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+                    #(<#container_types>::element_sizes(sizes)?;)*
+                    Ok(())
+                }
             }
         }
     };
@@ -516,6 +520,10 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
                 *offset += 1;
                 Self { count: w.first().unwrap_or(&0) }
             }
+            fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+                sizes.push(8);
+                Ok(())
+            }
         }
 
         impl ::columnar::Columnar for #name {
@@ -569,7 +577,6 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
     let r_ident = syn::Ident::new(&r_name, name.span());
 
     // Record everything we know about the variants.
-    // TODO: Distinguish between unit and 0-tuple variants.
     let variants: Vec<(&syn::Ident, Vec<_>)> =
     data_enum
         .variants
@@ -601,13 +608,13 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
             /// Derived columnar container for an enum.
             #derive
             #[allow(non_snake_case)]
-            #vis struct #c_ident < #(#container_types,)* CVar = Vec<u8>, COff = Vec<u64>, CC = u64, >{
+            #vis struct #c_ident < #(#container_types,)* CVar = Vec<u8>, COff = Vec<u64>, >{
                 #(
                     /// Container for #names.
                     pub #names : #container_types,
                 )*
                 /// Discriminant tracking for variants.
-                pub indexes: ::columnar::Discriminant<CVar, COff, CC>,
+                pub indexes: ::columnar::Discriminant<CVar, COff>,
             }
         }
     };
@@ -647,7 +654,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
         let push = variants.iter().enumerate().map(|(index, (variant, types))| {
 
-            match data_enum.variants[index].fields {
+            match &data_enum.variants[index].fields {
                 syn::Fields::Unit => {
                     quote! {
                         #name::#variant => {
@@ -669,8 +676,15 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                         },
                     }
                 }
-                syn::Fields::Named(_) => {
-                    unimplemented!("Named fields in enum variants are not supported by Columnar");
+                syn::Fields::Named(fields) => {
+                    let field_names = &fields.named.iter().map(|f| f.ident.as_ref().unwrap()).collect::<Vec<_>>();
+
+                    quote! {
+                        #name::#variant { #(#field_names),* } => {
+                            self.indexes.push(#index as u8, self.#variant.len() as u64);
+                            self.#variant.push((#(#field_names),*));
+                        },
+                    }
                 }
             }
         });
@@ -700,7 +714,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
         let push = variants.iter().enumerate().map(|(index, (variant, types))| {
 
-            match data_enum.variants[index].fields {
+            match &data_enum.variants[index].fields {
                 syn::Fields::Unit => {
                     quote! {
                         #name::#variant => {
@@ -722,8 +736,15 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                         },
                     }
                 }
-                syn::Fields::Named(_) => {
-                    unimplemented!("Named fields in enum variants are not supported by Columnar");
+                syn::Fields::Named(fields) => {
+                    let field_names = &fields.named.iter().map(|f| f.ident.as_ref().unwrap()).collect::<Vec<_>>();
+
+                    quote! {
+                        #name::#variant { #(#field_names),* } => {
+                            self.indexes.push(#index as u8, self.#variant.len() as u64);
+                            self.#variant.push((#(#field_names),*));
+                        },
+                    }
                 }
             }
         });
@@ -780,9 +801,9 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
     };
 
     let index_own = {
-        let impl_gen = quote! { < #(#container_types,)* CVar, COff, CC> };
-        let ty_gen = quote! { < #(#container_types,)* CVar, COff, CC> };
-        let where_clause = quote! { where #(#container_types: ::columnar::Index,)* CVar: ::columnar::Len + ::columnar::IndexAs<u8>, COff: ::columnar::Len + ::columnar::IndexAs<u64>, CC: ::columnar::common::index::CopyAs<u64>  };
+        let impl_gen = quote! { < #(#container_types,)* CVar, COff> };
+        let ty_gen = quote! { < #(#container_types,)* CVar, COff> };
+        let where_clause = quote! { where #(#container_types: ::columnar::Index,)* CVar: ::columnar::Len + ::columnar::IndexAs<u8>, COff: ::columnar::Len + ::columnar::IndexAs<u64>  };
 
         let index_type = quote! { #r_ident < #(<#container_types as ::columnar::Index>::Ref,)* > };
 
@@ -805,9 +826,9 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
     };
 
     let index_ref = {
-        let impl_gen = quote! { < 'columnar, #(#container_types,)* CVar, COff, CC> };
-        let ty_gen = quote! { < #(#container_types,)* CVar, COff, CC> };
-        let where_clause = quote! { where #(&'columnar #container_types: ::columnar::Index,)* CVar: ::columnar::Len + ::columnar::IndexAs<u8>, COff: ::columnar::Len + ::columnar::IndexAs<u64>, CC: ::columnar::common::index::CopyAs<u64>  };
+        let impl_gen = quote! { < 'columnar, #(#container_types,)* CVar, COff> };
+        let ty_gen = quote! { < #(#container_types,)* CVar, COff> };
+        let where_clause = quote! { where #(&'columnar #container_types: ::columnar::Index,)* CVar: ::columnar::Len + ::columnar::IndexAs<u8>, COff: ::columnar::Len + ::columnar::IndexAs<u64>  };
 
         let index_type = quote! { #r_ident < #(<&'columnar #container_types as ::columnar::Index>::Ref,)* > };
 
@@ -848,11 +869,11 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
     let length = {
 
-        let impl_gen = quote! { < #(#container_types,)* CVar, COff, CC> };
-        let ty_gen = quote! { < #(#container_types,)* CVar, COff, CC > };
+        let impl_gen = quote! { < #(#container_types,)* CVar, COff> };
+        let ty_gen = quote! { < #(#container_types,)* CVar, COff > };
 
         quote! {
-            impl #impl_gen ::columnar::Len for #c_ident #ty_gen where CVar: ::columnar::Len, CC: ::columnar::common::index::CopyAs<u64> {
+            impl #impl_gen ::columnar::Len for #c_ident #ty_gen where CVar: ::columnar::Len, COff: ::columnar::Len + ::columnar::IndexAs<u64> {
                 #[inline(always)]
                 fn len(&self) -> usize {
                     self.indexes.len()
@@ -863,9 +884,9 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
     let as_bytes = {
 
-        let impl_gen = quote! { < 'a, #(#container_types,)* CVar, COff, CC> };
-        let ty_gen = quote! { < #(#container_types,)* CVar, COff, CC > };
-        let where_clause = quote! { where #(#container_types: ::columnar::AsBytes<'a>,)* ::columnar::Discriminant<CVar, COff, CC>: ::columnar::AsBytes<'a> };
+        let impl_gen = quote! { < 'a, #(#container_types,)* CVar, COff> };
+        let ty_gen = quote! { < #(#container_types,)* CVar, COff > };
+        let where_clause = quote! { where #(#container_types: ::columnar::AsBytes<'a>,)* ::columnar::Discriminant<CVar, COff>: ::columnar::AsBytes<'a> };
 
         quote! {
             impl #impl_gen ::columnar::AsBytes<'a> for #c_ident #ty_gen #where_clause {
@@ -882,14 +903,14 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
     let from_bytes = {
 
-        let impl_gen = quote! { < 'columnar, #(#container_types,)* CVar, COff, CC> };
-        let ty_gen = quote! { < #(#container_types,)* CVar, COff, CC > };
-        let where_clause = quote! { where #(#container_types: ::columnar::FromBytes<'columnar>,)* ::columnar::Discriminant<CVar, COff, CC>: ::columnar::FromBytes<'columnar> };
+        let impl_gen = quote! { < 'columnar, #(#container_types,)* CVar, COff> };
+        let ty_gen = quote! { < #(#container_types,)* CVar, COff > };
+        let where_clause = quote! { where #(#container_types: ::columnar::FromBytes<'columnar>,)* ::columnar::Discriminant<CVar, COff>: ::columnar::FromBytes<'columnar> };
 
         quote! {
             #[allow(non_snake_case)]
             impl #impl_gen ::columnar::FromBytes<'columnar> for #c_ident #ty_gen #where_clause {
-                const SLICE_COUNT: usize = 0 #(+ <#container_types>::SLICE_COUNT)* + <::columnar::Discriminant<CVar, COff, CC>>::SLICE_COUNT;
+                const SLICE_COUNT: usize = 0 #(+ <#container_types>::SLICE_COUNT)* + <::columnar::Discriminant<CVar, COff>>::SLICE_COUNT;
                 #[inline(always)]
                 fn from_bytes(bytes: &mut impl Iterator<Item=&'columnar [u8]>) -> Self {
                     Self {
@@ -903,6 +924,11 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                         #(#names: ::columnar::FromBytes::from_store(store, offset),)*
                         indexes: ::columnar::FromBytes::from_store(store, offset),
                     }
+                }
+                fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+                    #(<#container_types>::element_sizes(sizes)?;)*
+                    <::columnar::Discriminant<CVar, COff>>::element_sizes(sizes)?;
+                    Ok(())
                 }
             }
         }
@@ -954,8 +980,16 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                     syn::Ident::new(&new_name, variant.span())
                 }).collect::<Vec<_>>();
 
+                let destructure = match &data_enum.variants[index].fields {
+                    syn::Fields::Named(fields) => {
+                        let field_names: Vec<_> = fields.named.iter().map(|f| f.ident.as_ref().unwrap()).collect();
+                        quote! { #name::#variant { #(#field_names: #temp_names1),* } }
+                    }
+                    _ => quote! { #name::#variant( #(#temp_names1),* ) }
+                };
+
                 quote! {
-                    (#name::#variant( #( #temp_names1 ),* ), #r_ident::#variant( ( #( #temp_names2 ),* ) )) => {
+                    (#destructure, #r_ident::#variant( ( #( #temp_names2 ),* ) )) => {
                         #( ::columnar::Columnar::copy_from(#temp_names1, #temp_names2); )*
                     }
                 }
@@ -974,9 +1008,17 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                     syn::Ident::new(&new_name, variant.span())
                 }).collect::<Vec<_>>();
 
+                let reconstruct = match &data_enum.variants[index].fields {
+                    syn::Fields::Named(fields) => {
+                        let field_names: Vec<_> = fields.named.iter().map(|f| f.ident.as_ref().unwrap()).collect();
+                        quote! { #name::#variant { #(#field_names: ::columnar::Columnar::into_owned(#temp_names)),* } }
+                    }
+                    _ => quote! { #name::#variant( #( ::columnar::Columnar::into_owned(#temp_names) ),* ) }
+                };
+
                 quote! {
                     #r_ident::#variant(( #( #temp_names ),* )) => {
-                        #name::#variant( #( ::columnar::Columnar::into_owned(#temp_names) ),* )
+                        #reconstruct
                     },
                 }
             }
@@ -1017,7 +1059,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
             impl < #(#container_names : ::columnar::Borrow ),* > ::columnar::Borrow for #c_ident < #(#container_names),* > {
                 type Ref<'a> = #r_ident < #( <#container_names as ::columnar::Borrow>::Ref<'a> ,)* > where Self: 'a, #(#container_names: 'a,)*;
-                type Borrowed<'a> = #c_ident < #( < #container_names as ::columnar::Borrow >::Borrowed<'a>, )* &'a [u8], &'a [u64], &'a u64 > where #(#container_names: 'a,)*;
+                type Borrowed<'a> = #c_ident < #( < #container_names as ::columnar::Borrow >::Borrowed<'a>, )* &'a [u8], &'a [u64] > where #(#container_names: 'a,)*;
                 #[inline(always)]
                 fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
                     #c_ident {
@@ -1227,6 +1269,9 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
             #[inline(always)]
             fn from_store(store: &::columnar::bytes::indexed::DecodedStore<'columnar>, offset: &mut usize) -> Self {
                 Self { variant: ::columnar::FromBytes::from_store(store, offset) }
+            }
+            fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+                CVar::element_sizes(sizes)
             }
         }
 

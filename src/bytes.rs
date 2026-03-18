@@ -501,13 +501,13 @@ mod test {
             assert_eq!(column.get(2*i+1), Err(i as u64));
         }
 
-        let column2 = crate::Results::<&[u64], &[u64], &[u64], &[u64], &u64>::from_bytes(&mut column.borrow().as_bytes().map(|(_, bytes)| bytes));
+        let column2 = crate::Results::<&[u64], &[u64], &[u64], &[u64], &[u64]>::from_bytes(&mut column.borrow().as_bytes().map(|(_, bytes)| bytes));
         for i in 0..100 {
             assert_eq!(column.get(2*i+0), column2.get(2*i+0).copied().map_err(|e| *e));
             assert_eq!(column.get(2*i+1), column2.get(2*i+1).copied().map_err(|e| *e));
         }
 
-        let column3 = crate::Results::<&[u64], &[u64], &[u64], &[u64], &u64>::from_bytes(&mut column2.as_bytes().map(|(_, bytes)| bytes));
+        let column3 = crate::Results::<&[u64], &[u64], &[u64], &[u64], &[u64]>::from_bytes(&mut column2.as_bytes().map(|(_, bytes)| bytes));
         for i in 0..100 {
             assert_eq!(column3.get(2*i+0), column2.get(2*i+0));
             assert_eq!(column3.get(2*i+1), column2.get(2*i+1));
@@ -517,10 +517,64 @@ mod test {
         let mut store = Vec::new();
         crate::bytes::indexed::encode(&mut store, &column.borrow());
         let ds = crate::bytes::indexed::DecodedStore::new(&store);
-        let column4 = crate::Results::<&[u64], &[u64], &[u64], &[u64], &u64>::from_store(&ds, &mut 0);
+        let column4 = crate::Results::<&[u64], &[u64], &[u64], &[u64], &[u64]>::from_store(&ds, &mut 0);
         for i in 0..100 {
             assert_eq!(column.get(2*i+0), column4.get(2*i+0).copied().map_err(|e| *e));
             assert_eq!(column.get(2*i+1), column4.get(2*i+1).copied().map_err(|e| *e));
+        }
+    }
+
+    /// Test that try_from_bytes works for Result, Option, and derived enum types.
+    #[test]
+    fn validate_sum_types() {
+        use crate::common::{Push, Index};
+        use crate::{Borrow, ContainerOf};
+        use crate::bytes::stash::Stash;
+
+        // Result<u64, u64>
+        let mut c: ContainerOf<Result<u64, u64>> = Default::default();
+        for i in 0..100u64 {
+            c.push(Ok::<u64, u64>(i));
+            c.push(Err::<u64, u64>(i));
+        }
+        let mut bytes: Vec<u8> = Vec::new();
+        crate::bytes::indexed::write(&mut bytes, &c.borrow()).unwrap();
+        let stash: Stash<ContainerOf<Result<u64, u64>>, Vec<u8>> =
+            Stash::try_from_bytes(bytes).expect("Result<u64, u64> should validate");
+        assert_eq!(stash.borrow().get(0), Ok(&0u64));
+        assert_eq!(stash.borrow().get(1), Err(&0u64));
+
+        // Option<String>
+        let mut c: ContainerOf<Option<String>> = Default::default();
+        c.push(&Some("hello".to_string()));
+        c.push(&None::<String>);
+        c.push(&Some("world".to_string()));
+        let mut bytes: Vec<u8> = Vec::new();
+        crate::bytes::indexed::write(&mut bytes, &c.borrow()).unwrap();
+        let stash: Stash<ContainerOf<Option<String>>, Vec<u8>> =
+            Stash::try_from_bytes(bytes).expect("Option<String> should validate");
+        assert_eq!(stash.borrow().get(0), Some(&b"hello"[..]));
+        assert_eq!(stash.borrow().get(1), None);
+        assert_eq!(stash.borrow().get(2), Some(&b"world"[..]));
+
+        // Result<(u64, String), u64>
+        let mut c: ContainerOf<Result<(u64, String), u64>> = Default::default();
+        let val: Result<(u64, String), u64> = Ok((42, "test".to_string()));
+        c.push(&val);
+        let val2: Result<(u64, String), u64> = Err(99);
+        c.push(&val2);
+        let mut bytes: Vec<u8> = Vec::new();
+        crate::bytes::indexed::write(&mut bytes, &c.borrow()).unwrap();
+        let stash: Stash<ContainerOf<Result<(u64, String), u64>>, Vec<u8>> =
+            Stash::try_from_bytes(bytes).expect("Result<(u64, String), u64> should validate");
+        let borrowed = stash.borrow();
+        match borrowed.get(0) {
+            Ok((n, s)) => { assert_eq!(*n, 42); assert_eq!(s, b"test"); },
+            Err(_) => panic!("expected Ok"),
+        }
+        match borrowed.get(1) {
+            Err(n) => assert_eq!(*n, 99),
+            Ok(_) => panic!("expected Err"),
         }
     }
 

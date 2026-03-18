@@ -13,7 +13,7 @@
 pub mod rank_select {
 
     use crate::primitive::Bools;
-    use crate::common::index::CopyAs;
+
     use crate::{Borrow, Len, Index, IndexAs, Push, Clear};
 
     /// A store for maintaining `Vec<bool>` with fast `rank` and `select` access.
@@ -23,7 +23,7 @@ pub mod rank_select {
     /// above the bits themselves, which seems pretty solid.
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[derive(Copy, Clone, Debug, Default, PartialEq)]
-    pub struct RankSelect<CC = Vec<u64>, VC = Vec<u64>, WC = u64> {
+    pub struct RankSelect<CC = Vec<u64>, VC = Vec<u64>, WC = [u64; 2]> {
         /// Counts of the number of cumulative set (true) bits, *after* each block of 1024 bits.
         pub counts: CC,
         /// The bits themselves.
@@ -32,29 +32,29 @@ pub mod rank_select {
 
     impl<CC: crate::common::BorrowIndexAs<u64>, VC: crate::common::BorrowIndexAs<u64>> RankSelect<CC, VC> {
         #[inline(always)]
-        pub fn borrow<'a>(&'a self) -> RankSelect<CC::Borrowed<'a>, VC::Borrowed<'a>, &'a u64> {
+        pub fn borrow<'a>(&'a self) -> RankSelect<CC::Borrowed<'a>, VC::Borrowed<'a>, &'a [u64]> {
             RankSelect {
                 counts: self.counts.borrow(),
                 values: self.values.borrow(),
             }
         }
         #[inline(always)]
-        pub fn reborrow<'b, 'a: 'b>(thing: RankSelect<CC::Borrowed<'a>, VC::Borrowed<'a>, &'a u64>) -> RankSelect<CC::Borrowed<'b>, VC::Borrowed<'b>, &'b u64> {
+        pub fn reborrow<'b, 'a: 'b>(thing: RankSelect<CC::Borrowed<'a>, VC::Borrowed<'a>, &'a [u64]>) -> RankSelect<CC::Borrowed<'b>, VC::Borrowed<'b>, &'b [u64]> {
             RankSelect {
                 counts: CC::reborrow(thing.counts),
-                values: Bools::<VC, u64>::reborrow(thing.values),
+                values: Bools::<VC, [u64; 2]>::reborrow(thing.values),
             }
         }
     }
 
-    impl<'a, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for RankSelect<CC, VC, &'a u64> {
+    impl<'a, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for RankSelect<CC, VC, &'a [u64]> {
         #[inline(always)]
         fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
             crate::chain(self.counts.as_bytes(), self.values.as_bytes())
         }
     }
-    impl<'a, CC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for RankSelect<CC, VC, &'a u64> {
-        const SLICE_COUNT: usize = CC::SLICE_COUNT + <crate::primitive::Bools<VC, &'a u64>>::SLICE_COUNT;
+    impl<'a, CC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for RankSelect<CC, VC, &'a [u64]> {
+        const SLICE_COUNT: usize = CC::SLICE_COUNT + <crate::primitive::Bools<VC, &'a [u64]>>::SLICE_COUNT;
         #[inline(always)]
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
             Self {
@@ -66,19 +66,24 @@ pub mod rank_select {
         fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
             Self {
                 counts: CC::from_store(store, offset),
-                values: <crate::primitive::Bools<VC, &'a u64>>::from_store(store, offset),
+                values: <crate::primitive::Bools<VC, &'a [u64]>>::from_store(store, offset),
             }
+        }
+        fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+            CC::element_sizes(sizes)?;
+            <crate::primitive::Bools<VC, &'a [u64]>>::element_sizes(sizes)?;
+            Ok(())
         }
     }
 
 
-    impl<CC, VC: Len + IndexAs<u64>, WC: CopyAs<u64>> RankSelect<CC, VC, WC> {
+    impl<CC, VC: Len + IndexAs<u64>, WC: IndexAs<u64>> RankSelect<CC, VC, WC> {
         #[inline(always)]
         pub fn get(&self, index: usize) -> bool {
             Index::get(&self.values, index)
         }
     }
-    impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, WC: CopyAs<u64>> RankSelect<CC, VC, WC> {
+    impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, WC: IndexAs<u64>> RankSelect<CC, VC, WC> {
         /// The number of set bits *strictly* preceding `index`.
         ///
         /// This number is accumulated first by reading out of `self.counts` at the correct position,
@@ -93,7 +98,7 @@ pub mod rank_select {
                 count += self.values.values.index_as(pos).count_ones() as usize;
             }
             // TODO: Panic if out of bounds?
-            let intra_word = if block == self.values.values.len() { self.values.last_word.copy_as() } else { self.values.values.index_as(block) };
+            let intra_word = if block == self.values.values.len() { self.values.tail.index_as(0) } else { self.values.values.index_as(block) };
             count += (intra_word & ((1 << bit) - 1)).count_ones() as usize;
             count
         }
@@ -114,8 +119,8 @@ pub mod rank_select {
                 block += 1;
             }
             // Step three is to search the last word for the location, or return `None` if we run out of bits.
-            let last_bits = if block == self.values.values.len() { self.values.last_bits.copy_as() as usize } else { 64 };
-            let last_word = if block == self.values.values.len() { self.values.last_word.copy_as() } else { self.values.values.index_as(block) };
+            let last_bits = if block == self.values.values.len() { self.values.tail.index_as(1) as usize } else { 64 };
+            let last_word = if block == self.values.values.len() { self.values.tail.index_as(0) } else { self.values.values.index_as(block) };
             for shift in 0 .. last_bits {
                 if ((last_word >> shift) & 0x01 == 0x01) && count + 1 == rank {
                     return Some(64 * block + shift);
@@ -127,7 +132,7 @@ pub mod rank_select {
         }
     }
 
-    impl<CC, VC: Len, WC: CopyAs<u64>> RankSelect<CC, VC, WC> {
+    impl<CC, VC: Len, WC: IndexAs<u64>> RankSelect<CC, VC, WC> {
         pub fn len(&self) -> usize {
             self.values.len()
         }
@@ -160,13 +165,13 @@ pub mod rank_select {
 
 pub mod result {
 
-    use crate::common::index::CopyAs;
+
     use crate::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, Borrow};
     use crate::RankSelect;
 
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[derive(Copy, Clone, Debug, Default, PartialEq)]
-    pub struct Results<SC, TC, CC=Vec<u64>, VC=Vec<u64>, WC=u64> {
+    pub struct Results<SC, TC, CC=Vec<u64>, VC=Vec<u64>, WC=[u64; 2]> {
         /// Bits set to `true` correspond to `Ok` variants.
         pub indexes: RankSelect<CC, VC, WC>,
         pub oks: SC,
@@ -192,7 +197,7 @@ pub mod result {
 
     impl<SC: Borrow, TC: Borrow> Borrow for Results<SC, TC> {
         type Ref<'a> = Result<SC::Ref<'a>, TC::Ref<'a>> where SC: 'a, TC: 'a;
-        type Borrowed<'a> = Results<SC::Borrowed<'a>, TC::Borrowed<'a>, &'a [u64], &'a [u64], &'a u64> where SC: 'a, TC: 'a;
+        type Borrowed<'a> = Results<SC::Borrowed<'a>, TC::Borrowed<'a>, &'a [u64], &'a [u64], &'a [u64]> where SC: 'a, TC: 'a;
         fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
             Results {
                 indexes: self.indexes.borrow(),
@@ -247,7 +252,7 @@ pub mod result {
         }
     }
 
-    impl<'a, SC: crate::AsBytes<'a>, TC: crate::AsBytes<'a>, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for Results<SC, TC, CC, VC, &'a u64> {
+    impl<'a, SC: crate::AsBytes<'a>, TC: crate::AsBytes<'a>, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for Results<SC, TC, CC, VC, &'a [u64]> {
         #[inline(always)]
         fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
             let iter = self.indexes.as_bytes();
@@ -255,8 +260,8 @@ pub mod result {
             crate::chain(iter, self.errs.as_bytes())
         }
     }
-    impl<'a, SC: crate::FromBytes<'a>, TC: crate::FromBytes<'a>, CC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for Results<SC, TC, CC, VC, &'a u64> {
-        const SLICE_COUNT: usize = <RankSelect<CC, VC, &'a u64>>::SLICE_COUNT + SC::SLICE_COUNT + TC::SLICE_COUNT;
+    impl<'a, SC: crate::FromBytes<'a>, TC: crate::FromBytes<'a>, CC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for Results<SC, TC, CC, VC, &'a [u64]> {
+        const SLICE_COUNT: usize = <RankSelect<CC, VC, &'a [u64]>>::SLICE_COUNT + SC::SLICE_COUNT + TC::SLICE_COUNT;
         #[inline(always)]
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
             Self {
@@ -273,9 +278,15 @@ pub mod result {
                 errs: TC::from_store(store, offset),
             }
         }
+        fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+            <RankSelect<CC, VC, &'a [u64]>>::element_sizes(sizes)?;
+            SC::element_sizes(sizes)?;
+            TC::element_sizes(sizes)?;
+            Ok(())
+        }
     }
 
-    impl<SC, TC, CC, VC: Len, WC: CopyAs<u64>> Len for Results<SC, TC, CC, VC, WC> {
+    impl<SC, TC, CC, VC: Len, WC: IndexAs<u64>> Len for Results<SC, TC, CC, VC, WC> {
         #[inline(always)] fn len(&self) -> usize { self.indexes.len() }
     }
 
@@ -285,7 +296,7 @@ pub mod result {
         TC: Index,
         CC: IndexAs<u64> + Len,
         VC: IndexAs<u64> + Len,
-        WC: CopyAs<u64>,
+        WC: IndexAs<u64>,
     {
         type Ref = Result<SC::Ref, TC::Ref>;
         #[inline(always)]
@@ -303,7 +314,7 @@ pub mod result {
         &'a TC: Index,
         CC: IndexAs<u64> + Len,
         VC: IndexAs<u64> + Len,
-        WC: CopyAs<u64>,
+        WC: IndexAs<u64>,
     {
         type Ref = Result<<&'a SC as Index>::Ref, <&'a TC as Index>::Ref>;
         #[inline(always)]
@@ -426,13 +437,13 @@ pub mod result {
 
 pub mod option {
 
-    use crate::common::index::CopyAs;
+
     use crate::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, Borrow};
     use crate::RankSelect;
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[derive(Copy, Clone, Debug, Default, PartialEq)]
-    pub struct Options<TC, CC=Vec<u64>, VC=Vec<u64>, WC=u64> {
+    pub struct Options<TC, CC=Vec<u64>, VC=Vec<u64>, WC=[u64; 2]> {
         /// Uses two bits for each item, one to indicate the variant and one (amortized)
         /// to enable efficient rank determination.
         pub indexes: RankSelect<CC, VC, WC>,
@@ -454,7 +465,7 @@ pub mod option {
 
     impl<TC: Borrow> Borrow for Options<TC> {
         type Ref<'a> = Option<TC::Ref<'a>> where TC: 'a;
-        type Borrowed<'a> = Options<TC::Borrowed<'a>, &'a [u64], &'a [u64], &'a u64> where TC: 'a;
+        type Borrowed<'a> = Options<TC::Borrowed<'a>, &'a [u64], &'a [u64], &'a [u64]> where TC: 'a;
         fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
             Options {
                 indexes: self.indexes.borrow(),
@@ -500,15 +511,15 @@ pub mod option {
         }
     }
 
-    impl<'a, TC: crate::AsBytes<'a>, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for Options<TC, CC, VC, &'a u64> {
+    impl<'a, TC: crate::AsBytes<'a>, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for Options<TC, CC, VC, &'a [u64]> {
         #[inline(always)]
         fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
             crate::chain(self.indexes.as_bytes(), self.somes.as_bytes())
         }
     }
 
-    impl <'a, TC: crate::FromBytes<'a>, CC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for Options<TC, CC, VC, &'a u64> {
-        const SLICE_COUNT: usize = <RankSelect<CC, VC, &'a u64>>::SLICE_COUNT + TC::SLICE_COUNT;
+    impl <'a, TC: crate::FromBytes<'a>, CC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for Options<TC, CC, VC, &'a [u64]> {
+        const SLICE_COUNT: usize = <RankSelect<CC, VC, &'a [u64]>>::SLICE_COUNT + TC::SLICE_COUNT;
         #[inline(always)]
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
             Self {
@@ -523,13 +534,18 @@ pub mod option {
                 somes: TC::from_store(store, offset),
             }
         }
+        fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+            <RankSelect<CC, VC, &'a [u64]>>::element_sizes(sizes)?;
+            TC::element_sizes(sizes)?;
+            Ok(())
+        }
     }
 
-    impl<T, CC, VC: Len, WC: CopyAs<u64>> Len for Options<T, CC, VC, WC> {
+    impl<T, CC, VC: Len, WC: IndexAs<u64>> Len for Options<T, CC, VC, WC> {
         #[inline(always)] fn len(&self) -> usize { self.indexes.len() }
     }
 
-    impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: CopyAs<u64>> Index for Options<TC, CC, VC, WC> {
+    impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>> Index for Options<TC, CC, VC, WC> {
         type Ref = Option<TC::Ref>;
         #[inline(always)]
         fn get(&self, index: usize) -> Self::Ref {
@@ -540,7 +556,7 @@ pub mod option {
             }
         }
     }
-    impl<'a, TC, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: CopyAs<u64>> Index for &'a Options<TC, CC, VC, WC>
+    impl<'a, TC, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>> Index for &'a Options<TC, CC, VC, WC>
     where &'a TC: Index
     {
         type Ref = Option<<&'a TC as Index>::Ref>;
@@ -596,7 +612,7 @@ pub mod option {
 
     impl<TC, CC, VC, WC> Options<TC, CC, VC, WC> {
         /// Returns the inner container if all elements are `Some`, or `None`.
-        pub fn try_unwrap(self) -> Option<TC> where TC: Len, VC: Len, WC: CopyAs<u64> {
+        pub fn try_unwrap(self) -> Option<TC> where TC: Len, VC: Len, WC: IndexAs<u64> {
             if self.somes.len() == self.indexes.len() { Some(self.somes) } else { None }
         }
         /// True if all elements are `None`.
@@ -647,55 +663,55 @@ pub mod option {
 
 pub mod discriminant {
 
-    use crate::common::index::CopyAs;
     use crate::{Clear, Container, Len, Index, IndexAs, Borrow};
 
     /// Tracks variant discriminants and offsets for enum containers.
     ///
-    /// When all elements share a single variant (homogeneous), avoids allocating
-    /// per-element discriminant and offset arrays. The `tag` field distinguishes:
-    /// - `0`: heterogeneous (or empty), discriminants and offsets in `variant`/`offset`
-    /// - `N > 0`: all elements are variant `N - 1`, with `count` elements total
+    /// Uses two arrays (`variant` and `offset`) with three states:
+    /// - **Empty**: both arrays empty, length is 0.
+    /// - **Homogeneous**: `variant` is empty, `offset` holds `[tag, count]` where
+    ///   `tag = variant_index + 1`. All elements share a single variant with
+    ///   identity offsets (element `i` maps to offset `i`).
+    /// - **Heterogeneous**: `variant` has per-element discriminants (`u8`),
+    ///   `offset` has per-element offsets into variant containers (`u64`).
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[derive(Clone, Debug, Default, PartialEq)]
-    pub struct Discriminant<CVar = Vec<u8>, COff = Vec<u64>, CC = u64> {
-        /// `0` for heterogeneous; `variant + 1` for homogeneous.
-        pub tag: CC,
-        /// Element count (homogeneous) or zero (heterogeneous).
-        pub count: CC,
+    pub struct Discriminant<CVar = Vec<u8>, COff = Vec<u64>> {
         /// Per-element variant discriminants; empty when homogeneous.
         pub variant: CVar,
-        /// Per-element offsets into variant containers; empty when homogeneous.
+        /// Per-element offsets (heterogeneous), or `[tag, count]` (homogeneous), or empty.
         pub offset: COff,
     }
 
-    impl<CVar: Copy, COff: Copy, CC: Copy> Copy for Discriminant<CVar, COff, CC> {}
+    impl<CVar: Copy, COff: Copy> Copy for Discriminant<CVar, COff> {}
 
     impl Discriminant {
         /// Push a variant discriminant and the offset into its variant container.
         #[inline]
         pub fn push(&mut self, variant: u8, offset: u64) {
-            let expected = variant as u64 + 1;
-            if self.tag == expected {
-                // Same variant as before; stay homogeneous.
-                self.count += 1;
-            } else if self.is_heterogeneous() && self.variant.is_empty() {
-                // Empty container; start homogeneous.
-                self.tag = expected;
-                self.count = 1;
-            } else if !self.is_heterogeneous() {
-                // Different variant; transition to heterogeneous.
-                let prev = (self.tag - 1) as u8;
-                self.variant.reserve(self.count as usize + 1);
-                self.offset.reserve(self.count as usize + 1);
-                for i in 0..self.count {
-                    self.variant.push(prev);
-                    self.offset.push(i);
+            let tag = variant as u64 + 1;
+            if self.variant.is_empty() {
+                if self.offset.is_empty() {
+                    // Empty → start homogeneous: offset = [tag, 1].
+                    self.offset.push(tag);
+                    self.offset.push(1);
+                } else if self.offset[0] == tag {
+                    // Same variant; stay homogeneous, increment count.
+                    self.offset[1] += 1;
+                } else {
+                    // Different variant; transition to heterogeneous.
+                    let prev = (self.offset[0] - 1) as u8;
+                    let count = self.offset[1];
+                    self.variant.reserve(count as usize + 1);
+                    self.offset.clear();
+                    self.offset.reserve(count as usize + 1);
+                    for i in 0..count {
+                        self.variant.push(prev);
+                        self.offset.push(i);
+                    }
+                    self.variant.push(variant);
+                    self.offset.push(offset);
                 }
-                self.variant.push(variant);
-                self.offset.push(offset);
-                self.tag = 0;
-                self.count = 0;
             } else {
                 // Already heterogeneous.
                 self.variant.push(variant);
@@ -704,23 +720,26 @@ pub mod discriminant {
         }
 
         /// Pre-allocate for the given borrowed discriminants.
-        pub fn reserve_for<'a>(&mut self, selves: impl Iterator<Item = Discriminant<&'a [u8], &'a [u64], &'a u64>> + Clone) {
+        pub fn reserve_for<'a>(&mut self, selves: impl Iterator<Item = Discriminant<&'a [u8], &'a [u64]>> + Clone) {
             self.variant.reserve_for(selves.clone().map(|x| x.variant));
             self.offset.reserve_for(selves.map(|x| x.offset));
         }
     }
 
-    impl<CVar, COff, CC: CopyAs<u64>> Discriminant<CVar, COff, CC> {
+    impl<CVar: Len, COff: Len> Discriminant<CVar, COff> {
         /// True if elements have mixed variants, with per-element discriminants and offsets.
         #[inline]
         pub fn is_heterogeneous(&self) -> bool {
-            self.tag.copy_as() == 0
+            !self.variant.is_empty()
         }
         /// Returns `Some(variant)` if all elements share a single variant.
         #[inline]
-        pub fn homogeneous(&self) -> Option<u8> {
-            let tag: u64 = self.tag.copy_as();
-            if tag != 0 { Some((tag - 1) as u8) } else { None }
+        pub fn homogeneous(&self) -> Option<u8> where COff: IndexAs<u64> {
+            if self.variant.is_empty() && self.offset.len() >= 2 {
+                Some((self.offset.index_as(0) - 1) as u8)
+            } else {
+                None
+            }
         }
         /// Returns `(variant, offset)` for the element at `index`.
         #[inline(always)]
@@ -728,28 +747,30 @@ pub mod discriminant {
             if self.is_heterogeneous() {
                 (self.variant.index_as(index), self.offset.index_as(index))
             } else {
-                let tag: u64 = self.tag.copy_as();
+                let tag: u64 = self.offset.index_as(0);
                 ((tag - 1) as u8, index as u64)
             }
         }
     }
 
-    impl<CVar: Len, COff, CC: CopyAs<u64>> Len for Discriminant<CVar, COff, CC> {
+    impl<CVar: Len, COff: Len + IndexAs<u64>> Len for Discriminant<CVar, COff> {
         #[inline(always)]
         fn len(&self) -> usize {
-            if self.is_heterogeneous() { self.variant.len() } else { self.count.copy_as() as usize }
+            if self.is_heterogeneous() { self.variant.len() }
+            else if self.offset.len() >= 2 { self.offset.index_as(1) as usize }
+            else { 0 }
         }
     }
 
     // Index for the borrowed form: returns (variant, offset).
-    impl<'a> Index for Discriminant<&'a [u8], &'a [u64], &'a u64> {
+    impl<'a> Index for Discriminant<&'a [u8], &'a [u64]> {
         type Ref = (u8, u64);
         #[inline(always)]
         fn get(&self, index: usize) -> (u8, u64) {
             if self.is_heterogeneous() {
                 (self.variant.index_as(index), self.offset.index_as(index))
             } else {
-                ((*self.tag - 1) as u8, index as u64)
+                ((self.offset[0] - 1) as u8, index as u64)
             }
         }
     }
@@ -757,12 +778,10 @@ pub mod discriminant {
     // Borrow
     impl Borrow for Discriminant {
         type Ref<'a> = (u8, u64);
-        type Borrowed<'a> = Discriminant<&'a [u8], &'a [u64], &'a u64>;
+        type Borrowed<'a> = Discriminant<&'a [u8], &'a [u64]>;
         #[inline(always)]
         fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
             Discriminant {
-                tag: &self.tag,
-                count: &self.count,
                 variant: &self.variant[..],
                 offset: &self.offset[..],
             }
@@ -770,8 +789,6 @@ pub mod discriminant {
         #[inline(always)]
         fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> {
             Discriminant {
-                tag: thing.tag,
-                count: thing.count,
                 variant: thing.variant,
                 offset: thing.offset,
             }
@@ -783,8 +800,6 @@ pub mod discriminant {
     impl<CVar: Clear, COff: Clear> Clear for Discriminant<CVar, COff> {
         #[inline(always)]
         fn clear(&mut self) {
-            self.tag = 0;
-            self.count = 0;
             self.variant.clear();
             self.offset.clear();
         }
@@ -792,57 +807,33 @@ pub mod discriminant {
 
 
     // AsBytes for borrowed form
-    impl<'a> crate::AsBytes<'a> for Discriminant<&'a [u8], &'a [u64], &'a u64> {
+    impl<'a> crate::AsBytes<'a> for Discriminant<&'a [u8], &'a [u64]> {
         #[inline(always)]
         fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-            let tag = std::iter::once((8u64, bytemuck::cast_slice(std::slice::from_ref(self.tag))));
-            let count = std::iter::once((8u64, bytemuck::cast_slice(std::slice::from_ref(self.count))));
             let variant = self.variant.as_bytes();
             let offset = self.offset.as_bytes();
-            crate::chain(crate::chain(tag, count), crate::chain(variant, offset))
+            crate::chain(variant, offset)
         }
     }
 
     // FromBytes for borrowed form
-    impl<'a> crate::FromBytes<'a> for Discriminant<&'a [u8], &'a [u64], &'a u64> {
-        const SLICE_COUNT: usize = 2 + <&'a [u8]>::SLICE_COUNT + <&'a [u64]>::SLICE_COUNT;
+    impl<'a> crate::FromBytes<'a> for Discriminant<&'a [u8], &'a [u64]> {
+        const SLICE_COUNT: usize = <&'a [u8]>::SLICE_COUNT + <&'a [u64]>::SLICE_COUNT;
         #[inline(always)]
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-            let tag = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
-            let count = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
             let variant = crate::FromBytes::from_bytes(bytes);
             let offset = crate::FromBytes::from_bytes(bytes);
-            Self { tag, count, variant, offset }
+            Self { variant, offset }
         }
         #[inline(always)]
         fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
-            let (w_tag, _) = store.get(*offset); *offset += 1;
-            debug_assert!(!w_tag.is_empty(), "Discriminant::from_store: empty tag slice");
-            let tag = w_tag.first().unwrap_or(&0);
-            let (w_count, _) = store.get(*offset); *offset += 1;
-            debug_assert!(!w_count.is_empty(), "Discriminant::from_store: empty count slice");
-            let count = w_count.first().unwrap_or(&0);
             let variant = crate::FromBytes::from_store(store, offset);
             let offset_field = crate::FromBytes::from_store(store, offset);
-            Self { tag, count, variant, offset: offset_field }
+            Self { variant, offset: offset_field }
         }
         fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
-            sizes.push(8); // tag
-            sizes.push(8); // count
             <&[u8]>::element_sizes(sizes)?;
             <&[u64]>::element_sizes(sizes)?;
-            Ok(())
-        }
-        fn validate(slices: &[(&[u64], u8)]) -> Result<(), String> {
-            if slices.len() < Self::SLICE_COUNT {
-                return Err(format!("Discriminant: expected {} slices but got {}", Self::SLICE_COUNT, slices.len()));
-            }
-            if slices[0].0.is_empty() || slices[1].0.is_empty() {
-                return Err("Discriminant: tag and count slices must be non-empty".into());
-            }
-            // Validate the variant and offset sub-slices.
-            <&[u8]>::validate(&slices[2..])?;
-            <&[u64]>::validate(&slices[2 + <&[u8]>::SLICE_COUNT..])?;
             Ok(())
         }
     }
@@ -860,7 +851,8 @@ pub mod discriminant {
             assert_eq!(d.len(), 3);
             assert_eq!(d.homogeneous(), Some(2));
             assert!(d.variant.is_empty());
-            assert!(d.offset.is_empty());
+            // offset holds [tag, count] = [3, 3] in homogeneous mode.
+            assert_eq!(d.offset, vec![3, 3]);
         }
 
         #[test]
