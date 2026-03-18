@@ -501,13 +501,13 @@ mod test {
             assert_eq!(column.get(2*i+1), Err(i as u64));
         }
 
-        let column2 = crate::Results::<&[u64], &[u64], &[u64], &[u64], &u64>::from_bytes(&mut column.borrow().as_bytes().map(|(_, bytes)| bytes));
+        let column2 = crate::Results::<&[u64], &[u64], &[u64], &[u64], &[u64]>::from_bytes(&mut column.borrow().as_bytes().map(|(_, bytes)| bytes));
         for i in 0..100 {
             assert_eq!(column.get(2*i+0), column2.get(2*i+0).copied().map_err(|e| *e));
             assert_eq!(column.get(2*i+1), column2.get(2*i+1).copied().map_err(|e| *e));
         }
 
-        let column3 = crate::Results::<&[u64], &[u64], &[u64], &[u64], &u64>::from_bytes(&mut column2.as_bytes().map(|(_, bytes)| bytes));
+        let column3 = crate::Results::<&[u64], &[u64], &[u64], &[u64], &[u64]>::from_bytes(&mut column2.as_bytes().map(|(_, bytes)| bytes));
         for i in 0..100 {
             assert_eq!(column3.get(2*i+0), column2.get(2*i+0));
             assert_eq!(column3.get(2*i+1), column2.get(2*i+1));
@@ -517,7 +517,7 @@ mod test {
         let mut store = Vec::new();
         crate::bytes::indexed::encode(&mut store, &column.borrow());
         let ds = crate::bytes::indexed::DecodedStore::new(&store);
-        let column4 = crate::Results::<&[u64], &[u64], &[u64], &[u64], &u64>::from_store(&ds, &mut 0);
+        let column4 = crate::Results::<&[u64], &[u64], &[u64], &[u64], &[u64]>::from_store(&ds, &mut 0);
         for i in 0..100 {
             assert_eq!(column.get(2*i+0), column4.get(2*i+0).copied().map_err(|e| *e));
             assert_eq!(column.get(2*i+1), column4.get(2*i+1).copied().map_err(|e| *e));

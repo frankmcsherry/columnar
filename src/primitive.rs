@@ -575,11 +575,16 @@ pub mod offsets {
         }
 
         use super::Strides;
-        impl<const K: u64, BC: Len, CC: CopyAs<u64>> std::convert::TryFrom<Strides<BC, CC>> for Fixeds<K, CC> {
-            // On error we return the original.
-            type Error = Strides<BC, CC>;
-            fn try_from(item: Strides<BC, CC>) -> Result<Self, Self::Error> {
-                if item.strided() == Some(K) { Ok( Self { count: item.length } ) } else { Err(item) }
+        impl<const K: u64> std::convert::TryFrom<Strides> for Fixeds<K> {
+            type Error = Strides;
+            fn try_from(item: Strides) -> Result<Self, Self::Error> {
+                if item.strided() == Some(K) { Ok( Self { count: item.head[1] } ) } else { Err(item) }
+            }
+        }
+        impl<'a, const K: u64> std::convert::TryFrom<Strides<&'a [u64], &'a [u64]>> for Fixeds<K, &'a u64> {
+            type Error = Strides<&'a [u64], &'a [u64]>;
+            fn try_from(item: Strides<&'a [u64], &'a [u64]>) -> Result<Self, Self::Error> {
+                if item.strided() == Some(K) { Ok( Self { count: &item.head[1] } ) } else { Err(item) }
             }
         }
     }
@@ -594,33 +599,29 @@ pub mod offsets {
     mod stride {
 
         use std::ops::Deref;
-        use crate::{Container, Borrow, Index, Len, Push, Clear, AsBytes, FromBytes};
-        use crate::common::index::CopyAs;
+        use crate::{Container, Borrow, Index, IndexAs, Len, Push, Clear, AsBytes, FromBytes};
 
-        /// The first two integers describe a stride pattern, [stride, length].
+        /// Columnar store for non-decreasing `u64` offsets with stride optimization.
         ///
-        /// If the length is zero the collection is empty. The first `item` pushed
-        /// always becomes the first list element. The next element is the number of
-        /// items at position `i` whose value is `item * (i+1)`. After this comes
-        /// the remaining entries in the bounds container.
+        /// `head` holds `[stride, length]`: when the first `length` offsets follow a
+        /// regular stride pattern (`(i+1) * stride`), they are stored implicitly.
+        /// Remaining offsets go into `bounds`. In the owned form `head` is `[u64; 2]`;
+        /// in the borrowed form it is `&[u64]` of length 2.
         #[derive(Copy, Clone, Debug, Default)]
-        pub struct Strides<BC = Vec<u64>, CC = u64> {
-            pub stride: CC,
-            pub length: CC,
+        pub struct Strides<BC = Vec<u64>, HC = [u64; 2]> {
+            pub head: HC,
             pub bounds: BC,
         }
 
         impl Borrow for Strides {
             type Ref<'a> = u64;
-            type Borrowed<'a> = Strides<&'a [u64], &'a u64>;
+            type Borrowed<'a> = Strides<&'a [u64], &'a [u64]>;
 
-            #[inline(always)] fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { Strides { stride: &self.stride, length: &self.length, bounds: &self.bounds[..] } }
-            /// Reborrows the borrowed type to a shorter lifetime. See [`Columnar::reborrow`] for details.
+            #[inline(always)] fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { Strides { head: &self.head, bounds: &self.bounds[..] } }
             #[inline(always)] fn reborrow<'b, 'a: 'b>(item: Self::Borrowed<'a>) -> Self::Borrowed<'b> where Self: 'a {
-                Strides { stride: item.stride, length: item.length, bounds: item.bounds }
+                Strides { head: item.head, bounds: item.bounds }
             }
-            /// Reborrows the borrowed type to a shorter lifetime. See [`Columnar::reborrow`] for details.
-                #[inline(always)]fn reborrow_ref<'b, 'a: 'b>(item: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { item }
+            #[inline(always)] fn reborrow_ref<'b, 'a: 'b>(item: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { item }
         }
 
         impl Container for Strides {
@@ -633,76 +634,71 @@ pub mod offsets {
         impl Push<u64> for Strides { #[inline(always)] fn push(&mut self, item: u64) { self.push(item) } }
         impl Clear for Strides { #[inline(always)] fn clear(&mut self) { self.clear() } }
 
-        impl<BC: Len, CC: CopyAs<u64>> Len for Strides<BC, CC> {
+        impl<BC: Len, HC: IndexAs<u64>> Len for Strides<BC, HC> {
             #[inline(always)]
-            fn len(&self) -> usize { self.length.copy_as() as usize + self.bounds.len() }
+            fn len(&self) -> usize { self.head.index_as(1) as usize + self.bounds.len() }
         }
-        impl Index for Strides<&[u64], &u64> {
+        impl Index for Strides<&[u64], &[u64]> {
             type Ref = u64;
             #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref {
                 let index = index as u64;
-                if index < *self.length { (index+1) * self.stride } else { self.bounds[(index - self.length) as usize] }
+                let length = self.head[1];
+                let stride = self.head[0];
+                if index < length { (index+1) * stride } else { self.bounds[(index - length) as usize] }
             }
         }
 
-        impl<'a, BC: AsBytes<'a>> AsBytes<'a> for Strides<BC, &'a u64> {
+        impl<'a, BC: AsBytes<'a>> AsBytes<'a> for Strides<BC, &'a [u64]> {
             #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                let stride = std::iter::once((8, bytemuck::cast_slice(std::slice::from_ref(self.stride))));
-                let length = std::iter::once((8, bytemuck::cast_slice(std::slice::from_ref(self.length))));
+                let head = std::iter::once((8u64, bytemuck::cast_slice(self.head)));
                 let bounds = self.bounds.as_bytes();
-                crate::chain(stride, crate::chain(length, bounds))
+                crate::chain(head, bounds)
             }
         }
-        impl<'a, BC: FromBytes<'a>> FromBytes<'a> for Strides<BC, &'a u64> {
-            const SLICE_COUNT: usize = 2 + BC::SLICE_COUNT;
+        impl<'a, BC: FromBytes<'a>> FromBytes<'a> for Strides<BC, &'a [u64]> {
+            const SLICE_COUNT: usize = 1 + BC::SLICE_COUNT;
             #[inline(always)]
             fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-                let stride = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
-                let length = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
+                let head: &[u64] = bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap();
                 let bounds = BC::from_bytes(bytes);
-                Self { stride, length, bounds }
+                Self { head, bounds }
             }
             #[inline(always)]
             fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
-                let (w1, _) = store.get(*offset); *offset += 1;
-                debug_assert!(!w1.is_empty(), "Strides::from_store: empty stride slice");
-                let stride = w1.first().unwrap_or(&0);
-                let (w2, _) = store.get(*offset); *offset += 1;
-                debug_assert!(!w2.is_empty(), "Strides::from_store: empty length slice");
-                let length = w2.first().unwrap_or(&0);
+                let (head, _) = store.get(*offset); *offset += 1;
+                debug_assert!(head.len() >= 2, "Strides::from_store: head slice too short (len {})", head.len());
                 let bounds = BC::from_store(store, offset);
-                Self { stride, length, bounds }
+                Self { head, bounds }
             }
             fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
-                sizes.push(8); // stride
-                sizes.push(8); // length
+                sizes.push(8); // head: [stride, length]
                 BC::element_sizes(sizes)
             }
             fn validate(slices: &[(&[u64], u8)]) -> Result<(), String> {
-                if slices.len() < 2 || slices[0].0.is_empty() || slices[1].0.is_empty() {
-                    return Err("Strides: stride and length slices must be non-empty".into());
+                if slices.is_empty() || slices[0].0.len() < 2 {
+                    return Err("Strides: head slice must have at least 2 elements (stride, length)".into());
                 }
-                BC::validate(&slices[2..])
+                BC::validate(&slices[1..])
             }
         }
 
         impl Strides {
             pub fn new(stride: u64, length: u64) -> Self {
-                Self { stride, length, bounds: Vec::default() }
+                Self { head: [stride, length], bounds: Vec::default() }
             }
             #[inline(always)]
             pub fn push(&mut self, item: u64) {
-                if self.length == 0 {
-                    self.stride = item;
-                    self.length = 1;
+                if self.head[1] == 0 {
+                    self.head[0] = item;
+                    self.head[1] = 1;
                 }
                 else if !self.bounds.is_empty() {
                     self.bounds.push(item);
                 }
-                else if item == self.stride * (self.length + 1) {
-                    self.length += 1;
+                else if item == self.head[0] * (self.head[1] + 1) {
+                    self.head[1] += 1;
                 }
                 else {
                     self.bounds.push(item);
@@ -710,17 +706,16 @@ pub mod offsets {
             }
             #[inline(always)]
             pub fn clear(&mut self) {
-                self.stride = 0;
-                self.length = 0;
+                self.head = [0, 0];
                 self.bounds.clear();
             }
         }
 
-        impl<BC: Deref<Target=[u64]>, CC: CopyAs<u64>> Strides<BC, CC> {
+        impl<BC: Deref<Target=[u64]>, HC: IndexAs<u64>> Strides<BC, HC> {
             #[inline(always)]
             pub fn bounds(&self, index: usize) -> (usize, usize) {
-                let stride = self.stride.copy_as();
-                let length = self.length.copy_as();
+                let stride = self.head.index_as(0);
+                let length = self.head.index_as(1);
                 let index = index as u64;
                 let lower = if index == 0 { 0 } else {
                     let index = index - 1;
@@ -730,10 +725,10 @@ pub mod offsets {
                 (lower, upper)
             }
         }
-        impl<BC: Len, CC: CopyAs<u64>> Strides<BC, CC> {
+        impl<BC: Len, HC: IndexAs<u64>> Strides<BC, HC> {
             #[inline(always)] pub fn strided(&self) -> Option<u64> {
                 if self.bounds.is_empty() {
-                    Some(self.stride.copy_as())
+                    Some(self.head.index_as(0))
                 }
                 else { None }
             }
@@ -890,19 +885,21 @@ pub use boolean::Bools;
 /// A columnar store for `bool`.
 mod boolean {
 
-    use crate::common::index::CopyAs;
     use crate::{Container, Clear, Len, Index, IndexAs, Push, Borrow};
 
     /// A store for maintaining `Vec<bool>`.
+    ///
+    /// Packed bits are stored in `values` as complete `u64` words. The `tail`
+    /// holds `[last_word, last_bits]`: the partial word being filled and the
+    /// count of valid bits in it. In the owned form `tail` is `[u64; 2]`;
+    /// in the borrowed form it is `&[u64]` of length 2.
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[derive(Copy, Clone, Debug, Default, PartialEq)]
-    pub struct Bools<VC = Vec<u64>, WC = u64> {
+    pub struct Bools<VC = Vec<u64>, TC = [u64; 2]> {
         /// The bundles of bits that form complete `u64` values.
         pub values: VC,
-        /// The work-in-progress bits that are not yet complete.
-        pub last_word: WC,
-        /// The number of set bits in `bits.last()`.
-        pub last_bits: WC,
+        /// `[last_word, last_bits]`: the partial word and the number of valid bits in it.
+        pub tail: TC,
     }
 
     impl crate::Columnar for bool {
@@ -913,21 +910,19 @@ mod boolean {
 
     impl<VC: crate::common::BorrowIndexAs<u64>> Borrow for Bools<VC> {
         type Ref<'a> = bool;
-        type Borrowed<'a> = Bools<VC::Borrowed<'a>, &'a u64> where VC: 'a;
+        type Borrowed<'a> = Bools<VC::Borrowed<'a>, &'a [u64]> where VC: 'a;
         #[inline(always)]
         fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
             Bools {
                 values: self.values.borrow(),
-                last_word: &self.last_word,
-                last_bits: &self.last_bits,
+                tail: &self.tail,
             }
         }
         #[inline(always)]
         fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> where VC: 'a {
             Bools {
                 values: VC::reborrow(thing.values),
-                last_word: thing.last_word,
-                last_bits: thing.last_bits,
+                tail: thing.tail,
             }
         }
         #[inline(always)]
@@ -942,39 +937,32 @@ mod boolean {
         }
     }
 
-    impl<'a, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for crate::primitive::Bools<VC, &'a u64> {
+    impl<'a, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for crate::primitive::Bools<VC, &'a [u64]> {
         #[inline(always)]
         fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
             let iter = self.values.as_bytes();
-            let iter = crate::chain_one(iter, (std::mem::align_of::<u64>() as u64, bytemuck::cast_slice(std::slice::from_ref(self.last_word))));
-            crate::chain_one(iter, (std::mem::align_of::<u64>() as u64, bytemuck::cast_slice(std::slice::from_ref(self.last_bits))))
+            crate::chain_one(iter, (std::mem::align_of::<u64>() as u64, bytemuck::cast_slice(self.tail)))
         }
     }
 
-    impl<'a, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for crate::primitive::Bools<VC, &'a u64> {
-        const SLICE_COUNT: usize = VC::SLICE_COUNT + 2;
+    impl<'a, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for crate::primitive::Bools<VC, &'a [u64]> {
+        const SLICE_COUNT: usize = VC::SLICE_COUNT + 1;
         #[inline(always)]
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
             let values = crate::FromBytes::from_bytes(bytes);
-            let last_word = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
-            let last_bits = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
-            Self { values, last_word, last_bits }
+            let tail: &[u64] = bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap();
+            Self { values, tail }
         }
         #[inline(always)]
         fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
             let values = VC::from_store(store, offset);
-            let (w1, _) = store.get(*offset); *offset += 1;
-            debug_assert!(!w1.is_empty(), "Bools::from_store: empty last_word slice");
-            let last_word = w1.first().unwrap_or(&0);
-            let (w2, _) = store.get(*offset); *offset += 1;
-            debug_assert!(!w2.is_empty(), "Bools::from_store: empty last_bits slice");
-            let last_bits = w2.first().unwrap_or(&0);
-            Self { values, last_word, last_bits }
+            let (tail, _) = store.get(*offset); *offset += 1;
+            debug_assert!(tail.len() >= 2, "Bools::from_store: tail slice too short (len {})", tail.len());
+            Self { values, tail }
         }
         fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
             VC::element_sizes(sizes)?;
-            sizes.push(8); // last_word
-            sizes.push(8); // last_bits
+            sizes.push(8); // tail: [last_word, last_bits]
             Ok(())
         }
         fn validate(slices: &[(&[u64], u8)]) -> Result<(), String> {
@@ -983,23 +971,23 @@ mod boolean {
             }
             VC::validate(slices)?;
             let vc = VC::SLICE_COUNT;
-            if slices[vc].0.is_empty() || slices[vc + 1].0.is_empty() {
-                return Err("Bools: last_word and last_bits slices must be non-empty".into());
+            if slices[vc].0.len() < 2 {
+                return Err("Bools: tail slice must have at least 2 elements (last_word, last_bits)".into());
             }
             Ok(())
         }
     }
 
-    impl<VC: Len, WC: CopyAs<u64>> Len for Bools<VC, WC> {
-        #[inline(always)] fn len(&self) -> usize { self.values.len() * 64 + (self.last_bits.copy_as() as usize) }
+    impl<VC: Len, TC: IndexAs<u64>> Len for Bools<VC, TC> {
+        #[inline(always)] fn len(&self) -> usize { self.values.len() * 64 + (self.tail.index_as(1) as usize) }
     }
 
-    impl<VC: Len + IndexAs<u64>, WC: CopyAs<u64>> Index for Bools<VC, WC> {
+    impl<VC: Len + IndexAs<u64>, TC: IndexAs<u64>> Index for Bools<VC, TC> {
         type Ref = bool;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
             let block = index / 64;
             let word = if block == self.values.len() {
-                self.last_word.copy_as()
+                self.tail.index_as(0)
             } else {
                 self.values.index_as(block)
             };
@@ -1008,7 +996,7 @@ mod boolean {
         }
     }
 
-    impl<VC: Len + IndexAs<u64>, WC: CopyAs<u64>> Index for &Bools<VC, WC> {
+    impl<VC: Len + IndexAs<u64>, TC: IndexAs<u64>> Index for &Bools<VC, TC> {
         type Ref = bool;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
             (*self).get(index)
@@ -1018,13 +1006,12 @@ mod boolean {
     impl<VC: for<'a> Push<&'a u64>> Push<bool> for Bools<VC> {
         #[inline]
         fn push(&mut self, bit: bool) {
-            self.last_word |= (bit as u64) << self.last_bits;
-            self.last_bits += 1;
+            self.tail[0] |= (bit as u64) << self.tail[1];
+            self.tail[1] += 1;
             // If we have a fully formed word, commit it to `self.values`.
-            if self.last_bits == 64 {
-                self.values.push(&self.last_word);
-                self.last_word = 0;
-                self.last_bits = 0;
+            if self.tail[1] == 64 {
+                self.values.push(&self.tail[0]);
+                self.tail = [0, 0];
             }
         }
     }
@@ -1040,8 +1027,7 @@ mod boolean {
         #[inline(always)]
         fn clear(&mut self) {
             self.values.clear();
-            self.last_word = 0;
-            self.last_bits = 0;
+            self.tail = [0, 0];
         }
     }
 

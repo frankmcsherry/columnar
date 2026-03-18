@@ -66,7 +66,7 @@ use columnar::bytes::indexed;
 // ================================================================
 
 #[no_mangle] pub fn store_u64_result_f0(store: &[u64], i: usize) -> u64 {
-    type T<'a> = (&'a [u64], columnar::Results<&'a [u64], &'a [u64], &'a [u64], &'a [u64], &'a u64>);
+    type T<'a> = (&'a [u64], columnar::Results<&'a [u64], &'a [u64], &'a [u64], &'a [u64], &'a [u64]>);
     let ds = indexed::DecodedStore::new(store);
     *T::from_store(&ds, &mut 0).0.get(i).unwrap()
 }

@@ -198,6 +198,9 @@ pub mod common {
     impl<T> Len for [T] {
         #[inline(always)] fn len(&self) -> usize { <[T]>::len(self) }
     }
+    impl<T, const N: usize> Len for [T; N] {
+        #[inline(always)] fn len(&self) -> usize { N }
+    }
 
     /// A type that can accept items of type `T`.
     pub trait Push<T> {
@@ -324,6 +327,10 @@ pub mod common {
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { &self[index] }
         }
         impl<T: Copy> Index for [T] {
+            type Ref = T;
+            #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self[index] }
+        }
+        impl<T: Copy, const N: usize> Index for [T; N] {
             type Ref = T;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self[index] }
         }

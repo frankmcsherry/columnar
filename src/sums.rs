@@ -13,7 +13,7 @@
 pub mod rank_select {
 
     use crate::primitive::Bools;
-    use crate::common::index::CopyAs;
+
     use crate::{Borrow, Len, Index, IndexAs, Push, Clear};
 
     /// A store for maintaining `Vec<bool>` with fast `rank` and `select` access.
@@ -23,7 +23,7 @@ pub mod rank_select {
     /// above the bits themselves, which seems pretty solid.
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[derive(Copy, Clone, Debug, Default, PartialEq)]
-    pub struct RankSelect<CC = Vec<u64>, VC = Vec<u64>, WC = u64> {
+    pub struct RankSelect<CC = Vec<u64>, VC = Vec<u64>, WC = [u64; 2]> {
         /// Counts of the number of cumulative set (true) bits, *after* each block of 1024 bits.
         pub counts: CC,
         /// The bits themselves.
@@ -32,29 +32,29 @@ pub mod rank_select {
 
     impl<CC: crate::common::BorrowIndexAs<u64>, VC: crate::common::BorrowIndexAs<u64>> RankSelect<CC, VC> {
         #[inline(always)]
-        pub fn borrow<'a>(&'a self) -> RankSelect<CC::Borrowed<'a>, VC::Borrowed<'a>, &'a u64> {
+        pub fn borrow<'a>(&'a self) -> RankSelect<CC::Borrowed<'a>, VC::Borrowed<'a>, &'a [u64]> {
             RankSelect {
                 counts: self.counts.borrow(),
                 values: self.values.borrow(),
             }
         }
         #[inline(always)]
-        pub fn reborrow<'b, 'a: 'b>(thing: RankSelect<CC::Borrowed<'a>, VC::Borrowed<'a>, &'a u64>) -> RankSelect<CC::Borrowed<'b>, VC::Borrowed<'b>, &'b u64> {
+        pub fn reborrow<'b, 'a: 'b>(thing: RankSelect<CC::Borrowed<'a>, VC::Borrowed<'a>, &'a [u64]>) -> RankSelect<CC::Borrowed<'b>, VC::Borrowed<'b>, &'b [u64]> {
             RankSelect {
                 counts: CC::reborrow(thing.counts),
-                values: Bools::<VC, u64>::reborrow(thing.values),
+                values: Bools::<VC, [u64; 2]>::reborrow(thing.values),
             }
         }
     }
 
-    impl<'a, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for RankSelect<CC, VC, &'a u64> {
+    impl<'a, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for RankSelect<CC, VC, &'a [u64]> {
         #[inline(always)]
         fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
             crate::chain(self.counts.as_bytes(), self.values.as_bytes())
         }
     }
-    impl<'a, CC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for RankSelect<CC, VC, &'a u64> {
-        const SLICE_COUNT: usize = CC::SLICE_COUNT + <crate::primitive::Bools<VC, &'a u64>>::SLICE_COUNT;
+    impl<'a, CC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for RankSelect<CC, VC, &'a [u64]> {
+        const SLICE_COUNT: usize = CC::SLICE_COUNT + <crate::primitive::Bools<VC, &'a [u64]>>::SLICE_COUNT;
         #[inline(always)]
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
             Self {
@@ -66,24 +66,24 @@ pub mod rank_select {
         fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
             Self {
                 counts: CC::from_store(store, offset),
-                values: <crate::primitive::Bools<VC, &'a u64>>::from_store(store, offset),
+                values: <crate::primitive::Bools<VC, &'a [u64]>>::from_store(store, offset),
             }
         }
         fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
             CC::element_sizes(sizes)?;
-            <crate::primitive::Bools<VC, &'a u64>>::element_sizes(sizes)?;
+            <crate::primitive::Bools<VC, &'a [u64]>>::element_sizes(sizes)?;
             Ok(())
         }
     }
 
 
-    impl<CC, VC: Len + IndexAs<u64>, WC: CopyAs<u64>> RankSelect<CC, VC, WC> {
+    impl<CC, VC: Len + IndexAs<u64>, WC: IndexAs<u64>> RankSelect<CC, VC, WC> {
         #[inline(always)]
         pub fn get(&self, index: usize) -> bool {
             Index::get(&self.values, index)
         }
     }
-    impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, WC: CopyAs<u64>> RankSelect<CC, VC, WC> {
+    impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, WC: IndexAs<u64>> RankSelect<CC, VC, WC> {
         /// The number of set bits *strictly* preceding `index`.
         ///
         /// This number is accumulated first by reading out of `self.counts` at the correct position,
@@ -98,7 +98,7 @@ pub mod rank_select {
                 count += self.values.values.index_as(pos).count_ones() as usize;
             }
             // TODO: Panic if out of bounds?
-            let intra_word = if block == self.values.values.len() { self.values.last_word.copy_as() } else { self.values.values.index_as(block) };
+            let intra_word = if block == self.values.values.len() { self.values.tail.index_as(0) } else { self.values.values.index_as(block) };
             count += (intra_word & ((1 << bit) - 1)).count_ones() as usize;
             count
         }
@@ -119,8 +119,8 @@ pub mod rank_select {
                 block += 1;
             }
             // Step three is to search the last word for the location, or return `None` if we run out of bits.
-            let last_bits = if block == self.values.values.len() { self.values.last_bits.copy_as() as usize } else { 64 };
-            let last_word = if block == self.values.values.len() { self.values.last_word.copy_as() } else { self.values.values.index_as(block) };
+            let last_bits = if block == self.values.values.len() { self.values.tail.index_as(1) as usize } else { 64 };
+            let last_word = if block == self.values.values.len() { self.values.tail.index_as(0) } else { self.values.values.index_as(block) };
             for shift in 0 .. last_bits {
                 if ((last_word >> shift) & 0x01 == 0x01) && count + 1 == rank {
                     return Some(64 * block + shift);
@@ -132,7 +132,7 @@ pub mod rank_select {
         }
     }
 
-    impl<CC, VC: Len, WC: CopyAs<u64>> RankSelect<CC, VC, WC> {
+    impl<CC, VC: Len, WC: IndexAs<u64>> RankSelect<CC, VC, WC> {
         pub fn len(&self) -> usize {
             self.values.len()
         }
@@ -165,13 +165,13 @@ pub mod rank_select {
 
 pub mod result {
 
-    use crate::common::index::CopyAs;
+
     use crate::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, Borrow};
     use crate::RankSelect;
 
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[derive(Copy, Clone, Debug, Default, PartialEq)]
-    pub struct Results<SC, TC, CC=Vec<u64>, VC=Vec<u64>, WC=u64> {
+    pub struct Results<SC, TC, CC=Vec<u64>, VC=Vec<u64>, WC=[u64; 2]> {
         /// Bits set to `true` correspond to `Ok` variants.
         pub indexes: RankSelect<CC, VC, WC>,
         pub oks: SC,
@@ -197,7 +197,7 @@ pub mod result {
 
     impl<SC: Borrow, TC: Borrow> Borrow for Results<SC, TC> {
         type Ref<'a> = Result<SC::Ref<'a>, TC::Ref<'a>> where SC: 'a, TC: 'a;
-        type Borrowed<'a> = Results<SC::Borrowed<'a>, TC::Borrowed<'a>, &'a [u64], &'a [u64], &'a u64> where SC: 'a, TC: 'a;
+        type Borrowed<'a> = Results<SC::Borrowed<'a>, TC::Borrowed<'a>, &'a [u64], &'a [u64], &'a [u64]> where SC: 'a, TC: 'a;
         fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
             Results {
                 indexes: self.indexes.borrow(),
@@ -252,7 +252,7 @@ pub mod result {
         }
     }
 
-    impl<'a, SC: crate::AsBytes<'a>, TC: crate::AsBytes<'a>, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for Results<SC, TC, CC, VC, &'a u64> {
+    impl<'a, SC: crate::AsBytes<'a>, TC: crate::AsBytes<'a>, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for Results<SC, TC, CC, VC, &'a [u64]> {
         #[inline(always)]
         fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
             let iter = self.indexes.as_bytes();
@@ -260,8 +260,8 @@ pub mod result {
             crate::chain(iter, self.errs.as_bytes())
         }
     }
-    impl<'a, SC: crate::FromBytes<'a>, TC: crate::FromBytes<'a>, CC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for Results<SC, TC, CC, VC, &'a u64> {
-        const SLICE_COUNT: usize = <RankSelect<CC, VC, &'a u64>>::SLICE_COUNT + SC::SLICE_COUNT + TC::SLICE_COUNT;
+    impl<'a, SC: crate::FromBytes<'a>, TC: crate::FromBytes<'a>, CC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for Results<SC, TC, CC, VC, &'a [u64]> {
+        const SLICE_COUNT: usize = <RankSelect<CC, VC, &'a [u64]>>::SLICE_COUNT + SC::SLICE_COUNT + TC::SLICE_COUNT;
         #[inline(always)]
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
             Self {
@@ -279,14 +279,14 @@ pub mod result {
             }
         }
         fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
-            <RankSelect<CC, VC, &'a u64>>::element_sizes(sizes)?;
+            <RankSelect<CC, VC, &'a [u64]>>::element_sizes(sizes)?;
             SC::element_sizes(sizes)?;
             TC::element_sizes(sizes)?;
             Ok(())
         }
     }
 
-    impl<SC, TC, CC, VC: Len, WC: CopyAs<u64>> Len for Results<SC, TC, CC, VC, WC> {
+    impl<SC, TC, CC, VC: Len, WC: IndexAs<u64>> Len for Results<SC, TC, CC, VC, WC> {
         #[inline(always)] fn len(&self) -> usize { self.indexes.len() }
     }
 
@@ -296,7 +296,7 @@ pub mod result {
         TC: Index,
         CC: IndexAs<u64> + Len,
         VC: IndexAs<u64> + Len,
-        WC: CopyAs<u64>,
+        WC: IndexAs<u64>,
     {
         type Ref = Result<SC::Ref, TC::Ref>;
         #[inline(always)]
@@ -314,7 +314,7 @@ pub mod result {
         &'a TC: Index,
         CC: IndexAs<u64> + Len,
         VC: IndexAs<u64> + Len,
-        WC: CopyAs<u64>,
+        WC: IndexAs<u64>,
     {
         type Ref = Result<<&'a SC as Index>::Ref, <&'a TC as Index>::Ref>;
         #[inline(always)]
@@ -437,13 +437,13 @@ pub mod result {
 
 pub mod option {
 
-    use crate::common::index::CopyAs;
+
     use crate::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, Borrow};
     use crate::RankSelect;
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[derive(Copy, Clone, Debug, Default, PartialEq)]
-    pub struct Options<TC, CC=Vec<u64>, VC=Vec<u64>, WC=u64> {
+    pub struct Options<TC, CC=Vec<u64>, VC=Vec<u64>, WC=[u64; 2]> {
         /// Uses two bits for each item, one to indicate the variant and one (amortized)
         /// to enable efficient rank determination.
         pub indexes: RankSelect<CC, VC, WC>,
@@ -465,7 +465,7 @@ pub mod option {
 
     impl<TC: Borrow> Borrow for Options<TC> {
         type Ref<'a> = Option<TC::Ref<'a>> where TC: 'a;
-        type Borrowed<'a> = Options<TC::Borrowed<'a>, &'a [u64], &'a [u64], &'a u64> where TC: 'a;
+        type Borrowed<'a> = Options<TC::Borrowed<'a>, &'a [u64], &'a [u64], &'a [u64]> where TC: 'a;
         fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
             Options {
                 indexes: self.indexes.borrow(),
@@ -511,15 +511,15 @@ pub mod option {
         }
     }
 
-    impl<'a, TC: crate::AsBytes<'a>, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for Options<TC, CC, VC, &'a u64> {
+    impl<'a, TC: crate::AsBytes<'a>, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for Options<TC, CC, VC, &'a [u64]> {
         #[inline(always)]
         fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
             crate::chain(self.indexes.as_bytes(), self.somes.as_bytes())
         }
     }
 
-    impl <'a, TC: crate::FromBytes<'a>, CC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for Options<TC, CC, VC, &'a u64> {
-        const SLICE_COUNT: usize = <RankSelect<CC, VC, &'a u64>>::SLICE_COUNT + TC::SLICE_COUNT;
+    impl <'a, TC: crate::FromBytes<'a>, CC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for Options<TC, CC, VC, &'a [u64]> {
+        const SLICE_COUNT: usize = <RankSelect<CC, VC, &'a [u64]>>::SLICE_COUNT + TC::SLICE_COUNT;
         #[inline(always)]
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
             Self {
@@ -535,17 +535,17 @@ pub mod option {
             }
         }
         fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
-            <RankSelect<CC, VC, &'a u64>>::element_sizes(sizes)?;
+            <RankSelect<CC, VC, &'a [u64]>>::element_sizes(sizes)?;
             TC::element_sizes(sizes)?;
             Ok(())
         }
     }
 
-    impl<T, CC, VC: Len, WC: CopyAs<u64>> Len for Options<T, CC, VC, WC> {
+    impl<T, CC, VC: Len, WC: IndexAs<u64>> Len for Options<T, CC, VC, WC> {
         #[inline(always)] fn len(&self) -> usize { self.indexes.len() }
     }
 
-    impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: CopyAs<u64>> Index for Options<TC, CC, VC, WC> {
+    impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>> Index for Options<TC, CC, VC, WC> {
         type Ref = Option<TC::Ref>;
         #[inline(always)]
         fn get(&self, index: usize) -> Self::Ref {
@@ -556,7 +556,7 @@ pub mod option {
             }
         }
     }
-    impl<'a, TC, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: CopyAs<u64>> Index for &'a Options<TC, CC, VC, WC>
+    impl<'a, TC, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>> Index for &'a Options<TC, CC, VC, WC>
     where &'a TC: Index
     {
         type Ref = Option<<&'a TC as Index>::Ref>;
@@ -612,7 +612,7 @@ pub mod option {
 
     impl<TC, CC, VC, WC> Options<TC, CC, VC, WC> {
         /// Returns the inner container if all elements are `Some`, or `None`.
-        pub fn try_unwrap(self) -> Option<TC> where TC: Len, VC: Len, WC: CopyAs<u64> {
+        pub fn try_unwrap(self) -> Option<TC> where TC: Len, VC: Len, WC: IndexAs<u64> {
             if self.somes.len() == self.indexes.len() { Some(self.somes) } else { None }
         }
         /// True if all elements are `None`.
