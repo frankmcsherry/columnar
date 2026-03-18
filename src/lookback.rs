@@ -8,12 +8,12 @@ use crate::{Options, Results, Push, Index, Len, Clear, Borrow, Container, IndexA
 /// A container that encodes repeated values with a `None` variant, at the cost of extra bits for every record.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
-pub struct Repeats<TC, CC=Vec<u64>, VC=Vec<u64>, WC=[u64; 2], const N: u8 = 255> {
+pub struct Repeats<TC, CC=Vec<u64>, VC=Vec<u64>, WC=[u64; 2]> {
     /// Some(x) encodes a value, and None indicates the prior `x` value.
     pub inner: Options<TC, CC, VC, WC>,
 }
 
-impl<T: PartialEq, TC: Push<T> + Len, const N: u8> Push<T> for Repeats<TC, Vec<u64>, Vec<u64>, [u64; 2], N>
+impl<T: PartialEq, TC: Push<T> + Len> Push<T> for Repeats<TC>
 where
     for<'a> &'a TC: Index,
     for<'a> <&'a TC as Index>::Ref : PartialEq<T>,
@@ -30,11 +30,11 @@ where
     }
 }
 
-impl<TC, CC, VC: Len, WC: IndexAs<u64>, const N: u8> Len for Repeats<TC, CC, VC, WC, N> {
+impl<TC, CC, VC: Len, WC: IndexAs<u64>> Len for Repeats<TC, CC, VC, WC> {
     #[inline(always)] fn len(&self) -> usize { self.inner.len() }
 }
 
-impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>, const N: u8> Index for Repeats<TC, CC, VC, WC, N> {
+impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>> Index for Repeats<TC, CC, VC, WC> {
     type Ref = TC::Ref;
     #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
         match self.inner.get(index) {
@@ -47,7 +47,7 @@ impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>
     }
 }
 
-impl<'a, TC, const N: u8> Index for &'a Repeats<TC, Vec<u64>, Vec<u64>, [u64; 2], N>
+impl<'a, TC> Index for &'a Repeats<TC>
 where
     &'a TC: Index,
 {
@@ -63,9 +63,9 @@ where
     }
 }
 
-impl<TC: Borrow, const N: u8> Borrow for Repeats<TC, Vec<u64>, Vec<u64>, [u64; 2], N> {
+impl<TC: Borrow> Borrow for Repeats<TC> {
     type Ref<'a> = TC::Ref<'a> where TC: 'a;
-    type Borrowed<'a> = Repeats<TC::Borrowed<'a>, &'a [u64], &'a [u64], &'a [u64], N> where TC: 'a;
+    type Borrowed<'a> = Repeats<TC::Borrowed<'a>, &'a [u64], &'a [u64], &'a [u64]> where TC: 'a;
     fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
         Repeats { inner: self.inner.borrow() }
     }
@@ -79,7 +79,7 @@ impl<TC: Borrow, const N: u8> Borrow for Repeats<TC, Vec<u64>, Vec<u64>, [u64; 2
     }
 }
 
-impl<TC: Container, const N: u8> Container for Repeats<TC, Vec<u64>, Vec<u64>, [u64; 2], N>
+impl<TC: Container> Container for Repeats<TC>
 where
     for<'a> &'a TC: Index,
     for<'a> TC::Ref<'a>: PartialEq,
@@ -102,7 +102,7 @@ where
     }
 }
 
-impl<TC: Clear, const N: u8> Clear for Repeats<TC, Vec<u64>, Vec<u64>, [u64; 2], N> {
+impl<TC: Clear> Clear for Repeats<TC> {
     fn clear(&mut self) {
         self.inner.clear();
     }
