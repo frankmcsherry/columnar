@@ -107,6 +107,8 @@ pub trait Borrow: Len + Clone + 'static {
     /// Corresponding to our example, `(&'a [A], Vecs<&'a [B], &'a [u64]>)`.
     type Borrowed<'a>: Copy + Len + Index<Ref = Self::Ref<'a>> where Self: 'a;
     /// Converts a reference to the type to a borrowed variant.
+    ///
+    /// Implementations should most likely be marked `#[inline(always)]`.
     fn borrow<'a>(&'a self) -> Self::Borrowed<'a>;
     /// Reborrows the borrowed type to a shorter lifetime. See [`Columnar::reborrow`] for details.
     fn reborrow<'b, 'a: 'b>(item: Self::Borrowed<'a>) -> Self::Borrowed<'b> where Self: 'a;
@@ -292,8 +294,15 @@ pub mod common {
         pub trait Index {
             /// The type returned by the `get` method.
             ///
-            /// Notably, this does not vary with lifetime, and will not depend on the lifetime of `&self`.
+            /// This trait is most often implemented for lifetimed containers, and the `Ref` type
+            /// will have a lifetime that depends on that of the containers, rather than `&self`.
             type Ref;
+            /// Returns the reference type for location `index`.
+            ///
+            /// Implementations should most likely be marked `#[inline(always)]`.
+            /// If possible, avoid the potential to panic in these implementations,
+            /// as this prevents Rust/LLVM from eliding the test even if the return
+            /// value is not actually consumed.
             fn get(&self, index: usize) -> Self::Ref;
             #[inline(always)] fn last(&self) -> Option<Self::Ref> where Self: Len {
                 if self.is_empty() { None }

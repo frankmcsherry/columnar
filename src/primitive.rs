@@ -638,14 +638,14 @@ pub mod offsets {
             #[inline(always)]
             fn len(&self) -> usize { self.head.index_as(1) as usize + self.bounds.len() }
         }
-        impl Index for Strides<&[u64], &[u64]> {
+        impl<BC: IndexAs<u64>, HC: IndexAs<u64>> Index for Strides<BC, HC> {
             type Ref = u64;
             #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref {
                 let index = index as u64;
-                let length = self.head[1];
-                let stride = self.head[0];
-                if index < length { (index+1) * stride } else { self.bounds[(index - length) as usize] }
+                let length = self.head.index_as(1);
+                let stride = self.head.index_as(0);
+                if index < length { (index+1) * stride } else { self.bounds.index_as((index - length) as usize) }
             }
         }
 
@@ -1117,6 +1117,12 @@ mod duration {
     }
 
     impl<SC: IndexAs<u64>, NC: IndexAs<u32>> Index for Durations<SC, NC> {
+        type Ref = Duration;
+        #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
+            Duration::new(self.seconds.index_as(index), self.nanoseconds.index_as(index))
+        }
+    }
+    impl<SC: IndexAs<u64>, NC: IndexAs<u32>> Index for &Durations<SC, NC> {
         type Ref = Duration;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
             Duration::new(self.seconds.index_as(index), self.nanoseconds.index_as(index))
