@@ -173,7 +173,7 @@ impl<T: Clone + Send + 'static> Container for Vec<T> {
 pub trait ContainerBytes : Container + for<'a> Borrow<Borrowed<'a> : AsBytes<'a> + FromBytes<'a>> { }
 impl<C: Container + for<'a> Borrow<Borrowed<'a> : AsBytes<'a> + FromBytes<'a>>> ContainerBytes for C { }
 
-pub use common::{Clear, Len, Push, IndexMut, Index, IndexAs, HeapSize, Slice, AsBytes, FromBytes};
+pub use common::{Clear, Len, Push, IndexMut, Index, IndexAs, Slice, AsBytes, FromBytes};
 /// Common traits and types that are re-used throughout the module.
 pub mod common {
 
@@ -392,42 +392,6 @@ pub mod common {
     // Slice references can be cleared.
     impl<T> Clear for &[T] {
         #[inline(always)] fn clear(&mut self) { *self = &[]; }
-    }
-
-    pub trait HeapSize {
-        /// Active (len) and allocated (cap) heap sizes in bytes.
-        /// This should not include the size of `self` itself.
-        fn heap_size(&self) -> (usize, usize) { (0, 0) }
-    }
-
-    impl HeapSize for String {
-        fn heap_size(&self) -> (usize, usize) {
-            (self.len(), self.capacity())
-        }
-    }
-    impl<T: HeapSize> HeapSize for [T] {
-        fn heap_size(&self) -> (usize, usize) {
-            let mut l = std::mem::size_of_val(self);
-            let mut c = std::mem::size_of_val(self);
-            for item in self.iter() {
-                let (il, ic) = item.heap_size();
-                l += il;
-                c += ic;
-            }
-            (l, c)
-        }
-    }
-    impl<T: HeapSize> HeapSize for Vec<T> {
-        fn heap_size(&self) -> (usize, usize) {
-            let mut l = std::mem::size_of::<T>() * self.len();
-            let mut c = std::mem::size_of::<T>() * self.capacity();
-            for item in (self[..]).iter() {
-                let (il, ic) = item.heap_size();
-                l += il;
-                c += ic;
-            }
-            (l, c)
-        }
     }
 
     /// A struct representing a slice of a range of values.

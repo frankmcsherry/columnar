@@ -1,4 +1,4 @@
-use super::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, HeapSize, Slice, Borrow};
+use super::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, Slice, Borrow};
 
 /// A stand-in for `Vec<Vec<T>>` for complex `T`.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -212,10 +212,4 @@ impl<TC: Clear, BC: Clear> Clear for Vecs<TC, BC> {
     }
 }
 
-impl<TC: HeapSize, BC: HeapSize> HeapSize for Vecs<TC, BC> {
-    fn heap_size(&self) -> (usize, usize) {
-        let (l0, c0) = self.bounds.heap_size();
-        let (l1, c1) = self.values.heap_size();
-        (l0 + l1, c0 + c1)
-    }
-}
+

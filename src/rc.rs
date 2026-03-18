@@ -1,7 +1,7 @@
 //! Implementations of traits for `Rc<T>`
 use std::rc::Rc;
 
-use crate::{Len, Borrow, HeapSize, AsBytes, FromBytes};
+use crate::{Len, Borrow, AsBytes, FromBytes};
 
 impl<T: Borrow> Borrow for Rc<T> {
     type Ref<'a> = T::Ref<'a> where T: 'a;
@@ -12,12 +12,6 @@ impl<T: Borrow> Borrow for Rc<T> {
 }
 impl<T: Len> Len for Rc<T> {
     #[inline(always)] fn len(&self) -> usize { self.as_ref().len() }
-}
-impl<T: HeapSize> HeapSize for Rc<T> {
-    fn heap_size(&self) -> (usize, usize) {
-        let (l, c) = self.as_ref().heap_size();
-        (l + std::mem::size_of::<Rc<T>>(), c + std::mem::size_of::<Rc<T>>())
-    }
 }
 impl<'a, T: AsBytes<'a>> AsBytes<'a> for Rc<T> {
     #[inline(always)] fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> { self.as_ref().as_bytes() }
@@ -31,7 +25,7 @@ impl<'a, T: FromBytes<'a>> FromBytes<'a> for Rc<T> {
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;
-    use crate::{Borrow, Len, HeapSize, AsBytes, FromBytes};
+    use crate::{Borrow, Len, AsBytes, FromBytes};
 
     #[test]
     fn test_borrow() {
@@ -44,14 +38,6 @@ mod tests {
     fn test_len() {
         let x = Rc::new(vec![1, 2, 3]);
         assert_eq!(x.len(), 3);
-    }
-
-    #[test]
-    fn test_heap_size() {
-        let x = Rc::new(vec![1, 2, 3]);
-        let (l, c) = x.heap_size();
-        assert!(l > 0);
-        assert!(c > 0);
     }
 
     #[test]

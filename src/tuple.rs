@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use crate::{Columnar, Container, Borrow, Len, Clear, HeapSize, Index, IndexMut, Push};
+use crate::{Columnar, Container, Borrow, Len, Clear, Index, IndexMut, Push};
 
 // Implementations for tuple types.
 // These are all macro based, because the implementations are very similar.
@@ -98,16 +98,6 @@ macro_rules! tuple_impl {
                 $($name.clear();)*
             }
         }
-        impl<$($name: HeapSize),*> HeapSize for ($($name,)*) {
-            #[inline(always)]
-            fn heap_size(&self) -> (usize, usize) {
-                let ($($name,)*) = self;
-                let mut l = 0;
-                let mut c = 0;
-                $(let (l0, c0) = $name.heap_size(); l += l0; c += c0;)*
-                (l, c)
-            }
-        }
         impl<$($name: Index),*> Index for ($($name,)*) {
             type Ref = ($($name::Ref,)*);
             #[inline(always)]
@@ -168,7 +158,7 @@ mod test {
     #[test]
     fn round_trip() {
 
-        use crate::common::{Index, Push, HeapSize, Len};
+        use crate::common::{Index, Push, Len};
 
         let mut column: crate::ContainerOf<(u64, u8, String)> = Default::default();
         for i in 0..100 {
@@ -177,22 +167,11 @@ mod test {
         }
 
         assert_eq!(column.len(), 200);
-        assert_eq!(column.heap_size(), (3590, 4608));
 
         for i in 0..100u64 {
             assert_eq!((&column).get((2*i+0) as usize), (&i, &(i as u8), i.to_string().as_bytes()));
             assert_eq!((&column).get((2*i+1) as usize), (&i, &(i as u8), &b""[..]));
         }
-
-        // Compare to the heap size of a `Vec<Option<usize>>`.
-        let mut column: Vec<(u64, u8, String)> = Default::default();
-        for i in 0..100 {
-            column.push((i, i as u8, i.to_string()));
-            column.push((i, i as u8, "".to_string()));
-        }
-        // NB: Rust seems to change the capacities across versions (1.88 != 1.89),
-        // so we just compare the allocated regions to avoid updating the MSRV.
-        assert_eq!(column.heap_size().0, 8190);
 
     }
 }

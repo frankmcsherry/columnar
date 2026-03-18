@@ -14,7 +14,7 @@ pub mod rank_select {
 
     use crate::primitive::Bools;
     use crate::common::index::CopyAs;
-    use crate::{Borrow, Len, Index, IndexAs, Push, Clear, HeapSize};
+    use crate::{Borrow, Len, Index, IndexAs, Push, Clear};
 
     /// A store for maintaining `Vec<bool>` with fast `rank` and `select` access.
     ///
@@ -156,19 +156,12 @@ pub mod rank_select {
             self.values.clear();
         }
     }
-    impl<CC: HeapSize, VC: HeapSize> HeapSize for RankSelect<CC, VC> {
-        fn heap_size(&self) -> (usize, usize) {
-            let (l0, c0) = self.counts.heap_size();
-            let (l1, c1) = self.values.heap_size();
-            (l0 + l1, c0 + c1)
-        }
-    }
 }
 
 pub mod result {
 
     use crate::common::index::CopyAs;
-    use crate::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, HeapSize, Borrow};
+    use crate::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, Borrow};
     use crate::RankSelect;
 
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -375,15 +368,6 @@ pub mod result {
         }
     }
 
-    impl<SC: HeapSize, TC: HeapSize> HeapSize for Results<SC, TC> {
-        fn heap_size(&self) -> (usize, usize) {
-            let (l0, c0) = self.oks.heap_size();
-            let (l1, c1) = self.errs.heap_size();
-            let (li, ci) = self.indexes.heap_size();
-            (l0 + l1 + li, c0 + c1 + ci)
-        }
-    }
-
     impl<SC, TC, CC, VC, WC> Results<SC, TC, CC, VC, WC> {
         /// Returns ok values if no errors exist.
         pub fn unwrap(self) -> SC where TC: Len {
@@ -409,7 +393,7 @@ pub mod result {
         #[test]
         fn round_trip() {
 
-            use crate::common::{Index, Push, HeapSize, Len};
+            use crate::common::{Index, Push, Len};
 
             let mut column: crate::ContainerOf<Result<u64, u64>> = Default::default();
             for i in 0..100 {
@@ -418,7 +402,6 @@ pub mod result {
             }
 
             assert_eq!(column.len(), 200);
-            assert_eq!(column.heap_size(), (1624, 2080));
 
             for i in 0..100 {
                 assert_eq!(column.get(2*i+0), Ok(i as u64));
@@ -432,7 +415,6 @@ pub mod result {
             }
 
             assert_eq!(column.len(), 200);
-            assert_eq!(column.heap_size(), (924, 1184));
 
             for i in 0..100 {
                 assert_eq!(column.get(2*i+0), Ok(i as u64));
@@ -445,7 +427,7 @@ pub mod result {
 pub mod option {
 
     use crate::common::index::CopyAs;
-    use crate::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, HeapSize, Borrow};
+    use crate::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, Borrow};
     use crate::RankSelect;
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -630,19 +612,11 @@ pub mod option {
         }
     }
 
-    impl<TC: HeapSize> HeapSize for Options<TC> {
-        fn heap_size(&self) -> (usize, usize) {
-            let (l0, c0) = self.somes.heap_size();
-            let (li, ci) = self.indexes.heap_size();
-            (l0 + li, c0 + ci)
-        }
-    }
-
     #[cfg(test)]
     mod test {
 
         use crate::Columnar;
-        use crate::common::{Index, HeapSize, Len};
+        use crate::common::{Index, Len};
         use crate::Options;
 
         #[test]
@@ -651,7 +625,6 @@ pub mod option {
             let store: Options<Vec<i32>> = Columnar::into_columns((0..100).map(Some));
             assert_eq!(store.len(), 100);
             assert!((&store).index_iter().zip(0..100).all(|(a, b)| a == Some(&b)));
-            assert_eq!(store.heap_size(), (408, 544));
         }
 
         #[test]
@@ -660,7 +633,6 @@ pub mod option {
             assert_eq!(store.len(), 100);
             let foo = &store;
             assert!(foo.index_iter().zip(0..100).all(|(a, _b)| a == None));
-            assert_eq!(store.heap_size(), (8, 32));
         }
 
         #[test]
@@ -669,7 +641,6 @@ pub mod option {
             let store: Options<Vec<i32>>  = Columnar::into_columns((0..100).map(|x| if x % 2 == 0 { Some(x) } else { None }));
             assert_eq!(store.len(), 100);
             assert!((&store).index_iter().zip(0..100).all(|(a, b)| a == if b % 2 == 0 { Some(&b) } else { None }));
-            assert_eq!(store.heap_size(), (208, 288));
         }
     }
 }
@@ -677,7 +648,7 @@ pub mod option {
 pub mod discriminant {
 
     use crate::common::index::CopyAs;
-    use crate::{Clear, Container, Len, Index, IndexAs, HeapSize, Borrow};
+    use crate::{Clear, Container, Len, Index, IndexAs, Borrow};
 
     /// Tracks variant discriminants and offsets for enum containers.
     ///
@@ -819,13 +790,6 @@ pub mod discriminant {
         }
     }
 
-    impl<CVar: HeapSize, COff: HeapSize> HeapSize for Discriminant<CVar, COff> {
-        fn heap_size(&self) -> (usize, usize) {
-            let (l0, c0) = self.variant.heap_size();
-            let (l1, c1) = self.offset.heap_size();
-            (l0 + l1, c0 + c1)
-        }
-    }
 
     // AsBytes for borrowed form
     impl<'a> crate::AsBytes<'a> for Discriminant<&'a [u8], &'a [u64], &'a u64> {

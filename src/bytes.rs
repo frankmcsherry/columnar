@@ -387,7 +387,7 @@ pub mod stash {
         /// // Borrow and index into individual columns.
         /// let borrowed = stash.borrow();
         /// assert_eq!(*Index::get(&borrowed.0, 0), 0u64);
-        /// assert_eq!(borrowed.1.get(1), "world");
+        /// assert_eq!(borrowed.1.get(1), b"world");
         /// ```
         pub fn try_from_bytes(bytes: B) -> Result<Self, String> {
             use crate::bytes::indexed::validate;
@@ -485,7 +485,7 @@ mod test {
     #[test]
     fn round_trip() {
 
-        use crate::common::{Push, HeapSize, Len, Index};
+        use crate::common::{Push, Len, Index};
         use crate::{Borrow, AsBytes, FromBytes};
 
         let mut column: ContainerOf<Result<u64, u64>> = Default::default();
@@ -495,7 +495,6 @@ mod test {
         }
 
         assert_eq!(column.len(), 200);
-        assert_eq!(column.heap_size(), (1624, 2080));
 
         for i in 0..100 {
             assert_eq!(column.get(2*i+0), Ok(i as u64));

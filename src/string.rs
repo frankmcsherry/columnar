@@ -1,4 +1,4 @@
-use super::{Clear, Columnar, Container, Len, Index, IndexAs, Push, HeapSize, Borrow};
+use super::{Clear, Columnar, Container, Len, Index, IndexAs, Push, Borrow};
 
 /// A stand-in for `Vec<String>`.
 ///
@@ -210,11 +210,4 @@ impl<BC: Clear, VC: Clear> Clear for Strings<BC, VC> {
         self.values.clear();
     }
 }
-impl<BC: HeapSize, VC: HeapSize> HeapSize for Strings<BC, VC> {
-    #[inline(always)]
-    fn heap_size(&self) -> (usize, usize) {
-        let (l0, c0) = self.bounds.heap_size();
-        let (l1, c1) = self.values.heap_size();
-        (l0 + l1, c0 + c1)
-    }
-}
+
