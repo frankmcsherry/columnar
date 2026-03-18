@@ -663,55 +663,55 @@ pub mod option {
 
 pub mod discriminant {
 
-    use crate::common::index::CopyAs;
     use crate::{Clear, Container, Len, Index, IndexAs, Borrow};
 
     /// Tracks variant discriminants and offsets for enum containers.
     ///
-    /// When all elements share a single variant (homogeneous), avoids allocating
-    /// per-element discriminant and offset arrays. The `tag` field distinguishes:
-    /// - `0`: heterogeneous (or empty), discriminants and offsets in `variant`/`offset`
-    /// - `N > 0`: all elements are variant `N - 1`, with `count` elements total
+    /// Uses two arrays (`variant` and `offset`) with three states:
+    /// - **Empty**: both arrays empty, length is 0.
+    /// - **Homogeneous**: `variant` is empty, `offset` holds `[tag, count]` where
+    ///   `tag = variant_index + 1`. All elements share a single variant with
+    ///   identity offsets (element `i` maps to offset `i`).
+    /// - **Heterogeneous**: `variant` has per-element discriminants (`u8`),
+    ///   `offset` has per-element offsets into variant containers (`u64`).
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[derive(Clone, Debug, Default, PartialEq)]
-    pub struct Discriminant<CVar = Vec<u8>, COff = Vec<u64>, CC = u64> {
-        /// `0` for heterogeneous; `variant + 1` for homogeneous.
-        pub tag: CC,
-        /// Element count (homogeneous) or zero (heterogeneous).
-        pub count: CC,
+    pub struct Discriminant<CVar = Vec<u8>, COff = Vec<u64>> {
         /// Per-element variant discriminants; empty when homogeneous.
         pub variant: CVar,
-        /// Per-element offsets into variant containers; empty when homogeneous.
+        /// Per-element offsets (heterogeneous), or `[tag, count]` (homogeneous), or empty.
         pub offset: COff,
     }
 
-    impl<CVar: Copy, COff: Copy, CC: Copy> Copy for Discriminant<CVar, COff, CC> {}
+    impl<CVar: Copy, COff: Copy> Copy for Discriminant<CVar, COff> {}
 
     impl Discriminant {
         /// Push a variant discriminant and the offset into its variant container.
         #[inline]
         pub fn push(&mut self, variant: u8, offset: u64) {
-            let expected = variant as u64 + 1;
-            if self.tag == expected {
-                // Same variant as before; stay homogeneous.
-                self.count += 1;
-            } else if self.is_heterogeneous() && self.variant.is_empty() {
-                // Empty container; start homogeneous.
-                self.tag = expected;
-                self.count = 1;
-            } else if !self.is_heterogeneous() {
-                // Different variant; transition to heterogeneous.
-                let prev = (self.tag - 1) as u8;
-                self.variant.reserve(self.count as usize + 1);
-                self.offset.reserve(self.count as usize + 1);
-                for i in 0..self.count {
-                    self.variant.push(prev);
-                    self.offset.push(i);
+            let tag = variant as u64 + 1;
+            if self.variant.is_empty() {
+                if self.offset.is_empty() {
+                    // Empty → start homogeneous: offset = [tag, 1].
+                    self.offset.push(tag);
+                    self.offset.push(1);
+                } else if self.offset[0] == tag {
+                    // Same variant; stay homogeneous, increment count.
+                    self.offset[1] += 1;
+                } else {
+                    // Different variant; transition to heterogeneous.
+                    let prev = (self.offset[0] - 1) as u8;
+                    let count = self.offset[1];
+                    self.variant.reserve(count as usize + 1);
+                    self.offset.clear();
+                    self.offset.reserve(count as usize + 1);
+                    for i in 0..count {
+                        self.variant.push(prev);
+                        self.offset.push(i);
+                    }
+                    self.variant.push(variant);
+                    self.offset.push(offset);
                 }
-                self.variant.push(variant);
-                self.offset.push(offset);
-                self.tag = 0;
-                self.count = 0;
             } else {
                 // Already heterogeneous.
                 self.variant.push(variant);
@@ -720,23 +720,26 @@ pub mod discriminant {
         }
 
         /// Pre-allocate for the given borrowed discriminants.
-        pub fn reserve_for<'a>(&mut self, selves: impl Iterator<Item = Discriminant<&'a [u8], &'a [u64], &'a u64>> + Clone) {
+        pub fn reserve_for<'a>(&mut self, selves: impl Iterator<Item = Discriminant<&'a [u8], &'a [u64]>> + Clone) {
             self.variant.reserve_for(selves.clone().map(|x| x.variant));
             self.offset.reserve_for(selves.map(|x| x.offset));
         }
     }
 
-    impl<CVar, COff, CC: CopyAs<u64>> Discriminant<CVar, COff, CC> {
+    impl<CVar: Len, COff: Len> Discriminant<CVar, COff> {
         /// True if elements have mixed variants, with per-element discriminants and offsets.
         #[inline]
         pub fn is_heterogeneous(&self) -> bool {
-            self.tag.copy_as() == 0
+            !self.variant.is_empty()
         }
         /// Returns `Some(variant)` if all elements share a single variant.
         #[inline]
-        pub fn homogeneous(&self) -> Option<u8> {
-            let tag: u64 = self.tag.copy_as();
-            if tag != 0 { Some((tag - 1) as u8) } else { None }
+        pub fn homogeneous(&self) -> Option<u8> where COff: IndexAs<u64> {
+            if self.variant.is_empty() && self.offset.len() >= 2 {
+                Some((self.offset.index_as(0) - 1) as u8)
+            } else {
+                None
+            }
         }
         /// Returns `(variant, offset)` for the element at `index`.
         #[inline(always)]
@@ -744,28 +747,30 @@ pub mod discriminant {
             if self.is_heterogeneous() {
                 (self.variant.index_as(index), self.offset.index_as(index))
             } else {
-                let tag: u64 = self.tag.copy_as();
+                let tag: u64 = self.offset.index_as(0);
                 ((tag - 1) as u8, index as u64)
             }
         }
     }
 
-    impl<CVar: Len, COff, CC: CopyAs<u64>> Len for Discriminant<CVar, COff, CC> {
+    impl<CVar: Len, COff: Len + IndexAs<u64>> Len for Discriminant<CVar, COff> {
         #[inline(always)]
         fn len(&self) -> usize {
-            if self.is_heterogeneous() { self.variant.len() } else { self.count.copy_as() as usize }
+            if self.is_heterogeneous() { self.variant.len() }
+            else if self.offset.len() >= 2 { self.offset.index_as(1) as usize }
+            else { 0 }
         }
     }
 
     // Index for the borrowed form: returns (variant, offset).
-    impl<'a> Index for Discriminant<&'a [u8], &'a [u64], &'a u64> {
+    impl<'a> Index for Discriminant<&'a [u8], &'a [u64]> {
         type Ref = (u8, u64);
         #[inline(always)]
         fn get(&self, index: usize) -> (u8, u64) {
             if self.is_heterogeneous() {
                 (self.variant.index_as(index), self.offset.index_as(index))
             } else {
-                ((*self.tag - 1) as u8, index as u64)
+                ((self.offset[0] - 1) as u8, index as u64)
             }
         }
     }
@@ -773,12 +778,10 @@ pub mod discriminant {
     // Borrow
     impl Borrow for Discriminant {
         type Ref<'a> = (u8, u64);
-        type Borrowed<'a> = Discriminant<&'a [u8], &'a [u64], &'a u64>;
+        type Borrowed<'a> = Discriminant<&'a [u8], &'a [u64]>;
         #[inline(always)]
         fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
             Discriminant {
-                tag: &self.tag,
-                count: &self.count,
                 variant: &self.variant[..],
                 offset: &self.offset[..],
             }
@@ -786,8 +789,6 @@ pub mod discriminant {
         #[inline(always)]
         fn reborrow<'b, 'a: 'b>(thing: Self::Borrowed<'a>) -> Self::Borrowed<'b> {
             Discriminant {
-                tag: thing.tag,
-                count: thing.count,
                 variant: thing.variant,
                 offset: thing.offset,
             }
@@ -799,8 +800,6 @@ pub mod discriminant {
     impl<CVar: Clear, COff: Clear> Clear for Discriminant<CVar, COff> {
         #[inline(always)]
         fn clear(&mut self) {
-            self.tag = 0;
-            self.count = 0;
             self.variant.clear();
             self.offset.clear();
         }
@@ -808,57 +807,33 @@ pub mod discriminant {
 
 
     // AsBytes for borrowed form
-    impl<'a> crate::AsBytes<'a> for Discriminant<&'a [u8], &'a [u64], &'a u64> {
+    impl<'a> crate::AsBytes<'a> for Discriminant<&'a [u8], &'a [u64]> {
         #[inline(always)]
         fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-            let tag = std::iter::once((8u64, bytemuck::cast_slice(std::slice::from_ref(self.tag))));
-            let count = std::iter::once((8u64, bytemuck::cast_slice(std::slice::from_ref(self.count))));
             let variant = self.variant.as_bytes();
             let offset = self.offset.as_bytes();
-            crate::chain(crate::chain(tag, count), crate::chain(variant, offset))
+            crate::chain(variant, offset)
         }
     }
 
     // FromBytes for borrowed form
-    impl<'a> crate::FromBytes<'a> for Discriminant<&'a [u8], &'a [u64], &'a u64> {
-        const SLICE_COUNT: usize = 2 + <&'a [u8]>::SLICE_COUNT + <&'a [u64]>::SLICE_COUNT;
+    impl<'a> crate::FromBytes<'a> for Discriminant<&'a [u8], &'a [u64]> {
+        const SLICE_COUNT: usize = <&'a [u8]>::SLICE_COUNT + <&'a [u64]>::SLICE_COUNT;
         #[inline(always)]
         fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-            let tag = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
-            let count = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
             let variant = crate::FromBytes::from_bytes(bytes);
             let offset = crate::FromBytes::from_bytes(bytes);
-            Self { tag, count, variant, offset }
+            Self { variant, offset }
         }
         #[inline(always)]
         fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
-            let (w_tag, _) = store.get(*offset); *offset += 1;
-            debug_assert!(!w_tag.is_empty(), "Discriminant::from_store: empty tag slice");
-            let tag = w_tag.first().unwrap_or(&0);
-            let (w_count, _) = store.get(*offset); *offset += 1;
-            debug_assert!(!w_count.is_empty(), "Discriminant::from_store: empty count slice");
-            let count = w_count.first().unwrap_or(&0);
             let variant = crate::FromBytes::from_store(store, offset);
             let offset_field = crate::FromBytes::from_store(store, offset);
-            Self { tag, count, variant, offset: offset_field }
+            Self { variant, offset: offset_field }
         }
         fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
-            sizes.push(8); // tag
-            sizes.push(8); // count
             <&[u8]>::element_sizes(sizes)?;
             <&[u64]>::element_sizes(sizes)?;
-            Ok(())
-        }
-        fn validate(slices: &[(&[u64], u8)]) -> Result<(), String> {
-            if slices.len() < Self::SLICE_COUNT {
-                return Err(format!("Discriminant: expected {} slices but got {}", Self::SLICE_COUNT, slices.len()));
-            }
-            if slices[0].0.is_empty() || slices[1].0.is_empty() {
-                return Err("Discriminant: tag and count slices must be non-empty".into());
-            }
-            // Validate the variant and offset sub-slices.
-            <&[u8]>::validate(&slices[2..])?;
-            <&[u64]>::validate(&slices[2 + <&[u8]>::SLICE_COUNT..])?;
             Ok(())
         }
     }
@@ -876,7 +851,8 @@ pub mod discriminant {
             assert_eq!(d.len(), 3);
             assert_eq!(d.homogeneous(), Some(2));
             assert!(d.variant.is_empty());
-            assert!(d.offset.is_empty());
+            // offset holds [tag, count] = [3, 3] in homogeneous mode.
+            assert_eq!(d.offset, vec![3, 3]);
         }
 
         #[test]

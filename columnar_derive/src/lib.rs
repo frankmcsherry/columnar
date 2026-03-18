@@ -609,13 +609,13 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
             /// Derived columnar container for an enum.
             #derive
             #[allow(non_snake_case)]
-            #vis struct #c_ident < #(#container_types,)* CVar = Vec<u8>, COff = Vec<u64>, CC = u64, >{
+            #vis struct #c_ident < #(#container_types,)* CVar = Vec<u8>, COff = Vec<u64>, >{
                 #(
                     /// Container for #names.
                     pub #names : #container_types,
                 )*
                 /// Discriminant tracking for variants.
-                pub indexes: ::columnar::Discriminant<CVar, COff, CC>,
+                pub indexes: ::columnar::Discriminant<CVar, COff>,
             }
         }
     };
@@ -788,9 +788,9 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
     };
 
     let index_own = {
-        let impl_gen = quote! { < #(#container_types,)* CVar, COff, CC> };
-        let ty_gen = quote! { < #(#container_types,)* CVar, COff, CC> };
-        let where_clause = quote! { where #(#container_types: ::columnar::Index,)* CVar: ::columnar::Len + ::columnar::IndexAs<u8>, COff: ::columnar::Len + ::columnar::IndexAs<u64>, CC: ::columnar::common::index::CopyAs<u64>  };
+        let impl_gen = quote! { < #(#container_types,)* CVar, COff> };
+        let ty_gen = quote! { < #(#container_types,)* CVar, COff> };
+        let where_clause = quote! { where #(#container_types: ::columnar::Index,)* CVar: ::columnar::Len + ::columnar::IndexAs<u8>, COff: ::columnar::Len + ::columnar::IndexAs<u64>  };
 
         let index_type = quote! { #r_ident < #(<#container_types as ::columnar::Index>::Ref,)* > };
 
@@ -813,9 +813,9 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
     };
 
     let index_ref = {
-        let impl_gen = quote! { < 'columnar, #(#container_types,)* CVar, COff, CC> };
-        let ty_gen = quote! { < #(#container_types,)* CVar, COff, CC> };
-        let where_clause = quote! { where #(&'columnar #container_types: ::columnar::Index,)* CVar: ::columnar::Len + ::columnar::IndexAs<u8>, COff: ::columnar::Len + ::columnar::IndexAs<u64>, CC: ::columnar::common::index::CopyAs<u64>  };
+        let impl_gen = quote! { < 'columnar, #(#container_types,)* CVar, COff> };
+        let ty_gen = quote! { < #(#container_types,)* CVar, COff> };
+        let where_clause = quote! { where #(&'columnar #container_types: ::columnar::Index,)* CVar: ::columnar::Len + ::columnar::IndexAs<u8>, COff: ::columnar::Len + ::columnar::IndexAs<u64>  };
 
         let index_type = quote! { #r_ident < #(<&'columnar #container_types as ::columnar::Index>::Ref,)* > };
 
@@ -856,11 +856,11 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
     let length = {
 
-        let impl_gen = quote! { < #(#container_types,)* CVar, COff, CC> };
-        let ty_gen = quote! { < #(#container_types,)* CVar, COff, CC > };
+        let impl_gen = quote! { < #(#container_types,)* CVar, COff> };
+        let ty_gen = quote! { < #(#container_types,)* CVar, COff > };
 
         quote! {
-            impl #impl_gen ::columnar::Len for #c_ident #ty_gen where CVar: ::columnar::Len, CC: ::columnar::common::index::CopyAs<u64> {
+            impl #impl_gen ::columnar::Len for #c_ident #ty_gen where CVar: ::columnar::Len, COff: ::columnar::Len + ::columnar::IndexAs<u64> {
                 #[inline(always)]
                 fn len(&self) -> usize {
                     self.indexes.len()
@@ -871,9 +871,9 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
     let as_bytes = {
 
-        let impl_gen = quote! { < 'a, #(#container_types,)* CVar, COff, CC> };
-        let ty_gen = quote! { < #(#container_types,)* CVar, COff, CC > };
-        let where_clause = quote! { where #(#container_types: ::columnar::AsBytes<'a>,)* ::columnar::Discriminant<CVar, COff, CC>: ::columnar::AsBytes<'a> };
+        let impl_gen = quote! { < 'a, #(#container_types,)* CVar, COff> };
+        let ty_gen = quote! { < #(#container_types,)* CVar, COff > };
+        let where_clause = quote! { where #(#container_types: ::columnar::AsBytes<'a>,)* ::columnar::Discriminant<CVar, COff>: ::columnar::AsBytes<'a> };
 
         quote! {
             impl #impl_gen ::columnar::AsBytes<'a> for #c_ident #ty_gen #where_clause {
@@ -890,14 +890,14 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
     let from_bytes = {
 
-        let impl_gen = quote! { < 'columnar, #(#container_types,)* CVar, COff, CC> };
-        let ty_gen = quote! { < #(#container_types,)* CVar, COff, CC > };
-        let where_clause = quote! { where #(#container_types: ::columnar::FromBytes<'columnar>,)* ::columnar::Discriminant<CVar, COff, CC>: ::columnar::FromBytes<'columnar> };
+        let impl_gen = quote! { < 'columnar, #(#container_types,)* CVar, COff> };
+        let ty_gen = quote! { < #(#container_types,)* CVar, COff > };
+        let where_clause = quote! { where #(#container_types: ::columnar::FromBytes<'columnar>,)* ::columnar::Discriminant<CVar, COff>: ::columnar::FromBytes<'columnar> };
 
         quote! {
             #[allow(non_snake_case)]
             impl #impl_gen ::columnar::FromBytes<'columnar> for #c_ident #ty_gen #where_clause {
-                const SLICE_COUNT: usize = 0 #(+ <#container_types>::SLICE_COUNT)* + <::columnar::Discriminant<CVar, COff, CC>>::SLICE_COUNT;
+                const SLICE_COUNT: usize = 0 #(+ <#container_types>::SLICE_COUNT)* + <::columnar::Discriminant<CVar, COff>>::SLICE_COUNT;
                 #[inline(always)]
                 fn from_bytes(bytes: &mut impl Iterator<Item=&'columnar [u8]>) -> Self {
                     Self {
@@ -914,7 +914,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                 }
                 fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
                     #(<#container_types>::element_sizes(sizes)?;)*
-                    <::columnar::Discriminant<CVar, COff, CC>>::element_sizes(sizes)?;
+                    <::columnar::Discriminant<CVar, COff>>::element_sizes(sizes)?;
                     Ok(())
                 }
             }
@@ -1030,7 +1030,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
             impl < #(#container_names : ::columnar::Borrow ),* > ::columnar::Borrow for #c_ident < #(#container_names),* > {
                 type Ref<'a> = #r_ident < #( <#container_names as ::columnar::Borrow>::Ref<'a> ,)* > where Self: 'a, #(#container_names: 'a,)*;
-                type Borrowed<'a> = #c_ident < #( < #container_names as ::columnar::Borrow >::Borrowed<'a>, )* &'a [u8], &'a [u64], &'a u64 > where #(#container_names: 'a,)*;
+                type Borrowed<'a> = #c_ident < #( < #container_names as ::columnar::Borrow >::Borrowed<'a>, )* &'a [u8], &'a [u64] > where #(#container_names: 'a,)*;
                 #[inline(always)]
                 fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
                     #c_ident {
