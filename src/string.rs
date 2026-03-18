@@ -128,6 +128,18 @@ impl<BC: Len, VC> Len for Strings<BC, VC> {
     #[inline(always)] fn len(&self) -> usize { self.bounds.len() }
 }
 
+impl<'a, BC: Len+IndexAs<u64>> Strings<BC, &'a [u8]> {
+    /// Returns the `index`-th string as `&str`, validating UTF-8.
+    ///
+    /// This is a convenience wrapper around [`Index::get`] (which returns `&[u8]`)
+    /// for callers who need `&str`. The UTF-8 validation has a measurable cost;
+    /// use `get` directly if you can work with `&[u8]`.
+    #[inline(always)]
+    pub fn get_str(&self, index: usize) -> &'a str {
+        std::str::from_utf8(self.get(index)).expect("invalid utf8 in Strings column")
+    }
+}
+
 impl<'a, BC: Len+IndexAs<u64>> Index for Strings<BC, &'a [u8]> {
     type Ref = &'a [u8];
     #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
