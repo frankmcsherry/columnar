@@ -66,6 +66,7 @@ where
 impl<TC: Borrow> Borrow for Repeats<TC> {
     type Ref<'a> = TC::Ref<'a> where TC: 'a;
     type Borrowed<'a> = Repeats<TC::Borrowed<'a>, &'a [u64], &'a [u64], &'a [u64]> where TC: 'a;
+    #[inline(always)]
     fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
         Repeats { inner: self.inner.borrow() }
     }
@@ -188,6 +189,7 @@ where
 impl<TC: Borrow, const N: u8> Borrow for Lookbacks<TC, Vec<u8>, Vec<u64>, Vec<u64>, [u64; 2], N> {
     type Ref<'a> = TC::Ref<'a> where TC: 'a;
     type Borrowed<'a> = Lookbacks<TC::Borrowed<'a>, &'a [u8], &'a [u64], &'a [u64], &'a [u64], N> where TC: 'a;
+    #[inline(always)]
     fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
         Lookbacks { inner: self.inner.borrow() }
     }
