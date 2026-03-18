@@ -180,8 +180,8 @@ mod test {
         assert_eq!(column.heap_size(), (3590, 4608));
 
         for i in 0..100u64 {
-            assert_eq!((&column).get((2*i+0) as usize), (&i, &(i as u8), i.to_string().as_str()));
-            assert_eq!((&column).get((2*i+1) as usize), (&i, &(i as u8), ""));
+            assert_eq!((&column).get((2*i+0) as usize), (&i, &(i as u8), i.to_string().as_bytes()));
+            assert_eq!((&column).get((2*i+1) as usize), (&i, &(i as u8), &b""[..]));
         }
 
         // Compare to the heap size of a `Vec<Option<usize>>`.

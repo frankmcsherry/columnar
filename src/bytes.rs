@@ -484,7 +484,7 @@ mod test {
         for i in 0..50 {
             let (a, b, _c) = reconstructed.get(i);
             assert_eq!(*a, i as u64);
-            assert_eq!(b, &*format!("hello {i}"));
+            assert_eq!(b, format!("hello {i}").as_bytes());
         }
     }
 

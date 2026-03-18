@@ -1,6 +1,10 @@
 use super::{Clear, Columnar, Container, Len, Index, IndexAs, Push, HeapSize, Borrow};
 
 /// A stand-in for `Vec<String>`.
+///
+/// The reference type for `Strings` is `&[u8]` rather than `&str` to remove utf8 validation
+/// from the critical path of reads. You get to make the call about whether and how you'd like
+/// to manage this validation. The `copy_from` and `into_owned` methods panic on invalid data.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub struct Strings<BC = Vec<u64>, VC = Vec<u8>> {
@@ -14,10 +18,12 @@ impl Columnar for String {
     #[inline(always)]
     fn copy_from<'a>(&mut self, other: crate::Ref<'a, Self>) {
         self.clear();
-        self.push_str(other);
+        self.push_str(std::str::from_utf8(other).expect("invalid utf8 in Strings column"));
     }
     #[inline(always)]
-    fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self { other.to_string() }
+    fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self {
+        std::str::from_utf8(other).expect("invalid utf8 in Strings column").to_string()
+    }
     type Container = Strings;
 }
 
@@ -26,16 +32,18 @@ impl Columnar for Box<str> {
     fn copy_from<'a>(&mut self, other: crate::Ref<'a, Self>) {
         let mut s = String::from(std::mem::take(self));
         s.clear();
-        s.push_str(other);
+        s.push_str(std::str::from_utf8(other).expect("invalid utf8 in Strings column"));
         *self = s.into_boxed_str();
     }
     #[inline(always)]
-    fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self { Self::from(other) }
+    fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self {
+        Self::from(std::str::from_utf8(other).expect("invalid utf8 in Strings column"))
+    }
     type Container = Strings;
 }
 
 impl<BC: crate::common::BorrowIndexAs<u64>> Borrow for Strings<BC, Vec<u8>> {
-    type Ref<'a> = &'a str;
+    type Ref<'a> = &'a [u8];
     type Borrowed<'a> = Strings<BC::Borrowed<'a>, &'a [u8]> where BC: 'a;
     #[inline(always)]
     fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -121,23 +129,23 @@ impl<BC: Len, VC> Len for Strings<BC, VC> {
 }
 
 impl<'a, BC: Len+IndexAs<u64>> Index for Strings<BC, &'a [u8]> {
-    type Ref = &'a str;
+    type Ref = &'a [u8];
     #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
         let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
         let upper = self.bounds.index_as(index);
         let lower: usize = lower.try_into().expect("bounds must fit in `usize`");
         let upper: usize = upper.try_into().expect("bounds must fit in `usize`");
-        std::str::from_utf8(&self.values[lower .. upper]).expect("&[u8] must be valid utf8")
+        &self.values[lower .. upper]
     }
 }
 impl<'a, BC: Len+IndexAs<u64>> Index for &'a Strings<BC, Vec<u8>> {
-    type Ref = &'a str;
+    type Ref = &'a [u8];
     #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
         let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
         let upper = self.bounds.index_as(index);
         let lower: usize = lower.try_into().expect("bounds must fit in `usize`");
         let upper: usize = upper.try_into().expect("bounds must fit in `usize`");
-        std::str::from_utf8(&self.values[lower .. upper]).expect("&[u8] must be valid utf8")
+        &self.values[lower .. upper]
     }
 }
 
@@ -153,6 +161,12 @@ impl<'a, BC: Len+IndexAs<u64>> Index for &'a Strings<BC, Vec<u8>> {
 //     }
 // }
 
+impl<BC: for<'a> Push<&'a u64>> Push<&[u8]> for Strings<BC> {
+    #[inline(always)] fn push(&mut self, item: &[u8]) {
+        self.values.extend_from_slice(item);
+        self.bounds.push(&(self.values.len() as u64));
+    }
+}
 impl<BC: for<'a> Push<&'a u64>> Push<&String> for Strings<BC> {
     #[inline(always)] fn push(&mut self, item: &String) {
         self.values.extend_from_slice(item.as_bytes());
