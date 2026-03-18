@@ -1,6 +1,7 @@
 //! Types that prefer to be represented by `Vec<T>`.
+use alloc::{vec::Vec, string::String};
 
-use std::num::Wrapping;
+use core::num::Wrapping;
 
 /// An implementation of opinions for types that want to use `Vec<T>`.
 macro_rules! implement_columnable {
@@ -15,7 +16,7 @@ macro_rules! implement_columnable {
         impl<'a> crate::AsBytes<'a> for &'a [$index_type] {
             #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                std::iter::once((std::mem::align_of::<$index_type>() as u64, bytemuck::cast_slice(&self[..])))
+                core::iter::once((core::mem::align_of::<$index_type>() as u64, bytemuck::cast_slice(&self[..])))
             }
         }
         impl<'a> crate::FromBytes<'a> for &'a [$index_type] {
@@ -30,19 +31,19 @@ macro_rules! implement_columnable {
                 let (w, tail) = store.get(*offset);
                 *offset += 1;
                 let all: &[$index_type] = bytemuck::cast_slice(w);
-                let trim = ((8 - tail as usize) % 8) / std::mem::size_of::<$index_type>();
+                let trim = ((8 - tail as usize) % 8) / core::mem::size_of::<$index_type>();
                 debug_assert!(trim <= all.len(), "from_store: trim {trim} exceeds slice length {}", all.len());
                 all.get(..all.len().wrapping_sub(trim)).unwrap_or(&[])
             }
             fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
-                sizes.push(std::mem::size_of::<$index_type>());
+                sizes.push(core::mem::size_of::<$index_type>());
                 Ok(())
             }
         }
         impl<'a, const N: usize> crate::AsBytes<'a> for &'a [[$index_type; N]] {
             #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                std::iter::once((std::mem::align_of::<$index_type>() as u64, bytemuck::cast_slice(&self[..])))
+                core::iter::once((core::mem::align_of::<$index_type>() as u64, bytemuck::cast_slice(&self[..])))
             }
         }
         impl<'a, const N: usize> crate::FromBytes<'a> for &'a [[$index_type; N]] {
@@ -57,12 +58,12 @@ macro_rules! implement_columnable {
                 let (w, tail) = store.get(*offset);
                 *offset += 1;
                 let all: &[[$index_type; N]] = bytemuck::cast_slice(w);
-                let trim = ((8 - tail as usize) % 8) / (std::mem::size_of::<$index_type>() * N);
+                let trim = ((8 - tail as usize) % 8) / (core::mem::size_of::<$index_type>() * N);
                 debug_assert!(trim <= all.len(), "from_store: trim {trim} exceeds slice length {}", all.len());
                 all.get(..all.len().wrapping_sub(trim)).unwrap_or(&[])
             }
             fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
-                sizes.push(std::mem::size_of::<$index_type>() * N);
+                sizes.push(core::mem::size_of::<$index_type>() * N);
                 Ok(())
             }
         }
@@ -106,7 +107,7 @@ mod sizes {
 
     impl<CV: PushIndexAs<u64>> Container for Usizes<CV> {
         #[inline(always)]
-        fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+        fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
             self.values.extend_from_self(other.values, range)
         }
 
@@ -182,7 +183,7 @@ mod sizes {
 
     impl<CV: PushIndexAs<i64>> Container for Isizes<CV> {
         #[inline(always)]
-        fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+        fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
             self.values.extend_from_self(other.values, range)
         }
 
@@ -267,7 +268,7 @@ mod chars {
 
     impl<CV: PushIndexAs<Encoded>> Container for Chars<CV> {
         #[inline(always)]
-        fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+        fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
             self.values.extend_from_self(other.values, range)
         }
 
@@ -348,7 +349,7 @@ mod larges {
 
     impl<CV: PushIndexAs<Encoded>> Container for U128s<CV> {
         #[inline(always)]
-        fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+        fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
             self.values.extend_from_self(other.values, range)
         }
 
@@ -419,7 +420,7 @@ mod larges {
 
     impl<CV: PushIndexAs<Encoded>> Container for I128s<CV> {
         #[inline(always)]
-        fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+        fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
             self.values.extend_from_self(other.values, range)
         }
 
@@ -474,6 +475,7 @@ mod larges {
 /// inter-offset spacing, and relatively short runs (compared to a `RankSelect`).
 pub mod offsets {
 
+
     pub use array::Fixeds;
     pub use stride::Strides;
 
@@ -485,6 +487,7 @@ pub mod offsets {
     /// introspected a `Strides` and found it to be only one constant stride.
     mod array {
 
+        use alloc::{vec::Vec, string::String};
         use crate::{Container, Borrow, Index, Len, Push};
         use crate::common::index::CopyAs;
 
@@ -507,7 +510,7 @@ pub mod offsets {
 
         impl<const K: u64> Container for Fixeds<K> {
             #[inline(always)]
-            fn extend_from_self(&mut self, _other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+            fn extend_from_self(&mut self, _other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
                 self.count += range.len() as u64;
             }
 
@@ -547,7 +550,7 @@ pub mod offsets {
         impl<'a, const K: u64> crate::AsBytes<'a> for Fixeds<K, &'a u64> {
             #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                std::iter::once((8, bytemuck::cast_slice(std::slice::from_ref(self.count))))
+                core::iter::once((8, bytemuck::cast_slice(core::slice::from_ref(self.count))))
             }
         }
         impl<'a, const K: u64> crate::FromBytes<'a> for Fixeds<K, &'a u64> {
@@ -575,13 +578,13 @@ pub mod offsets {
         }
 
         use super::Strides;
-        impl<const K: u64> std::convert::TryFrom<Strides> for Fixeds<K> {
+        impl<const K: u64> core::convert::TryFrom<Strides> for Fixeds<K> {
             type Error = Strides;
             fn try_from(item: Strides) -> Result<Self, Self::Error> {
                 if item.strided() == Some(K) { Ok( Self { count: item.head[1] } ) } else { Err(item) }
             }
         }
-        impl<'a, const K: u64> std::convert::TryFrom<Strides<&'a [u64], &'a [u64]>> for Fixeds<K, &'a u64> {
+        impl<'a, const K: u64> core::convert::TryFrom<Strides<&'a [u64], &'a [u64]>> for Fixeds<K, &'a u64> {
             type Error = Strides<&'a [u64], &'a [u64]>;
             fn try_from(item: Strides<&'a [u64], &'a [u64]>) -> Result<Self, Self::Error> {
                 if item.strided() == Some(K) { Ok( Self { count: &item.head[1] } ) } else { Err(item) }
@@ -598,7 +601,8 @@ pub mod offsets {
     /// the offsets in a general container.
     mod stride {
 
-        use std::ops::Deref;
+        use alloc::{vec::Vec, string::String};
+        use core::ops::Deref;
         use crate::{Container, Borrow, Index, IndexAs, Len, Push, Clear, AsBytes, FromBytes};
 
         /// Columnar store for non-decreasing `u64` offsets with stride optimization.
@@ -652,7 +656,7 @@ pub mod offsets {
         impl<'a, BC: AsBytes<'a>> AsBytes<'a> for Strides<BC, &'a [u64]> {
             #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                let head = std::iter::once((8u64, bytemuck::cast_slice(self.head)));
+                let head = core::iter::once((8u64, bytemuck::cast_slice(self.head)));
                 let bounds = self.bounds.as_bytes();
                 crate::chain(head, bounds)
             }
@@ -737,6 +741,7 @@ pub mod offsets {
 
     #[cfg(test)]
     mod test {
+        use alloc::vec::Vec;
         #[test]
         fn round_trip() {
 
@@ -774,6 +779,7 @@ pub use empty::Empties;
 /// A columnar store for `()`.
 mod empty {
 
+    use alloc::{vec::Vec, string::String};
     use crate::common::index::CopyAs;
     use crate::{Clear, Columnar, Container, Len, IndexMut, Index, Push, Borrow};
 
@@ -801,7 +807,7 @@ mod empty {
 
     impl Container for Empties {
         #[inline(always)]
-        fn extend_from_self(&mut self, _other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+        fn extend_from_self(&mut self, _other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
             self.count += range.len() as u64;
         }
 
@@ -853,7 +859,7 @@ mod empty {
     impl<'a> crate::AsBytes<'a> for crate::primitive::Empties<&'a u64> {
         #[inline(always)]
         fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-            std::iter::once((8, bytemuck::cast_slice(std::slice::from_ref(self.count))))
+            core::iter::once((8, bytemuck::cast_slice(core::slice::from_ref(self.count))))
         }
     }
     impl<'a> crate::FromBytes<'a> for crate::primitive::Empties<&'a u64> {
@@ -885,6 +891,7 @@ pub use boolean::Bools;
 /// A columnar store for `bool`.
 mod boolean {
 
+    use alloc::{vec::Vec, string::String};
     use crate::{Container, Clear, Len, Index, IndexAs, Push, Borrow};
 
     /// A store for maintaining `Vec<bool>`.
@@ -941,7 +948,7 @@ mod boolean {
         #[inline(always)]
         fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
             let iter = self.values.as_bytes();
-            crate::chain_one(iter, (std::mem::align_of::<u64>() as u64, bytemuck::cast_slice(self.tail)))
+            crate::chain_one(iter, (core::mem::align_of::<u64>() as u64, bytemuck::cast_slice(self.tail)))
         }
     }
 
@@ -1034,13 +1041,14 @@ mod boolean {
 }
 
 pub use duration::Durations;
-/// A columnar store for `std::time::Duration`.
+/// A columnar store for `core::time::Duration`.
 mod duration {
 
-    use std::time::Duration;
+    use alloc::vec::Vec;
+    use core::time::Duration;
     use crate::{Container, Len, Index, IndexAs, Push, Clear, Borrow};
 
-    // `std::time::Duration` is equivalent to `(u64, u32)`, corresponding to seconds and nanoseconds.
+    // `core::time::Duration` is equivalent to `(u64, u32)`, corresponding to seconds and nanoseconds.
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[derive(Copy, Clone, Debug, Default, PartialEq)]
     pub struct Durations<SC = Vec<u64>, NC = Vec<u32>> {
@@ -1077,7 +1085,7 @@ mod duration {
 
     impl<SC: crate::common::PushIndexAs<u64>, NC: crate::common::PushIndexAs<u32>> Container for Durations<SC, NC> {
         #[inline(always)]
-        fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+        fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
             self.seconds.extend_from_self(other.seconds, range.clone());
             self.nanoseconds.extend_from_self(other.nanoseconds, range);
         }
@@ -1129,16 +1137,16 @@ mod duration {
         }
     }
 
-    impl<SC: for<'a> Push<&'a u64>, NC: for<'a> Push<&'a u32>> Push<std::time::Duration> for Durations<SC, NC> {
+    impl<SC: for<'a> Push<&'a u64>, NC: for<'a> Push<&'a u32>> Push<core::time::Duration> for Durations<SC, NC> {
         #[inline]
-        fn push(&mut self, item: std::time::Duration) {
+        fn push(&mut self, item: core::time::Duration) {
             self.seconds.push(&item.as_secs());
             self.nanoseconds.push(&item.subsec_nanos());
         }
     }
-    impl<'a, SC: for<'b> Push<&'b u64>, NC: for<'b> Push<&'b u32>> Push<&'a std::time::Duration> for Durations<SC, NC> {
+    impl<'a, SC: for<'b> Push<&'b u64>, NC: for<'b> Push<&'b u32>> Push<&'a core::time::Duration> for Durations<SC, NC> {
         #[inline]
-        fn push(&mut self, item: &'a std::time::Duration) {
+        fn push(&mut self, item: &'a core::time::Duration) {
             self.push(*item)
         }
     }

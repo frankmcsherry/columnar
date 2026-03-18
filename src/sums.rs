@@ -12,6 +12,7 @@
 /// that make the operation constant time (using additional amortized memory).
 pub mod rank_select {
 
+    use alloc::{vec::Vec, string::String};
     use crate::primitive::Bools;
 
     use crate::{Borrow, Len, Index, IndexAs, Push, Clear};
@@ -165,6 +166,7 @@ pub mod rank_select {
 
 pub mod result {
 
+    use alloc::{vec::Vec, string::String};
 
     use crate::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, Borrow};
     use crate::RankSelect;
@@ -224,7 +226,7 @@ pub mod result {
 
     impl<SC: Container, TC: Container> Container for Results<SC, TC> {
         #[inline(always)]
-        fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+        fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
             if !range.is_empty() {
                 // Starting offsets of each variant in `other`.
                 let oks_start = other.indexes.rank(range.start);
@@ -437,6 +439,7 @@ pub mod result {
 
 pub mod option {
 
+    use alloc::{vec::Vec, string::String};
 
     use crate::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, Borrow};
     use crate::RankSelect;
@@ -487,7 +490,7 @@ pub mod option {
 
     impl<TC: Container> Container for Options<TC> {
         #[inline(always)]
-        fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+        fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
             if !range.is_empty() {
                 // Starting offsets of `Some` variants in `other`.
                 let somes_start = other.indexes.rank(range.start);
@@ -630,6 +633,7 @@ pub mod option {
 
     #[cfg(test)]
     mod test {
+        use alloc::vec::Vec;
 
         use crate::Columnar;
         use crate::common::{Index, Len};
@@ -663,6 +667,7 @@ pub mod option {
 
 pub mod discriminant {
 
+    use alloc::{vec::Vec, string::String};
     use crate::{Clear, Container, Len, Index, IndexAs, Borrow};
 
     /// Tracks variant discriminants and offsets for enum containers.

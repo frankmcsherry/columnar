@@ -9,6 +9,37 @@
 //! which can be formed from any type that implements `Deref<Target=[u8]>`. Doing so will check
 //! `u64` alignment, copy the contents if misaligned, and perform some structural validation.
 
+/// A trait for writing bytes, usable in `no_std` environments.
+///
+/// This replaces `std::io::Write` for the columnar encoding functions.
+/// Implementations exist for `Vec<u8>` (always) and `std::io::Write` (with the `std` feature).
+pub trait WriteBytes {
+    /// The error type returned by write operations.
+    type Error;
+    /// Write all bytes from the slice, or return an error.
+    fn write_all(&mut self, bytes: &[u8]) -> Result<(), Self::Error>;
+}
+
+#[cfg(feature = "std")]
+impl<W: std::io::Write> WriteBytes for W {
+    type Error = std::io::Error;
+    #[inline(always)]
+    fn write_all(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
+        std::io::Write::write_all(self, bytes)
+    }
+}
+
+#[cfg(not(feature = "std"))]
+impl WriteBytes for alloc::vec::Vec<u8> {
+    type Error = core::convert::Infallible;
+    #[inline(always)]
+    fn write_all(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
+        self.extend_from_slice(bytes);
+        Ok(())
+    }
+}
+
+
 /// A binary encoding of sequences of byte slices.
 ///
 /// The encoding starts with a sequence of n+1 offsets describing where to find the n slices in the bytes that follow.
@@ -17,6 +48,7 @@
 /// This means that slices that are not multiples of eight bytes may leave unread bytes at their end, which is fine.
 pub mod indexed {
 
+    use alloc::{vec::Vec, string::String};
     use crate::AsBytes;
 
     /// Encoded length in number of `u64` words required.
@@ -44,7 +76,7 @@ pub mod indexed {
         // Read 1: Number of offsets we will record, equal to the number of slices plus one.
         // TODO: right-size `store` before first call to `push`.
         let offsets = 1 + iter.as_bytes().count();
-        let offsets_end: u64 = TryInto::<u64>::try_into((offsets) * std::mem::size_of::<u64>()).unwrap();
+        let offsets_end: u64 = TryInto::<u64>::try_into((offsets) * core::mem::size_of::<u64>()).unwrap();
         store.push(offsets_end);
         // Read 2: Establish each of the offsets based on lengths of byte slices.
         let mut position_bytes = offsets_end;
@@ -73,7 +105,7 @@ pub mod indexed {
             let remaining_bytes = &bytes[whole_words..];
             if !remaining_bytes.is_empty() {
                 let mut remainder = 0u64;
-                let transmute: &mut [u8] = bytemuck::try_cast_slice_mut(std::slice::from_mut(&mut remainder)).expect("&[u64] should convert to &[u8]");
+                let transmute: &mut [u8] = bytemuck::try_cast_slice_mut(core::slice::from_mut(&mut remainder)).expect("&[u64] should convert to &[u8]");
                 for (i, byte) in remaining_bytes.iter().enumerate() {
                     transmute[i] = *byte;
                 }
@@ -82,22 +114,22 @@ pub mod indexed {
         }
     }
 
-    pub fn write<'a, A, W>(mut writer: W, iter: &A) -> std::io::Result<()>
+    pub fn write<'a, A, W>(writer: &mut W, iter: &A) -> Result<(), W::Error>
     where
         A: AsBytes<'a>,
-        W: std::io::Write,
+        W: super::WriteBytes,
     {
         // Read 1: Number of offsets we will record, equal to the number of slices plus one.
         let offsets = 1 + iter.as_bytes().count();
-        let offsets_end: u64 = TryInto::<u64>::try_into((offsets) * std::mem::size_of::<u64>()).unwrap();
-        writer.write_all(bytemuck::cast_slice(std::slice::from_ref(&offsets_end)))?;
+        let offsets_end: u64 = TryInto::<u64>::try_into((offsets) * core::mem::size_of::<u64>()).unwrap();
+        writer.write_all(bytemuck::cast_slice(core::slice::from_ref(&offsets_end)))?;
         // Read 2: Establish each of the offsets based on lengths of byte slices.
         let mut position_bytes = offsets_end;
         for (align, bytes) in iter.as_bytes() {
             assert!(align <= 8);
             // Write length in bytes, but round up to words before updating `position_bytes`.
             let to_push: u64 = position_bytes + TryInto::<u64>::try_into(bytes.len()).unwrap();
-            writer.write_all(bytemuck::cast_slice(std::slice::from_ref(&to_push)))?;
+            writer.write_all(bytemuck::cast_slice(core::slice::from_ref(&to_push)))?;
             let round_len: u64 = ((bytes.len() + 7) & !7).try_into().unwrap();
             position_bytes += round_len;
         }
@@ -256,6 +288,7 @@ pub mod indexed {
     #[cfg(test)]
     mod test {
 
+        use alloc::{vec, vec::Vec, string::String};
         use crate::{Borrow, ContainerOf};
         use crate::common::Push;
         use crate::AsBytes;
@@ -316,6 +349,7 @@ pub mod indexed {
 /// A container of either typed columns, or serialized bytes that can be borrowed as the former.
 pub mod stash {
 
+    use alloc::{vec::Vec, string::String, boxed::Box};
     use crate::{Len, FromBytes};
     /// A container of either typed columns, or serialized bytes that can be borrowed as the former.
     ///
@@ -351,7 +385,7 @@ pub mod stash {
 
     impl<C: Default, B> Default for Stash<C, B> { fn default() -> Self { Self::Typed(Default::default()) } }
 
-    impl<C: crate::ContainerBytes, B: std::ops::Deref<Target = [u8]>> Stash<C, B> {
+    impl<C: crate::ContainerBytes, B: core::ops::Deref<Target = [u8]>> Stash<C, B> {
         /// An analogue of `TryFrom` for any `B: Deref<Target=[u8]>`, avoiding coherence issues.
         ///
         /// This is the recommended way to form a `Stash`, as it performs certain structural validation
@@ -407,7 +441,7 @@ pub mod stash {
         }
     }
 
-    impl<C: crate::ContainerBytes, B: std::ops::Deref<Target=[u8]> + Clone + 'static> crate::Borrow for Stash<C, B> {
+    impl<C: crate::ContainerBytes, B: core::ops::Deref<Target=[u8]> + Clone + 'static> crate::Borrow for Stash<C, B> {
 
         type Ref<'a> = <C as crate::Borrow>::Ref<'a>;
         type Borrowed<'a> = <C as crate::Borrow>::Borrowed<'a>;
@@ -417,11 +451,11 @@ pub mod stash {
         #[inline(always)] fn reborrow_ref<'b, 'a: 'b>(item: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { <C as crate::Borrow>::reborrow_ref(item) }
     }
 
-    impl<C: crate::ContainerBytes, B: std::ops::Deref<Target=[u8]>> Len for Stash<C, B> {
+    impl<C: crate::ContainerBytes, B: core::ops::Deref<Target=[u8]>> Len for Stash<C, B> {
         #[inline(always)] fn len(&self) -> usize { self.borrow().len() }
     }
 
-    impl<C: crate::ContainerBytes, B: std::ops::Deref<Target=[u8]>> Stash<C, B> {
+    impl<C: crate::ContainerBytes, B: core::ops::Deref<Target=[u8]>> Stash<C, B> {
         /// Borrows the contents, either from a typed container or by decoding serialized bytes.
         ///
         /// This method is relatively cheap but is not free.
@@ -447,13 +481,14 @@ pub mod stash {
                 Stash::Align(a) => 8 * a.len(),
             }
         }
-        /// Write the contents into a `std::io::Write` using the [`indexed`] encoder.
-        pub fn into_bytes<W: ::std::io::Write>(&self, writer: &mut W) {
+        /// Write the contents into a [`WriteBytes`](crate::bytes::WriteBytes) destination.
+        pub fn into_bytes<W: crate::bytes::WriteBytes>(&self, writer: &mut W) -> Result<(), W::Error> {
             match self {
-                Stash::Typed(t) => { crate::bytes::indexed::write(writer, &t.borrow()).unwrap() },
-                Stash::Bytes(b) => writer.write_all(&b[..]).unwrap(),
-                Stash::Align(a) => writer.write_all(bytemuck::cast_slice(&a[..])).unwrap(),
+                Stash::Typed(t) => { crate::bytes::indexed::write(writer, &t.borrow())?; },
+                Stash::Bytes(b) => writer.write_all(&b[..])?,
+                Stash::Align(a) => writer.write_all(bytemuck::cast_slice(&a[..]))?,
             }
+            Ok(())
         }
     }
 
@@ -481,6 +516,7 @@ pub mod stash {
 #[cfg(test)]
 mod test {
     use crate::ContainerOf;
+    use alloc::{vec, vec::Vec, string::{String, ToString}};
 
     #[test]
     fn round_trip() {

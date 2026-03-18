@@ -3,6 +3,7 @@
 //! This ADT represents an unordered collection of byte sequences as a tree.
 //! Like a trie, the paths down the tree correspond to byte sequences, and 
 //! the membership of a byte sequence is determined by the a viable path.
+use alloc::boxed::Box;
 
 /// An ART node exists in the context of a sequence of bytes, and indicates
 /// the possible options based on the next byte in the sequence.

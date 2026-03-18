@@ -1,3 +1,4 @@
+use alloc::{vec::Vec, string::String, string::ToString, boxed::Box};
 use super::{Clear, Columnar, Container, Len, Index, IndexAs, Push, Borrow};
 
 /// A stand-in for `Vec<String>`.
@@ -18,11 +19,11 @@ impl Columnar for String {
     #[inline(always)]
     fn copy_from<'a>(&mut self, other: crate::Ref<'a, Self>) {
         self.clear();
-        self.push_str(std::str::from_utf8(other).expect("invalid utf8 in Strings column"));
+        self.push_str(core::str::from_utf8(other).expect("invalid utf8 in Strings column"));
     }
     #[inline(always)]
     fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self {
-        std::str::from_utf8(other).expect("invalid utf8 in Strings column").to_string()
+        core::str::from_utf8(other).expect("invalid utf8 in Strings column").to_string()
     }
     type Container = Strings;
 }
@@ -30,14 +31,14 @@ impl Columnar for String {
 impl Columnar for Box<str> {
     #[inline(always)]
     fn copy_from<'a>(&mut self, other: crate::Ref<'a, Self>) {
-        let mut s = String::from(std::mem::take(self));
+        let mut s = String::from(core::mem::take(self));
         s.clear();
-        s.push_str(std::str::from_utf8(other).expect("invalid utf8 in Strings column"));
+        s.push_str(core::str::from_utf8(other).expect("invalid utf8 in Strings column"));
         *self = s.into_boxed_str();
     }
     #[inline(always)]
     fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self {
-        Self::from(std::str::from_utf8(other).expect("invalid utf8 in Strings column"))
+        Self::from(core::str::from_utf8(other).expect("invalid utf8 in Strings column"))
     }
     type Container = Strings;
 }
@@ -65,7 +66,7 @@ impl<BC: crate::common::BorrowIndexAs<u64>> Borrow for Strings<BC, Vec<u8>> {
 
 impl<BC: crate::common::PushIndexAs<u64>> Container for Strings<BC, Vec<u8>> {
     #[inline(always)]
-    fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+    fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
         if !range.is_empty() {
             // Imported bounds will be relative to this starting offset.
             let values_len = self.values.len() as u64;
@@ -136,7 +137,7 @@ impl<'a, BC: Len+IndexAs<u64>> Strings<BC, &'a [u8]> {
     /// use `get` directly if you can work with `&[u8]`.
     #[inline(always)]
     pub fn get_str(&self, index: usize) -> &'a str {
-        std::str::from_utf8(self.get(index)).expect("invalid utf8 in Strings column")
+        core::str::from_utf8(self.get(index)).expect("invalid utf8 in Strings column")
     }
 }
 
@@ -199,20 +200,25 @@ impl<BC: for<'a> Push<&'a u64>> Push<&Box<str>> for Strings<BC> {
         self.bounds.push(&(self.values.len() as u64));
     }
 }
-impl<'a, BC: for<'b> Push<&'b u64>> Push<std::fmt::Arguments<'a>> for Strings<BC> {
+impl<'a, BC: for<'b> Push<&'b u64>> Push<core::fmt::Arguments<'a>> for Strings<BC> {
     #[inline]
-    fn push(&mut self, item: std::fmt::Arguments<'a>) {
-        use std::io::Write;
-        self.values.write_fmt(item).expect("write_fmt failed");
+    fn push(&mut self, item: core::fmt::Arguments<'a>) {
+        // Use core::fmt::Write via a wrapper to avoid requiring std::io::Write.
+        struct VecWriter<'a>(&'a mut alloc::vec::Vec<u8>);
+        impl core::fmt::Write for VecWriter<'_> {
+            fn write_str(&mut self, s: &str) -> core::fmt::Result {
+                self.0.extend_from_slice(s.as_bytes());
+                Ok(())
+            }
+        }
+        core::fmt::Write::write_fmt(&mut VecWriter(&mut self.values), item).expect("write_fmt failed");
         self.bounds.push(&(self.values.len() as u64));
     }
 }
-impl<'a, 'b, BC: for<'c> Push<&'c u64>> Push<&'b std::fmt::Arguments<'a>> for Strings<BC> {
+impl<'a, 'b, BC: for<'c> Push<&'c u64>> Push<&'b core::fmt::Arguments<'a>> for Strings<BC> {
     #[inline]
-    fn push(&mut self, item: &'b std::fmt::Arguments<'a>) {
-        use std::io::Write;
-        self.values.write_fmt(*item).expect("write_fmt failed");
-        self.bounds.push(&(self.values.len() as u64));
+    fn push(&mut self, item: &'b core::fmt::Arguments<'a>) {
+        self.push(*item);
     }
 }
 impl<BC: Clear, VC: Clear> Clear for Strings<BC, VC> {

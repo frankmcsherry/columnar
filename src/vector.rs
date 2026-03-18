@@ -1,3 +1,4 @@
+use alloc::{vec::Vec, string::String};
 use super::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, Slice, Borrow};
 
 /// A stand-in for `Vec<Vec<T>>` for complex `T`.
@@ -89,7 +90,7 @@ impl<BC: crate::common::BorrowIndexAs<u64>, TC: Container> Borrow for Vecs<TC, B
 
 impl<BC: crate::common::PushIndexAs<u64>, TC: Container> Container for Vecs<TC, BC> {
     #[inline(always)]
-    fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+    fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
         if !range.is_empty() {
             // Imported bounds will be relative to this starting offset.
             let values_len = self.values.len() as u64;

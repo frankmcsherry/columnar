@@ -24,6 +24,8 @@ jobs:
         with:
           toolchain: ${{ matrix.toolchain }}
       - name: Cargo check
-        run: cargo test
+        run: cargo check
       - name: Cargo test
         run: cargo test --workspace --all-targets
+      - name: Verify no_std support
+        run: cargo check -p test-no-std
