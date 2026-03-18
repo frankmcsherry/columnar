@@ -21,14 +21,16 @@ pub trait WriteBytes {
     fn write_all(&mut self, bytes: &[u8]) -> Result<(), Self::Error>;
 }
 
-impl<W: WriteBytes> WriteBytes for &mut W {
-    type Error = W::Error;
+#[cfg(feature = "std")]
+impl<W: std::io::Write> WriteBytes for W {
+    type Error = std::io::Error;
     #[inline(always)]
     fn write_all(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
-        (**self).write_all(bytes)
+        std::io::Write::write_all(self, bytes)
     }
 }
 
+#[cfg(not(feature = "std"))]
 impl WriteBytes for Vec<u8> {
     type Error = core::convert::Infallible;
     #[inline(always)]
@@ -37,6 +39,7 @@ impl WriteBytes for Vec<u8> {
         Ok(())
     }
 }
+
 
 /// A binary encoding of sequences of byte slices.
 ///
@@ -112,7 +115,7 @@ pub mod indexed {
         }
     }
 
-    pub fn write<'a, A, W>(mut writer: W, iter: &A) -> Result<(), W::Error>
+    pub fn write<'a, A, W>(writer: &mut W, iter: &A) -> Result<(), W::Error>
     where
         A: AsBytes<'a>,
         W: super::WriteBytes,
@@ -482,7 +485,7 @@ pub mod stash {
         /// Write the contents into a [`WriteBytes`](crate::bytes::WriteBytes) destination.
         pub fn into_bytes<W: crate::bytes::WriteBytes>(&self, writer: &mut W) -> Result<(), W::Error> {
             match self {
-                Stash::Typed(t) => { crate::bytes::indexed::write(&mut *writer, &t.borrow())?; },
+                Stash::Typed(t) => { crate::bytes::indexed::write(writer, &t.borrow())?; },
                 Stash::Bytes(b) => writer.write_all(&b[..])?,
                 Stash::Align(a) => writer.write_all(bytemuck::cast_slice(&a[..]))?,
             }
