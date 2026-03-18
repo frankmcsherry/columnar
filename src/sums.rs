@@ -69,6 +69,11 @@ pub mod rank_select {
                 values: <crate::primitive::Bools<VC, &'a u64>>::from_store(store, offset),
             }
         }
+        fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+            CC::element_sizes(sizes)?;
+            <crate::primitive::Bools<VC, &'a u64>>::element_sizes(sizes)?;
+            Ok(())
+        }
     }
 
 
@@ -272,6 +277,12 @@ pub mod result {
                 oks: SC::from_store(store, offset),
                 errs: TC::from_store(store, offset),
             }
+        }
+        fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+            <RankSelect<CC, VC, &'a u64>>::element_sizes(sizes)?;
+            SC::element_sizes(sizes)?;
+            TC::element_sizes(sizes)?;
+            Ok(())
         }
     }
 
@@ -522,6 +533,11 @@ pub mod option {
                 indexes: crate::FromBytes::from_store(store, offset),
                 somes: TC::from_store(store, offset),
             }
+        }
+        fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+            <RankSelect<CC, VC, &'a u64>>::element_sizes(sizes)?;
+            TC::element_sizes(sizes)?;
+            Ok(())
         }
     }
 
