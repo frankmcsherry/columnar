@@ -56,22 +56,6 @@ impl std::ops::Deref for Number {
 
 /// Stand-in for `Vec<Json>`.
 ///
-/// This approach uses `indexes` which contains discriminants, which should allow
-/// an efficient representation of offset information. Unfortunately, both `arrays`
-/// and `objects` just list their intended offsets directly, rather than encode the
-/// offsets using unary degree sequences, which seemed hard to thread through the
-/// other abstractions. Their `Vec<usize>` container can probably be made smarter,
-/// in particular by an `Option<usize>` container where `None` indicates increment.
-// struct Jsons {
-//     pub indexes: Vec<JsonDiscriminant>,     // Container for `JsonDiscriminant`.
-//     pub numbers: Vec<serde_json::Number>,   // Any `Number` container.
-//     pub strings: Strings,                   // Any `String` container.
-//     pub arrays: Vecs<Vec<usize>>,           // Any `Vec<usize>` container.
-//     pub objects Vecs<(Lookbacks<Strings>, Vec<usize>)>,
-// }
-
-/// Stand-in for `Vec<Json>`.
-///
 /// The `roots` vector indicates the root of each stored `Json`.
 /// The (transitive) contents of each `Json` are stored throughout,
 /// at locations that may not necessarily be found in `roots`.
@@ -92,7 +76,7 @@ pub enum JsonsRef<'a> {
     Null,
     Bool(bool),
     Number(&'a Number),
-    String(&'a str),
+    String(&'a [u8]),
     Array(ArrRef<'a>),
     Object(ObjRef<'a>),
 }
@@ -119,14 +103,14 @@ impl<'a> PartialEq<Json> for JsonsRef<'a> {
             (JsonsRef::Null, Json::Null) => { true },
             (JsonsRef::Bool(b0), Json::Bool(b1)) => { b0 == b1 },
             (JsonsRef::Number(n0), Json::Number(n1)) => { *n0 == n1 },
-            (JsonsRef::String(s0), Json::String(s1)) => { *s0 == s1 },
+            (JsonsRef::String(s0), Json::String(s1)) => { *s0 == s1.as_bytes() },
             (JsonsRef::Array(a0), Json::Array(a1)) => {
                 let slice: columnar::Slice<&Vec<JsonIdx>> = (&a0.store.arrays).get(a0.index);
                 slice.len() == a1.len() && slice.into_iter().zip(a1).all(|(a,b)| a0.store.dereference(*a).eq(b))
             },
             (JsonsRef::Object(o0), Json::Object(o1)) => {
                 let slice: columnar::Slice<&(_, _)> = (&o0.store.objects).get(o0.index);
-                slice.len() == o1.len() && slice.into_iter().zip(o1).all(|((xs, xv),(ys, yv))| xs == ys && o0.store.dereference(*xv).eq(yv))
+                slice.len() == o1.len() && slice.into_iter().zip(o1).all(|((xs, xv),(ys, yv))| xs == ys.as_bytes() && o0.store.dereference(*xv).eq(yv))
             },
             _ => { false }
         }
@@ -167,12 +151,6 @@ impl Len for Jsons {
     }
 }
 
-// impl IndexGat for Jsons {
-//     type Ref<'a> = JsonsRef<'a>;
-//     fn get(&self, index: usize) -> Self::Ref<'_> {
-//         self.dereference(self.roots[index])
-//     }
-// }
 impl<'a> Index for &'a Jsons {
     type Ref = JsonsRef<'a>;
     #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
@@ -229,7 +207,7 @@ impl<'a> JsonQueues<'a> {
                 JsonIdx::Number(self.store.numbers.len() - 1)
             },
             Json::String(s) => {
-                self.store.strings.push(s);
+                self.store.strings.push(s.as_bytes());
                 JsonIdx::String(self.store.strings.len() - 1)
             },
             Json::Array(a) => {
@@ -258,7 +236,7 @@ impl<'a> JsonQueues<'a> {
             while let Some(pairs) = self.obj_todo.front().cloned() {
                 Extend::extend(&mut temp, pairs.iter().map(|(_,v)| self.copy(v)));
                 self.obj_todo.pop_front();
-                self.store.objects.push_iter(temp.drain(..).zip(pairs).map(|(v,(s,_))| (s, v)));
+                self.store.objects.push_iter(temp.drain(..).zip(pairs).map(|(v,(s,_))| (s.as_bytes(), v)));
             }
         }
     }
@@ -307,35 +285,22 @@ fn main() {
     let time = timer.elapsed();
     println!("{:?}\tjson_cols cloned", time);
 
+    // Bincode round-trip (serde-based).
     let timer = std::time::Instant::now();
-    use serde::ser::Serialize;
-    let mut encoded0 = Vec::new();
-    let mut serializer = rmp_serde::Serializer::new(&mut encoded0).with_bytes(rmp_serde::config::BytesMode::ForceAll);
-    values.serialize(&mut serializer).unwrap();
+    let encoded: Vec<u8> = bincode::serialize(&json_cols).unwrap();
     let time = timer.elapsed();
-    println!("{:?}\tjson_vals encode ({} bytes; msgpack)", time, encoded0.len());
-    let timer = std::time::Instant::now();
-    let decoded0: Vec<Json> = rmp_serde::from_slice(&encoded0[..]).unwrap();
-    let time = timer.elapsed();
-    println!("{:?}\tjson_vals decode", time);
+    println!("{:?}\tjson_cols encode ({} bytes; bincode)", time, encoded.len());
 
     let timer = std::time::Instant::now();
-    let mut encoded1 = Vec::new();
-    let mut serializer = rmp_serde::Serializer::new(&mut encoded1).with_bytes(rmp_serde::config::BytesMode::ForceAll);
-    json_cols.serialize(&mut serializer).unwrap();
+    let decoded: Jsons = bincode::deserialize(&encoded[..]).unwrap();
     let time = timer.elapsed();
-    println!("{:?}\tjson_cols encode ({} bytes; msgpack)", time, encoded1.len());
-    let timer = std::time::Instant::now();
-    let decoded1: Jsons = rmp_serde::from_slice(&encoded1[..]).unwrap();
-    let time = timer.elapsed();
-    println!("{:?}\tjson_cols decode", time);
+    println!("{:?}\tjson_cols decode (bincode)", time);
 
-    let timer = std::time::Instant::now();
-    let encoded2: Vec<u8> = bincode::serialize(&json_cols).unwrap();
-    let time = timer.elapsed();
-    println!("{:?}\tjson_cols encode ({} bytes; bincode)", time, encoded2.len());
+    assert_eq!(json_cols, decoded);
 
-    assert_eq!(values, decoded0);
-    assert_eq!(json_cols, decoded1);
-
+    // TODO: Columnar binary round-trip via AsBytes/FromBytes.
+    // This requires implementing Borrow for Jsons, which is blocked on
+    // Vec<Number> (serde_json::Number is not columnar-friendly).
+    // Converting numbers to a columnar representation (e.g. f64 + tag)
+    // would unblock this path.
 }
