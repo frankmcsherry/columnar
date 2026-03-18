@@ -1,6 +1,6 @@
 use serde_json::Value as JsonJson;
 
-use columnar::{Push, Len, Index, HeapSize};
+use columnar::{Push, Len, Index};
 use columnar::{Vecs, Strings, Lookbacks};
 
 /// Stand in for JSON, from `serde_json`.
@@ -14,18 +14,7 @@ pub enum Json {
     Object(Vec<(String, Json)>),
 }
 
-impl HeapSize for Json {
-    fn heap_size(&self) -> (usize, usize) {
-        match self {
-            Json::Null => (0, 0),
-            Json::Bool(_) => (0, 0),
-            Json::Number(_) => (0, 0),
-            Json::String(s) => (0, s.len()),
-            Json::Array(a) => a.heap_size(),
-            Json::Object(o) => o.heap_size(),
-        }
-    }
-}
+
 
 impl Json {
     pub fn from_json(json: JsonJson) -> Self {
@@ -55,10 +44,6 @@ pub enum JsonIdx {
     Object(usize),
 }
 
-impl HeapSize for JsonIdx {
-    fn heap_size(&self) -> (usize, usize) { (0, 0) }
-}
-
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Number (serde_json::Number);
 
@@ -68,8 +53,6 @@ impl std::ops::Deref for Number {
         &self.0
     }
 }
-
-impl HeapSize for Number { }
 
 /// Stand-in for `Vec<Json>`.
 ///
@@ -101,17 +84,6 @@ pub struct Jsons {
     pub strings: Lookbacks<Strings>,
     pub arrays: Vecs<Vec<JsonIdx>>,
     pub objects: Vecs<(Lookbacks<Strings>, Vec<JsonIdx>)>,
-}
-
-impl HeapSize for Jsons {
-    fn heap_size(&self) -> (usize, usize) {
-        let (l0, c0) = self.roots.heap_size();
-        let (l1, c1) = self.numbers.heap_size();
-        let (l2, c2) = self.strings.heap_size();
-        let (l3, c3) = self.arrays.heap_size();
-        let (l4, c4) = self.objects.heap_size();
-        (l0 + l1 + l2 + l3 + l4, c0 + c1 + c2 + c3 + c4)
-    }
 }
 
 /// Stand-in for `&'a Json`.
@@ -294,7 +266,7 @@ impl<'a> JsonQueues<'a> {
 
 fn main() {
 
-    use columnar::{Push, Len, Index, HeapSize};
+    use columnar::{Push, Len, Index};
 
     use std::fs::File;
     use serde_json::Value as JsonValue;
@@ -312,21 +284,12 @@ fn main() {
     println!("{:?}\tjson_vals cloned", time);
 
     let values = records.clone().into_iter().map(Json::from_json).collect::<Vec<_>>();
-    println!("\t\tjson_vals heapsize: {:?}", values.heap_size().0);
 
     let timer = std::time::Instant::now();
     let mut json_cols = Jsons::default();
     json_cols.extend(values.iter());
     let time = timer.elapsed();
     println!("{:?}\tjson_cols formed", time);
-    println!("\t\tjson_cols heapsize: {:?}", json_cols.heap_size().0);
-    println!("\t\tjson_cols.roots:    {:?}", json_cols.roots.heap_size().0);
-    println!("\t\tjson_cols.numbers:  {:?}", json_cols.numbers.heap_size().0);
-    println!("\t\tjson_cols.strings:  {:?}", json_cols.strings.heap_size().0);
-    println!("\t\tjson_cols.arrays:   {:?}", json_cols.arrays.heap_size().0);
-    println!("\t\tjson_cols.objects:  {:?}", json_cols.objects.heap_size().0);
-    println!("\t\tjson_cols.objects.values.0:  {:?}", json_cols.objects.values.0.heap_size().0);
-    println!("\t\tjson_cols.objects.values.1:  {:?}", json_cols.objects.values.1.heap_size().0);
 
     println!("\t\tjson_cols.arrays.len: {:?}", json_cols.arrays.len());
 

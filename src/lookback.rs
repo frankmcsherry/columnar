@@ -3,7 +3,7 @@
 //! This has the potential to be more efficient than a list of `T` when many values repeat in
 //! close proximity. Values must be equatable, and the degree of lookback can be configured.
 
-use crate::{Options, Results, Push, Index, Len, HeapSize};
+use crate::{Options, Results, Push, Index, Len};
 
 /// A container that encodes repeated values with a `None` variant, at the cost of extra bits for every record.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -44,12 +44,6 @@ impl<TC: Index, const N: u8> Index for Repeats<TC, N> {
                 self.inner.somes.get(pos)
             },
         }
-    }
-}
-
-impl<TC: HeapSize, const N: u8> HeapSize for Repeats<TC, N> {
-    fn heap_size(&self) -> (usize, usize) {
-        self.inner.heap_size()
     }
 }
 
@@ -107,8 +101,3 @@ where
     }
 }
 
-impl<TC: HeapSize, VC: HeapSize, const N: u8> HeapSize for Lookbacks<TC, VC, N> {
-    fn heap_size(&self) -> (usize, usize) {
-        self.inner.heap_size()
-    }
-}

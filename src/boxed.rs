@@ -6,7 +6,7 @@
 //! We need this wrapper to distinguish which [`Push`] implementation to use, otherwise
 //! the implementations would conflict.
 
-use crate::{AsBytes, Borrow, Clear, Columnar, Container, FromBytes, HeapSize, Index, IndexMut, Len, Push, Ref};
+use crate::{AsBytes, Borrow, Clear, Columnar, Container, FromBytes, Index, IndexMut, Len, Push, Ref};
 
 impl<T: Columnar> Columnar for Box<T> {
     type Container = Boxed<T::Container>;
@@ -71,6 +71,4 @@ impl<C: IndexMut> IndexMut for Boxed<C> {
     type IndexMut<'a> = Boxed<C::IndexMut<'a>> where Self: 'a;
     #[inline(always)] fn get_mut(&mut self, index: usize) -> Self::IndexMut<'_> { Boxed(self.0.get_mut(index)) }
 }
-impl<C: HeapSize> HeapSize for Boxed<C> {
-    #[inline(always)] fn heap_size(&self) -> (usize, usize) { self.0.heap_size() }
-}
+

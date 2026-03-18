@@ -12,8 +12,6 @@ macro_rules! implement_columnable {
             type Container = Vec<$index_type>;
         }
 
-        impl crate::HeapSize for $index_type { }
-
         impl<'a> crate::AsBytes<'a> for &'a [$index_type] {
             #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
@@ -140,12 +138,6 @@ mod sizes {
     }
     impl<CV: Clear> Clear for Usizes<CV> { fn clear(&mut self) { self.values.clear() }}
 
-    impl<CV: HeapSize> HeapSize for Usizes<CV> {
-        fn heap_size(&self) -> (usize, usize) {
-            self.values.heap_size()
-        }
-    }
-
     impl<'a, CV: crate::AsBytes<'a>> crate::AsBytes<'a> for crate::primitive::Usizes<CV> {
         #[inline(always)]
         fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
@@ -221,12 +213,6 @@ mod sizes {
         fn push(&mut self, item: &isize) { self.values.push((*item).try_into().expect("isize must fit in a i64")) }
     }
     impl<CV: Clear> Clear for Isizes<CV> { fn clear(&mut self) { self.values.clear() }}
-
-    impl<CV: HeapSize> HeapSize for Isizes<CV> {
-        fn heap_size(&self) -> (usize, usize) {
-            self.values.heap_size()
-        }
-    }
 
     impl<'a, CV: crate::AsBytes<'a>> crate::AsBytes<'a> for crate::primitive::Isizes<CV> {
         #[inline(always)]
@@ -309,12 +295,6 @@ mod chars {
     }
     impl<CV: Clear> Clear for Chars<CV> { fn clear(&mut self) { self.values.clear() }}
 
-    impl<CV: HeapSize> HeapSize for Chars<CV> {
-        fn heap_size(&self) -> (usize, usize) {
-            self.values.heap_size()
-        }
-    }
-
     impl<'a, CV: crate::AsBytes<'a>> crate::AsBytes<'a> for Chars<CV> {
         #[inline(always)]
         fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
@@ -396,12 +376,6 @@ mod larges {
     }
     impl<CV: Clear> Clear for U128s<CV> { fn clear(&mut self) { self.values.clear() }}
 
-    impl<CV: HeapSize> HeapSize for U128s<CV> {
-        fn heap_size(&self) -> (usize, usize) {
-            self.values.heap_size()
-        }
-    }
-
     impl<'a, CV: crate::AsBytes<'a>> crate::AsBytes<'a> for U128s<CV> {
         #[inline(always)]
         fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
@@ -472,12 +446,6 @@ mod larges {
         fn push(&mut self, item: &i128) { self.values.push(item.to_le_bytes()) }
     }
     impl<CV: Clear> Clear for I128s<CV> { fn clear(&mut self) { self.values.clear() }}
-
-    impl<CV: HeapSize> HeapSize for I128s<CV> {
-        fn heap_size(&self) -> (usize, usize) {
-            self.values.heap_size()
-        }
-    }
 
     impl<'a, CV: crate::AsBytes<'a>> crate::AsBytes<'a> for I128s<CV> {
         #[inline(always)]
@@ -571,10 +539,6 @@ pub mod offsets {
             }
         }
 
-        impl<const K: u64> crate::HeapSize for Fixeds<K> {
-            #[inline(always)]
-            fn heap_size(&self) -> (usize, usize) { (0, 0) }
-        }
         impl<const K: u64> crate::Clear for Fixeds<K> {
             #[inline(always)]
             fn clear(&mut self) { self.count = 0; }
@@ -816,7 +780,7 @@ pub use empty::Empties;
 mod empty {
 
     use crate::common::index::CopyAs;
-    use crate::{Clear, Columnar, Container, Len, IndexMut, Index, Push, HeapSize, Borrow};
+    use crate::{Clear, Columnar, Container, Len, IndexMut, Index, Push, Borrow};
 
     #[derive(Copy, Clone, Debug, Default)]
     pub struct Empties<CC = u64> { pub count: CC, pub empty: () }
@@ -886,10 +850,6 @@ mod empty {
         }
     }
 
-    impl HeapSize for Empties {
-        #[inline(always)]
-        fn heap_size(&self) -> (usize, usize) { (0, 0) }
-    }
     impl Clear for Empties {
         #[inline(always)]
         fn clear(&mut self) { self.count = 0; }
@@ -931,7 +891,7 @@ pub use boolean::Bools;
 mod boolean {
 
     use crate::common::index::CopyAs;
-    use crate::{Container, Clear, Len, Index, IndexAs, Push, HeapSize, Borrow};
+    use crate::{Container, Clear, Len, Index, IndexAs, Push, Borrow};
 
     /// A store for maintaining `Vec<bool>`.
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -1085,12 +1045,6 @@ mod boolean {
         }
     }
 
-    impl<VC: HeapSize> HeapSize for Bools<VC> {
-        #[inline(always)]
-        fn heap_size(&self) -> (usize, usize) {
-            self.values.heap_size()
-        }
-    }
 }
 
 pub use duration::Durations;
@@ -1098,7 +1052,7 @@ pub use duration::Durations;
 mod duration {
 
     use std::time::Duration;
-    use crate::{Container, Len, Index, IndexAs, Push, Clear, HeapSize, Borrow};
+    use crate::{Container, Len, Index, IndexAs, Push, Clear, Borrow};
 
     // `std::time::Duration` is equivalent to `(u64, u32)`, corresponding to seconds and nanoseconds.
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -1212,13 +1166,5 @@ mod duration {
         }
     }
 
-    impl<SC: HeapSize, NC: HeapSize> HeapSize for Durations<SC, NC> {
-        #[inline(always)]
-        fn heap_size(&self) -> (usize, usize) {
-            let (l0, c0) = self.seconds.heap_size();
-            let (l1, c1) = self.nanoseconds.heap_size();
-            (l0 + l1, c0 + c1)
-        }
-    }
 }
 

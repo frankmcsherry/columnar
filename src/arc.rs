@@ -1,7 +1,7 @@
 //! Implementations of traits for `Arc<T>`
 use std::sync::Arc;
 
-use crate::{Len, Borrow, HeapSize, AsBytes, FromBytes};
+use crate::{Len, Borrow, AsBytes, FromBytes};
 
 impl<T: Borrow> Borrow for Arc<T> {
     type Ref<'a> = T::Ref<'a> where T: 'a;
@@ -12,12 +12,6 @@ impl<T: Borrow> Borrow for Arc<T> {
 }
 impl<T: Len> Len for Arc<T> {
     #[inline(always)] fn len(&self) -> usize { self.as_ref().len() }
-}
-impl<T: HeapSize> HeapSize for Arc<T> {
-    fn heap_size(&self) -> (usize, usize) {
-        let (l, c) = self.as_ref().heap_size();
-        (l + std::mem::size_of::<Arc<T>>(), c + std::mem::size_of::<Arc<T>>())
-    }
 }
 impl<'a, T: AsBytes<'a>> AsBytes<'a> for Arc<T> {
     #[inline(always)] fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> { self.as_ref().as_bytes() }
@@ -31,7 +25,7 @@ impl<'a, T: FromBytes<'a>> FromBytes<'a> for Arc<T> {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use crate::{Borrow, Len, HeapSize, AsBytes, FromBytes};
+    use crate::{Borrow, Len, AsBytes, FromBytes};
 
     #[test]
     fn test_borrow() {
@@ -44,14 +38,6 @@ mod tests {
     fn test_len() {
         let x = Arc::new(vec![1, 2, 3]);
         assert_eq!(x.len(), 3);
-    }
-
-    #[test]
-    fn test_heap_size() {
-        let x = Arc::new(vec![1, 2, 3]);
-        let (l, c) = x.heap_size();
-        assert!(l > 0);
-        assert!(c > 0);
     }
 
     #[test]
