@@ -1,6 +1,6 @@
-use alloc::{vec::Vec, string::String};
-#[allow(non_snake_case)]
+#![allow(non_snake_case)]
 
+use alloc::{vec::Vec, string::String};
 use crate::{Columnar, Container, Borrow, Len, Clear, Index, IndexMut, Push};
 
 // Implementations for tuple types.
@@ -156,7 +156,7 @@ tuple_impl!(A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5 G,GG,6 H,HH,7 I,II,8 J,JJ,
 
 #[cfg(test)]
 mod test {
-    use alloc::{vec, vec::Vec, string::{String, ToString}};
+    use alloc::string::{String, ToString};
     #[test]
     fn round_trip() {
 

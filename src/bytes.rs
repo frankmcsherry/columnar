@@ -288,7 +288,7 @@ pub mod indexed {
     #[cfg(test)]
     mod test {
 
-        use alloc::{vec, vec::Vec, string::{String, ToString}};
+        use alloc::{vec, vec::Vec, string::String};
         use crate::{Borrow, ContainerOf};
         use crate::common::Push;
         use crate::AsBytes;

@@ -741,7 +741,7 @@ pub mod offsets {
 
     #[cfg(test)]
     mod test {
-        use alloc::{vec, vec::Vec, string::{String, ToString}};
+        use alloc::vec::Vec;
         #[test]
         fn round_trip() {
 

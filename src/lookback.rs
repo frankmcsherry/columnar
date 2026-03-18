@@ -251,7 +251,7 @@ impl<'a, TC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>, CC: crate::FromByte
 #[cfg(test)]
 mod test {
 
-    use alloc::{vec, vec::Vec, string::{String, ToString}};
+    use alloc::vec::Vec;
     use crate::common::{Push, Index, Len, Clear};
     use crate::{Borrow, Container, AsBytes, FromBytes};
     use crate::bytes::stash::Stash;

@@ -241,7 +241,7 @@ mod louds {
 #[cfg(test)]
 mod test {
 
-    use alloc::{vec, vec::Vec, string::{String, ToString}};
+    use alloc::{vec, vec::Vec, string::ToString};
     use crate::common::{Index, Len, Clear};
     use crate::{Borrow, AsBytes, FromBytes};
     use super::{Tree, Trees};

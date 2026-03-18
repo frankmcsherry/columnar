@@ -403,7 +403,6 @@ pub mod result {
     }
     #[cfg(test)]
     mod test {
-        use alloc::{vec, vec::Vec, string::{String, ToString}};
         #[test]
         fn round_trip() {
 
@@ -634,7 +633,7 @@ pub mod option {
 
     #[cfg(test)]
     mod test {
-        use alloc::{vec, vec::Vec, string::{String, ToString}};
+        use alloc::vec::Vec;
 
         use crate::Columnar;
         use crate::common::{Index, Len};

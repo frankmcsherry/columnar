@@ -25,7 +25,7 @@ impl<'a, T: FromBytes<'a>> FromBytes<'a> for Rc<T> {
 #[cfg(test)]
 mod tests {
     use alloc::rc::Rc;
-    use alloc::{vec, vec::Vec, string::{String, ToString}};
+    use alloc::{vec, vec::Vec};
     use crate::{Borrow, Len, AsBytes, FromBytes};
 
     #[test]
