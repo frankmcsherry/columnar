@@ -23,6 +23,8 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: ${{ matrix.toolchain }}
+      - name: Cargo check
+        run: cargo check
       - name: Cargo test
         run: cargo test --workspace --all-targets
       - name: Verify no_std support
