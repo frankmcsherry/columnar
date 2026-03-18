@@ -4,12 +4,17 @@
 //!
 //! The encoding uses an index of byte offsets prepended to the data, enabling
 //! random access to individual byte slices and `u64`-aligned decoding.
+//!
+//! The most reliable entry point to the read side of this functionality is the `Stash` type,
+//! which can be formed from any type that implements `Deref<Target=[u8]>`. Doing so will check
+//! `u64` alignment, copy the contents if misaligned, and perform some structural validation.
 
 /// A binary encoding of sequences of byte slices.
 ///
 /// The encoding starts with a sequence of n+1 offsets describing where to find the n slices in the bytes that follow.
 /// Treating the offsets as a byte slice too, each offset indicates the location (in bytes) of the end of its slice.
 /// Each byte slice can be found from a pair of adjacent offsets, where the first is rounded up to a multiple of eight.
+/// This means that slices that are not multiples of eight bytes may leave unread bytes at their end, which is fine.
 pub mod indexed {
 
     use crate::AsBytes;
@@ -146,9 +151,11 @@ pub mod indexed {
         #[inline(always)]
         pub fn new(store: &'a [u64]) -> Self {
             let slices = store.first().copied().unwrap_or(0) as usize / 8;
+            debug_assert!(slices <= store.len(), "DecodedStore::new: slice count {slices} exceeds store length {}", store.len());
             let index = store.get(..slices).unwrap_or(&[]);
             let last = index.last().copied().unwrap_or(0) as usize;
             let last_w = (last + 7) / 8;
+            debug_assert!(last_w <= store.len(), "DecodedStore::new: last word offset {last_w} exceeds store length {}", store.len());
             let words = store.get(..last_w).unwrap_or(&[]);
             Self { index, words }
         }
@@ -158,6 +165,7 @@ pub mod indexed {
         /// (0 means all 8 are valid). Returns an empty slice for out-of-bounds access.
         #[inline(always)]
         pub fn get(&self, k: usize) -> (&'a [u64], u8) {
+            debug_assert!(k + 1 < self.index.len(), "DecodedStore::get: index {k} out of bounds (len {})", self.index.len().saturating_sub(1));
             let upper = (*self.index.get(k + 1).unwrap_or(&0) as usize)
                 .min(self.words.len() * 8);
             let lower = (((*self.index.get(k).unwrap_or(&0) as usize) + 7) & !7)
@@ -317,6 +325,17 @@ pub mod stash {
     ///
     /// The container can be cleared and pushed into. When cleared it reverts to a typed variant, and when
     /// pushed into if the typed variant it will accept the item, and if not it will panic.
+    ///
+    /// The best ways to construct a `Stash` is with either the `Default` implementation to get an empty
+    /// writeable version, or with the `try_from_bytes` method that attempts to install a type that dereferences
+    /// to a byte slice in the `Bytes` variant, after validating some structural properties.
+    ///
+    /// One can form a `Stash` directly by loading the variants, which are public. Do so with care,
+    /// as loading mis-aligned `B` into the `Bytes` variant can result in a run-time panic, and
+    /// loading structurally invalid data into either the `Bytes` or `Align` variant can produce
+    /// incorrect results at runtime (clamped index accesses, for example). The validation does not
+    /// confirm that the internal structure of types are valid, for example that all vector bounds
+    /// are in-bounds for their values, and these may result in panics at runtime for invalid data.
     #[derive(Clone)]
     pub enum Stash<C, B> {
         /// The typed variant of the container.
@@ -331,6 +350,62 @@ pub mod stash {
     }
 
     impl<C: Default, B> Default for Stash<C, B> { fn default() -> Self { Self::Typed(Default::default()) } }
+
+    impl<C: crate::ContainerBytes, B: std::ops::Deref<Target = [u8]>> Stash<C, B> {
+        /// An analogue of `TryFrom` for any `B: Deref<Target=[u8]>`, avoiding coherence issues.
+        ///
+        /// This is the recommended way to form a `Stash`, as it performs certain structural validation
+        /// steps that the stash will then skip in future borrowing and indexing operations. If the data
+        /// are structurally invalid, e.g. the wrong framing header, the wrong number of slices for `C`,
+        /// this will return an error. If this returns a `Stash` then all accesses that do not panic should
+        /// be correct. The resulting `Stash` may still panic if the internal structure of the data
+        /// are inconsistent, for example if any vector bounds are out-of-bounds for their values slice.
+        ///
+        /// There is no `unsafe` that is called through this type, and invalid data can result in panics
+        /// or incorrect results, but not undefined behavior.
+        ///
+        /// # Example
+        ///
+        /// ```rust
+        /// use columnar::{Columnar, Borrow, ContainerOf};
+        /// use columnar::common::{Push, Index};
+        /// use columnar::bytes::stash::Stash;
+        ///
+        /// // Build a typed container and populate it.
+        /// let mut stash: Stash<ContainerOf<(u64, String)>, Vec<u8>> = Default::default();
+        /// stash.push(&(0u64, format!("hello")));
+        /// stash.push(&(1u64, format!("world")));
+        ///
+        /// // Serialize to bytes.
+        /// let mut bytes: Vec<u8> = Vec::new();
+        /// stash.into_bytes(&mut bytes);
+        ///
+        /// // Reconstruct from bytes, with validation.
+        /// let stash: Stash<ContainerOf<(u64, String)>, Vec<u8>> =
+        ///     Stash::try_from_bytes(bytes).expect("valid data");
+        ///
+        /// // Borrow and index into individual columns.
+        /// let borrowed = stash.borrow();
+        /// assert_eq!(*Index::get(&borrowed.0, 0), 0u64);
+        /// assert_eq!(borrowed.1.get(1), "world");
+        /// ```
+        pub fn try_from_bytes(bytes: B) -> Result<Self, String> {
+            use crate::bytes::indexed::validate;
+            use crate::Borrow;
+            if !(bytes.len() % 8 == 0) { return Err(format!("bytes.len() = {:?} not a multiple of 8", bytes.len())) }
+            if let Ok(words) = bytemuck::try_cast_slice::<_, u64>(&bytes) {
+                validate::<<C as Borrow>::Borrowed<'_>>(words)?;
+                Ok(Self::Bytes(bytes))
+            }
+            else {
+                // Re-locating bytes for alignment reasons.
+                let mut alloc: Vec<u64> = vec![0; bytes.len() / 8];
+                bytemuck::cast_slice_mut(&mut alloc[..]).copy_from_slice(&bytes[..]);
+                validate::<<C as Borrow>::Borrowed<'_>>(&alloc)?;
+                Ok(Self::Align(alloc.into()))
+            }
+        }
+    }
 
     impl<C: crate::ContainerBytes, B: std::ops::Deref<Target=[u8]> + Clone + 'static> crate::Borrow for Stash<C, B> {
 
@@ -398,21 +473,6 @@ pub mod stash {
                 Stash::Bytes(_) | Stash::Align(_) => {
                     *self = Stash::Typed(Default::default());
                 }
-            }
-        }
-    }
-
-    impl<C: crate::Container, B: std::ops::Deref<Target = [u8]>> From<B> for Stash<C, B> {
-        fn from(bytes: B) -> Self {
-            assert!(bytes.len() % 8 == 0);
-            if bytemuck::try_cast_slice::<_, u64>(&bytes).is_ok() {
-                Self::Bytes(bytes)
-            }
-            else {
-                // Re-locating bytes for alignment reasons.
-                let mut alloc: Vec<u64> = vec![0; bytes.len() / 8];
-                bytemuck::cast_slice_mut(&mut alloc[..]).copy_from_slice(&bytes[..]);
-                Self::Align(alloc.into())
             }
         }
     }

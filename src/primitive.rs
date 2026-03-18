@@ -33,6 +33,7 @@ macro_rules! implement_columnable {
                 *offset += 1;
                 let all: &[$index_type] = bytemuck::cast_slice(w);
                 let trim = ((8 - tail as usize) % 8) / std::mem::size_of::<$index_type>();
+                debug_assert!(trim <= all.len(), "from_store: trim {trim} exceeds slice length {}", all.len());
                 all.get(..all.len().wrapping_sub(trim)).unwrap_or(&[])
             }
             fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
@@ -59,6 +60,7 @@ macro_rules! implement_columnable {
                 *offset += 1;
                 let all: &[[$index_type; N]] = bytemuck::cast_slice(w);
                 let trim = ((8 - tail as usize) % 8) / (std::mem::size_of::<$index_type>() * N);
+                debug_assert!(trim <= all.len(), "from_store: trim {trim} exceeds slice length {}", all.len());
                 all.get(..all.len().wrapping_sub(trim)).unwrap_or(&[])
             }
             fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
@@ -593,7 +595,18 @@ pub mod offsets {
             #[inline(always)]
             fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
                 let (w, _) = store.get(*offset); *offset += 1;
+                debug_assert!(!w.is_empty(), "Fixeds::from_store: empty count slice");
                 Self { count: w.first().unwrap_or(&0) }
+            }
+            fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+                sizes.push(8);
+                Ok(())
+            }
+            fn validate(slices: &[(&[u64], u8)]) -> Result<(), String> {
+                if slices.is_empty() || slices[0].0.is_empty() {
+                    return Err("Fixeds: count slice must be non-empty".into());
+                }
+                Ok(())
             }
         }
 
@@ -690,11 +703,24 @@ pub mod offsets {
             #[inline(always)]
             fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
                 let (w1, _) = store.get(*offset); *offset += 1;
+                debug_assert!(!w1.is_empty(), "Strides::from_store: empty stride slice");
                 let stride = w1.first().unwrap_or(&0);
                 let (w2, _) = store.get(*offset); *offset += 1;
+                debug_assert!(!w2.is_empty(), "Strides::from_store: empty length slice");
                 let length = w2.first().unwrap_or(&0);
                 let bounds = BC::from_store(store, offset);
                 Self { stride, length, bounds }
+            }
+            fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+                sizes.push(8); // stride
+                sizes.push(8); // length
+                BC::element_sizes(sizes)
+            }
+            fn validate(slices: &[(&[u64], u8)]) -> Result<(), String> {
+                if slices.len() < 2 || slices[0].0.is_empty() || slices[1].0.is_empty() {
+                    return Err("Strides: stride and length slices must be non-empty".into());
+                }
+                BC::validate(&slices[2..])
             }
         }
 
@@ -884,7 +910,18 @@ mod empty {
         #[inline(always)]
         fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
             let (w, _) = store.get(*offset); *offset += 1;
+            debug_assert!(!w.is_empty(), "Empties::from_store: empty count slice");
             Self { count: w.first().unwrap_or(&0), empty: () }
+        }
+        fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+            sizes.push(8);
+            Ok(())
+        }
+        fn validate(slices: &[(&[u64], u8)]) -> Result<(), String> {
+            if slices.is_empty() || slices[0].0.is_empty() {
+                return Err("Empties: count slice must be non-empty".into());
+            }
+            Ok(())
         }
     }
 }
@@ -967,10 +1004,29 @@ mod boolean {
         fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
             let values = VC::from_store(store, offset);
             let (w1, _) = store.get(*offset); *offset += 1;
+            debug_assert!(!w1.is_empty(), "Bools::from_store: empty last_word slice");
             let last_word = w1.first().unwrap_or(&0);
             let (w2, _) = store.get(*offset); *offset += 1;
+            debug_assert!(!w2.is_empty(), "Bools::from_store: empty last_bits slice");
             let last_bits = w2.first().unwrap_or(&0);
             Self { values, last_word, last_bits }
+        }
+        fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+            VC::element_sizes(sizes)?;
+            sizes.push(8); // last_word
+            sizes.push(8); // last_bits
+            Ok(())
+        }
+        fn validate(slices: &[(&[u64], u8)]) -> Result<(), String> {
+            if slices.len() < Self::SLICE_COUNT {
+                return Err(format!("Bools: expected {} slices but got {}", Self::SLICE_COUNT, slices.len()));
+            }
+            VC::validate(slices)?;
+            let vc = VC::SLICE_COUNT;
+            if slices[vc].0.is_empty() || slices[vc + 1].0.is_empty() {
+                return Err("Bools: last_word and last_bits slices must be non-empty".into());
+            }
+            Ok(())
         }
     }
 
