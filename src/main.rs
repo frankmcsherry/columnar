@@ -27,13 +27,13 @@ fn main() {
     for (col, row) in columns.into_index_iter().zip(roster) {
         match (col, row) {
             (GroupReference::Solo(p0), Group::Solo(p1)) => {
-                assert_eq!(p0.0, p1.0);
+                assert_eq!(p0.0, p1.0.as_bytes());
                 assert_eq!(p0.1, &p1.1);
             },
             (GroupReference::Team(p0s), Group::Team(p1s)) => {
                 assert_eq!(p0s.len(), p1s.len());
                 for (p0, p1) in p0s.into_iter().zip(p1s) {
-                    assert_eq!(p0.0, p1.0);
+                    assert_eq!(p0.0, p1.0.as_bytes());
                     assert_eq!(p0.1, &p1.1);
                 }
             },
