@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0](https://github.com/frankmcsherry/columnar/compare/columnar-v0.11.1...columnar-v0.12.0) - 2026-03-19
+
+### Other
+
+- Use fully scoped names in derive macros ([#96](https://github.com/frankmcsherry/columnar/pull/96))
+- Claude drafted `no_std` support ([#94](https://github.com/frankmcsherry/columnar/pull/94))
+- Update JSON example ([#93](https://github.com/frankmcsherry/columnar/pull/93))
+- Update Trees container ([#92](https://github.com/frankmcsherry/columnar/pull/92))
+- Update trait coverage ([#91](https://github.com/frankmcsherry/columnar/pull/91))
+- Claude tidy up ([#88](https://github.com/frankmcsherry/columnar/pull/88))
+- Remove HeapSize trait ([#87](https://github.com/frankmcsherry/columnar/pull/87))
+- Improve validation of binary data, improve documentation. ([#85](https://github.com/frankmcsherry/columnar/pull/85))
+- Change Strings::Ref from &str to &[u8] ([#86](https://github.com/frankmcsherry/columnar/pull/86))
+- Derived extend_for_self for enums ([#82](https://github.com/frankmcsherry/columnar/pull/82))
+- Introduce BorrowedOf type alias for ergonomics ([#81](https://github.com/frankmcsherry/columnar/pull/81))
+- Make element_sizes return Result, default to Err ([#80](https://github.com/frankmcsherry/columnar/pull/80))
+- Add structured decoding ([#79](https://github.com/frankmcsherry/columnar/pull/79))
+- Decode u64s rather than u8s ([#78](https://github.com/frankmcsherry/columnar/pull/78))
+- Add Discriminant::is_heterogenous()
+- Rebase on master
+- Enum containers avoid per-element metadata for homogenous collections
+- Remove inspect module
+- Constant numbers of byte slices for FromBytes
+- Improve Indexed::decode codegen
+
 ## [0.11.1](https://github.com/frankmcsherry/columnar/compare/columnar-v0.11.0...columnar-v0.11.1) - 2026-01-17
 
 ### Other
