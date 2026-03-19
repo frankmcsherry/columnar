@@ -326,7 +326,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
                 fn from_store(store: &::columnar::bytes::indexed::DecodedStore<'columnar>, offset: &mut usize) -> Self {
                     Self { #(#names: ::columnar::FromBytes::from_store(store, offset),)* }
                 }
-                fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+                fn element_sizes(sizes: &mut Vec<usize>) -> ::core::result::Result<(), String> {
                     #(<#container_types>::element_sizes(sizes)?;)*
                     Ok(())
                 }
@@ -504,7 +504,7 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
             // type Borrowed<'columnar> = #c_ident;
             #[inline(always)]
             fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                std::iter::once((8, ::columnar::bytemuck::cast_slice(std::slice::from_ref(self.count))))
+                ::core::iter::once((8, ::columnar::bytemuck::cast_slice(::core::slice::from_ref(self.count))))
             }
         }
 
@@ -520,7 +520,7 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
                 *offset += 1;
                 Self { count: w.first().unwrap_or(&0) }
             }
-            fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+            fn element_sizes(sizes: &mut Vec<usize>) -> ::core::result::Result<(), String> {
                 sizes.push(8);
                 Ok(())
             }
@@ -925,7 +925,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                         indexes: ::columnar::FromBytes::from_store(store, offset),
                     }
                 }
-                fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+                fn element_sizes(sizes: &mut Vec<usize>) -> ::core::result::Result<(), String> {
                     #(<#container_types>::element_sizes(sizes)?;)*
                     <::columnar::Discriminant<CVar, COff>>::element_sizes(sizes)?;
                     Ok(())
@@ -1270,7 +1270,7 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
             fn from_store(store: &::columnar::bytes::indexed::DecodedStore<'columnar>, offset: &mut usize) -> Self {
                 Self { variant: ::columnar::FromBytes::from_store(store, offset) }
             }
-            fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+            fn element_sizes(sizes: &mut Vec<usize>) -> ::core::result::Result<(), String> {
                 CVar::element_sizes(sizes)
             }
         }
