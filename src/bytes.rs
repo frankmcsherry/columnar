@@ -349,7 +349,7 @@ pub mod indexed {
 /// A container of either typed columns, or serialized bytes that can be borrowed as the former.
 pub mod stash {
 
-    use alloc::{vec::Vec, string::String, boxed::Box};
+    use alloc::{vec::Vec, string::String};
     use crate::{Len, FromBytes};
     /// A container of either typed columns, or serialized bytes that can be borrowed as the former.
     ///
@@ -380,7 +380,7 @@ pub mod stash {
         ///
         /// Most commonly this works around misaligned binary data, but it can also be useful if the `B`
         /// type is a scarce resource that should be released.
-        Align(Box<[u64]>),
+        Align(alloc::sync::Arc<[u64]>),
     }
 
     impl<C: Default, B> Default for Stash<C, B> { fn default() -> Self { Self::Typed(Default::default()) } }
@@ -412,7 +412,7 @@ pub mod stash {
         ///
         /// // Serialize to bytes.
         /// let mut bytes: Vec<u8> = Vec::new();
-        /// stash.into_bytes(&mut bytes);
+        /// stash.write_bytes(&mut bytes);
         ///
         /// // Reconstruct from bytes, with validation.
         /// let stash: Stash<ContainerOf<(u64, String)>, Vec<u8>> =
@@ -455,6 +455,44 @@ pub mod stash {
         #[inline(always)] fn len(&self) -> usize { self.borrow().len() }
     }
 
+    impl<C: crate::Container + crate::ContainerBytes, B: core::ops::Deref<Target=[u8]>> Stash<C, B> {
+        /// Converts the stash to the `Typed` variant, by copying the borrowed data into a new container.
+        pub fn to_typed(&self) -> Self {
+            let borrowed = self.borrow();
+            let len = borrowed.len();
+            let mut container = C::with_capacity_for(core::iter::once(borrowed));
+            container.extend_from_self(borrowed, 0..len);
+            Self::Typed(container)
+        }
+        /// Converts the stash to the `Align` variant, by serializing the borrowed data into aligned words.
+        pub fn to_aligned(&self) -> Self {
+            let borrowed = self.borrow();
+            let mut store = Vec::with_capacity(crate::bytes::indexed::length_in_words(&borrowed));
+            crate::bytes::indexed::encode(&mut store, &borrowed);
+            Self::Align(store.into())
+        }
+        /// Ensures the stash is in the `Typed` variant, converting in place if needed, and returns a mutable reference.
+        pub fn make_typed(&mut self) -> &mut C {
+            if !matches!(self, Self::Typed(_)) {
+                *self = self.to_typed();
+            }
+            match self {
+                Stash::Typed(t) => t,
+                _ => unreachable!(),
+            }
+        }
+        /// Ensures the stash is in the `Align` variant, converting in place if needed, and returns a reference.
+        pub fn make_aligned(&mut self) -> &alloc::sync::Arc<[u64]> {
+            if !matches!(self, Self::Align(_)) {
+                *self = self.to_aligned();
+            }
+            match self {
+                Stash::Align(a) => a,
+                _ => unreachable!(),
+            }
+        }
+    }
+
     impl<C: crate::ContainerBytes, B: core::ops::Deref<Target=[u8]>> Stash<C, B> {
         /// Borrows the contents, either from a typed container or by decoding serialized bytes.
         ///
@@ -482,7 +520,7 @@ pub mod stash {
             }
         }
         /// Write the contents into a [`WriteBytes`](crate::bytes::WriteBytes) destination.
-        pub fn into_bytes<W: crate::bytes::WriteBytes>(&self, writer: &mut W) -> Result<(), W::Error> {
+        pub fn write_bytes<W: crate::bytes::WriteBytes>(&self, writer: &mut W) -> Result<(), W::Error> {
             match self {
                 Stash::Typed(t) => { crate::bytes::indexed::write(writer, &t.borrow())?; },
                 Stash::Bytes(b) => writer.write_all(&b[..])?,
@@ -492,11 +530,13 @@ pub mod stash {
         }
     }
 
-    impl<T, C: crate::Container + crate::Push<T>, B> crate::Push<T> for Stash<C, B> {
+    // This implementation converts to owned data if it is not already, which can be expensive.
+    impl<T, C: crate::Container + crate::ContainerBytes + crate::Push<T>, B: core::ops::Deref<Target=[u8]>> crate::Push<T> for Stash<C, B> {
         fn push(&mut self, item: T) {
+            self.make_typed();
             match self {
                 Stash::Typed(t) => t.push(item),
-                Stash::Bytes(_) | Stash::Align(_) => unimplemented!(),
+                _ => unreachable!(),
             }
         }
     }
