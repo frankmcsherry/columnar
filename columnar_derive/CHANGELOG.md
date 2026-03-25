@@ -9,16 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.12.0](https://github.com/frankmcsherry/columnar/compare/columnar_derive-v0.11.1...columnar_derive-v0.12.0) - 2026-03-25
 
-### Other
+### Added
 
-- Use fully scoped names in derive macros ([#96](https://github.com/frankmcsherry/columnar/pull/96))
-- Claude tidy up ([#88](https://github.com/frankmcsherry/columnar/pull/88))
-- Derived extend_for_self for enums ([#82](https://github.com/frankmcsherry/columnar/pull/82))
-- Add structured decoding ([#79](https://github.com/frankmcsherry/columnar/pull/79))
-- Decode u64s rather than u8s ([#78](https://github.com/frankmcsherry/columnar/pull/78))
-- Rebase on master
-- Enum containers avoid per-element metadata for homogenous collections
-- Constant numbers of byte slices for FromBytes
+- Derive support for `from_store` (structured decoding) ([#79](https://github.com/frankmcsherry/columnar/pull/79))
+- Derive support for `extend_for_self` on enum types ([#82](https://github.com/frankmcsherry/columnar/pull/82))
+
+### Changed
+
+- Generated code uses fully scoped paths (`::core::result::Result`, etc.) to avoid naming conflicts and support `no_std` ([#96](https://github.com/frankmcsherry/columnar/pull/96))
+- Generated `FromBytes` implementations use compile-time-constant byte slice counts ([#78](https://github.com/frankmcsherry/columnar/pull/78))
+- Consolidated scalar fields and streamlined naming in generated code ([#88](https://github.com/frankmcsherry/columnar/pull/88))
 
 ## [0.11.0](https://github.com/frankmcsherry/columnar/compare/columnar_derive-v0.10.2...columnar_derive-v0.11.0) - 2025-09-29
 

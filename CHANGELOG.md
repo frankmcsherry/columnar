@@ -9,30 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.12.0](https://github.com/frankmcsherry/columnar/compare/columnar-v0.11.1...columnar-v0.12.0) - 2026-03-25
 
-### Other
+### Added
 
-- Add Strides::pop ([#98](https://github.com/frankmcsherry/columnar/pull/98))
-- Update Bytes internals/methods ([#97](https://github.com/frankmcsherry/columnar/pull/97))
-- Use fully scoped names in derive macros ([#96](https://github.com/frankmcsherry/columnar/pull/96))
-- Claude drafted `no_std` support ([#94](https://github.com/frankmcsherry/columnar/pull/94))
-- Update JSON example ([#93](https://github.com/frankmcsherry/columnar/pull/93))
-- Update Trees container ([#92](https://github.com/frankmcsherry/columnar/pull/92))
-- Update trait coverage ([#91](https://github.com/frankmcsherry/columnar/pull/91))
-- Claude tidy up ([#88](https://github.com/frankmcsherry/columnar/pull/88))
-- Remove HeapSize trait ([#87](https://github.com/frankmcsherry/columnar/pull/87))
-- Improve validation of binary data, improve documentation. ([#85](https://github.com/frankmcsherry/columnar/pull/85))
-- Change Strings::Ref from &str to &[u8] ([#86](https://github.com/frankmcsherry/columnar/pull/86))
-- Derived extend_for_self for enums ([#82](https://github.com/frankmcsherry/columnar/pull/82))
-- Introduce BorrowedOf type alias for ergonomics ([#81](https://github.com/frankmcsherry/columnar/pull/81))
-- Make element_sizes return Result, default to Err ([#80](https://github.com/frankmcsherry/columnar/pull/80))
-- Add structured decoding ([#79](https://github.com/frankmcsherry/columnar/pull/79))
-- Decode u64s rather than u8s ([#78](https://github.com/frankmcsherry/columnar/pull/78))
-- Add Discriminant::is_heterogenous()
-- Rebase on master
-- Enum containers avoid per-element metadata for homogenous collections
-- Remove inspect module
-- Constant numbers of byte slices for FromBytes
-- Improve Indexed::decode codegen
+- Structured decoding via `DecodedStore`, a zero-allocation random-access view into indexed-encoded data, with constant-instruction-count field access regardless of tuple width ([#78](https://github.com/frankmcsherry/columnar/pull/78), [#79](https://github.com/frankmcsherry/columnar/pull/79))
+- `FromBytes::validate` implementations for `Fixeds`, `Strides`, `Empties`, `Bools`, and `Discriminant`; `Stash::try_from_bytes` as the validated constructor ([#85](https://github.com/frankmcsherry/columnar/pull/85))
+- `Discriminant::is_heterogenous()` and homogeneous enum optimization: enum containers now skip per-element discriminant and offset metadata when all elements share the same variant
+- `no_std` support (with `alloc`) ([#94](https://github.com/frankmcsherry/columnar/pull/94))
+- `BorrowedOf` type alias, mirroring the existing `ContainerOf` ([#81](https://github.com/frankmcsherry/columnar/pull/81))
+- `Strides::pop` for unsealing lists at merge boundaries ([#98](https://github.com/frankmcsherry/columnar/pull/98))
+- `Strings::get_str()` convenience method for when you want `&str` with explicit validation ([#88](https://github.com/frankmcsherry/columnar/pull/88))
+- Trait implementations for `Repeats` and `Lookback` types ([#91](https://github.com/frankmcsherry/columnar/pull/91))
+- Additional `Bytes`/`Stash` properties and methods ([#97](https://github.com/frankmcsherry/columnar/pull/97))
+
+### Changed
+
+- `Strings::Ref` changed from `&str` to `&[u8]` — UTF-8 validation at index time caused up to 17x slowdown and blocked compiler optimizations ([#86](https://github.com/frankmcsherry/columnar/pull/86))
+- `element_sizes` now returns `Result`, defaulting to `Err` for unimplemented types — previously missing implementations silently accepted any byte length ([#80](https://github.com/frankmcsherry/columnar/pull/80))
+- Decoding pipeline preserves `u64` alignment throughout, making field casts infallible and enabling dead-code elimination of unused fields ([#78](https://github.com/frankmcsherry/columnar/pull/78))
+- Refreshed `Trees` container and its JSON example to current conventions ([#92](https://github.com/frankmcsherry/columnar/pull/92), [#93](https://github.com/frankmcsherry/columnar/pull/93))
+- Removed vestigial `const N: usize` generic from `Repeats` ([#91](https://github.com/frankmcsherry/columnar/pull/91))
+
+### Removed
+
+- `HeapSize` trait, replaced by `AsBytes` which exposes actual byte slices rather than capacity metrics ([#87](https://github.com/frankmcsherry/columnar/pull/87))
+- `EncodeDecode` trait and `Sequence` encoding format, superseded by the `indexed` module ([#78](https://github.com/frankmcsherry/columnar/pull/78))
+- `from_u64s`, `decode_u64s`, and `from_byte_slices` methods, replaced by `DecodedStore`/`from_store` ([#79](https://github.com/frankmcsherry/columnar/pull/79))
+- `inspect` module
 
 ## [0.11.1](https://github.com/frankmcsherry/columnar/compare/columnar-v0.11.0...columnar-v0.11.1) - 2026-01-17
 
