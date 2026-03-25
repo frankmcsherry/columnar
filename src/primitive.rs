@@ -708,6 +708,15 @@ pub mod offsets {
                     self.bounds.push(item);
                 }
             }
+            /// Removes the last element, if non-empty.
+            ///
+            /// If empty, will trip a debug assert, but wrap in release.
+            #[inline(always)]
+            pub fn pop(&mut self) {
+                debug_assert!(self.len() > 0);
+                if self.bounds.is_empty() { self.head[1] -= 1; }
+                else { self.bounds.pop(); }
+            }
             #[inline(always)]
             pub fn clear(&mut self) {
                 self.head = [0, 0];
