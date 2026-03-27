@@ -74,7 +74,6 @@ pub mod indexed {
     where A : AsBytes<'a>,
     {
         // Read 1: Number of offsets we will record, equal to the number of slices plus one.
-        // TODO: right-size `store` before first call to `push`.
         let offsets = 1 + iter.as_bytes().count();
         let offsets_end: u64 = TryInto::<u64>::try_into((offsets) * core::mem::size_of::<u64>()).unwrap();
         store.push(offsets_end);
@@ -90,25 +89,22 @@ pub mod indexed {
         }
         // Read 3: Append each byte slice, with padding to align starts to `u64`.
         for (_align, bytes) in iter.as_bytes() {
-            let whole_words = 8 * (bytes.len() / 8);
-            // We want to extend `store` by `bytes`, but `bytes` may not be `u64` aligned.
-            // In the latter case, init `store` and cast and copy onto it as a byte slice.
-            if let Ok(words) = bytemuck::try_cast_slice(&bytes[.. whole_words]) {
+            // Split into the u64-aligned prefix and a <8 byte remainder.
+            let (aligned, remaining) = bytes.split_at(bytes.len() & !7);
+            // We want to extend `store` by `aligned`, but the bytes may not be `u64` aligned.
+            if let Ok(words) = bytemuck::try_cast_slice(aligned) {
                 store.extend_from_slice(words);
             }
             else {
-                let store_len = store.len();
-                store.resize(store_len + whole_words/8, 0);
-                let slice = bytemuck::try_cast_slice_mut(&mut store[store_len..]).expect("&[u64] should convert to &[u8]");
-                slice.copy_from_slice(&bytes[.. whole_words]);
+                // Misaligned source: copy word-by-word via read_unaligned.
+                store.extend(aligned.chunks_exact(8).map(|chunk| {
+                    u64::from_ne_bytes(chunk.try_into().unwrap())
+                }));
             }
-            let remaining_bytes = &bytes[whole_words..];
-            if !remaining_bytes.is_empty() {
+            if !remaining.is_empty() {
                 let mut remainder = 0u64;
-                let transmute: &mut [u8] = bytemuck::try_cast_slice_mut(core::slice::from_mut(&mut remainder)).expect("&[u64] should convert to &[u8]");
-                for (i, byte) in remaining_bytes.iter().enumerate() {
-                    transmute[i] = *byte;
-                }
+                let dest: &mut [u8; 8] = bytemuck::cast_mut(&mut remainder);
+                dest[..remaining.len()].copy_from_slice(remaining);
                 store.push(remainder);
             }
         }

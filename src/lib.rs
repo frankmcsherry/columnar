@@ -771,7 +771,7 @@ pub mod chain_mod {
             None
         }
 
-        #[inline]
+        #[inline(always)]
         fn fold<Acc, F>(self, mut acc: Acc, mut f: F) -> Acc
         where
             F: FnMut(Acc, Self::Item) -> Acc,
