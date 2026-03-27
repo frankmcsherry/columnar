@@ -70,6 +70,17 @@ pub mod indexed {
     ///
     /// The offsets are zero-based, rather than based on `store.len()`.
     /// If you call the method with a non-empty `store` be careful decoding.
+
+    /// Iterate, calling `f` for each element via dynamic dispatch.
+    ///
+    /// This prevents the closure body from being monomorphized at every leaf
+    /// of the inlined iterator tree, keeping code size proportional to the
+    /// iterator depth (O(log N)) rather than the number of leaves (O(N)).
+    #[inline(always)]
+    fn for_each_dyn<I: Iterator>(iter: I, f: &mut dyn FnMut(I::Item)) {
+        iter.for_each(|item| f(item));
+    }
+
     pub fn encode<'a, A>(store: &mut Vec<u64>, iter: &A)
     where A : AsBytes<'a>,
     {
@@ -79,16 +90,15 @@ pub mod indexed {
         store.push(offsets_end);
         // Read 2: Establish each of the offsets based on lengths of byte slices.
         let mut position_bytes = offsets_end;
-        for (align, bytes) in iter.as_bytes() {
+        for_each_dyn(iter.as_bytes(), &mut |(align, bytes): (u64, &[u8])| {
             assert!(align <= 8);
-            // Write length in bytes, but round up to words before updating `position_bytes`.
-            let to_push: u64 = position_bytes + TryInto::<u64>::try_into(bytes.len()).unwrap();
-            store.push(to_push);
-            let round_len: u64 = ((bytes.len() + 7) & !7).try_into().unwrap();
-            position_bytes += round_len;
-        }
+            position_bytes += TryInto::<u64>::try_into(bytes.len()).unwrap();
+            store.push(position_bytes);
+            // Round up to u64 alignment for the next slice's start.
+            position_bytes = (position_bytes + 7) & !7;
+        });
         // Read 3: Append each byte slice, with padding to align starts to `u64`.
-        for (_align, bytes) in iter.as_bytes() {
+        for_each_dyn(iter.as_bytes(), &mut |(_align, bytes): (u64, &[u8])| {
             // Split into the u64-aligned prefix and a <8 byte remainder.
             let (aligned, remaining) = bytes.split_at(bytes.len() & !7);
             // We want to extend `store` by `aligned`, but the bytes may not be `u64` aligned.
@@ -107,7 +117,7 @@ pub mod indexed {
                 dest[..remaining.len()].copy_from_slice(remaining);
                 store.push(remainder);
             }
-        }
+        });
     }
 
     pub fn write<'a, A, W>(writer: &mut W, iter: &A) -> Result<(), W::Error>
