@@ -4,6 +4,23 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, Attribute, DeriveInput};
 
+/// Build a balanced binary tree of `::columnar::chain(left, right)` calls.
+///
+/// This produces O(log N) nesting depth instead of O(N), avoiding the compiler's
+/// recursion limit on enums/structs with many fields.
+fn balanced_chain(iters: &[proc_macro2::TokenStream]) -> proc_macro2::TokenStream {
+    match iters {
+        [] => quote! { None.into_iter() },
+        [one] => one.clone(),
+        _ => {
+            let mid = iters.len() / 2;
+            let left = balanced_chain(&iters[..mid]);
+            let right = balanced_chain(&iters[mid..]);
+            quote! { ::columnar::chain(#left, #right) }
+        }
+    }
+}
+
 #[proc_macro_derive(Columnar, attributes(columnar))]
 pub fn derive(input: TokenStream) -> TokenStream {
 
@@ -296,14 +313,15 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         let ty_gen = quote! { < #(#container_types),* > };
         let where_clause = quote! { where #(#container_types: ::columnar::AsBytes<'a>),* };
 
+        let field_iters: Vec<_> = names.iter().map(|n| quote! { self.#n.as_bytes() }).collect();
+        let chain_expr = balanced_chain(&field_iters);
+
         quote! {
             impl #impl_gen ::columnar::AsBytes<'a> for #c_ident #ty_gen #where_clause {
                 // type Borrowed<'columnar> = #c_ident < #(<#container_types as ::columnar::AsBytes>::Borrowed<'columnar>,)*>;
                 #[inline(always)]
                 fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                    let iter = None.into_iter();
-                    #( let iter = ::columnar::chain(iter, self.#names.as_bytes()); )*
-                    iter
+                    #chain_expr
                 }
             }
         }
@@ -888,14 +906,15 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         let ty_gen = quote! { < #(#container_types,)* CVar, COff > };
         let where_clause = quote! { where #(#container_types: ::columnar::AsBytes<'a>,)* ::columnar::Discriminant<CVar, COff>: ::columnar::AsBytes<'a> };
 
+        let mut field_iters: Vec<_> = names.iter().map(|n| quote! { self.#n.as_bytes() }).collect();
+        field_iters.push(quote! { self.indexes.as_bytes() });
+        let chain_expr = balanced_chain(&field_iters);
+
         quote! {
             impl #impl_gen ::columnar::AsBytes<'a> for #c_ident #ty_gen #where_clause {
                 #[inline(always)]
                 fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                    let iter = None.into_iter();
-                    #( let iter = ::columnar::chain(iter,self.#names.as_bytes()); )*
-                    let iter = ::columnar::chain(iter, self.indexes.as_bytes());
-                    iter
+                    #chain_expr
                 }
             }
         }
