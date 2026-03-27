@@ -96,7 +96,7 @@ pub mod indexed {
                 store.extend_from_slice(words);
             }
             else {
-                // Misaligned source: copy word-by-word via read_unaligned.
+                // Misaligned source: copy word-by-word.
                 store.extend(aligned.chunks_exact(8).map(|chunk| {
                     u64::from_ne_bytes(chunk.try_into().unwrap())
                 }));
