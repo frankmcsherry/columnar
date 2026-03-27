@@ -772,6 +772,25 @@ pub mod chain_mod {
         }
 
         #[inline(always)]
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            let (a_lo, a_hi) = match &self.a { Some(a) => a.size_hint(), None => (0, Some(0)) };
+            let (b_lo, b_hi) = match &self.b { Some(b) => b.size_hint(), None => (0, Some(0)) };
+            let lo = a_lo.saturating_add(b_lo);
+            let hi = match (a_hi, b_hi) {
+                (Some(a), Some(b)) => a.checked_add(b),
+                _ => None,
+            };
+            (lo, hi)
+        }
+
+        #[inline(always)]
+        fn count(self) -> usize {
+            let a = match self.a { Some(a) => a.count(), None => 0 };
+            let b = match self.b { Some(b) => b.count(), None => 0 };
+            a + b
+        }
+
+        #[inline(always)]
         fn fold<Acc, F>(self, mut acc: Acc, mut f: F) -> Acc
         where
             F: FnMut(Acc, Self::Item) -> Acc,
@@ -815,6 +834,20 @@ pub mod chain_mod {
             } else {
                 None
             }
+        }
+
+        #[inline(always)]
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            let (a_lo, a_hi) = match &self.a { Some(a) => a.size_hint(), None => (0, Some(0)) };
+            let b = if self.b.is_some() { 1 } else { 0 };
+            (a_lo + b, a_hi.map(|h| h + b))
+        }
+
+        #[inline(always)]
+        fn count(self) -> usize {
+            let a = match self.a { Some(a) => a.count(), None => 0 };
+            let b = if self.b.is_some() { 1 } else { 0 };
+            a + b
         }
     }
 
