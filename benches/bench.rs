@@ -168,4 +168,31 @@ benchmark_group!(
     vec_u_s_copy,
     vec_u_vn_s_copy,
 );
-benchmark_main!(clone, copy, extend);
+// Enum with many same-type variants to exercise shared storage.
+#[derive(columnar::Columnar, Clone, PartialEq, Eq)]
+enum Multi {
+    V0(u64), V1(u64), V2(u64), V3(u64), V4(u64), V5(u64), V6(u64), V7(u64),
+    V8(u64), V9(u64), V10(u64), V11(u64), V12(u64), V13(u64), V14(u64), V15(u64),
+}
+
+fn multi_copy(bencher: &mut Bencher) {
+    let items: Vec<Multi> = (0..1024u64).map(|i| match i % 16 {
+        0 => Multi::V0(i), 1 => Multi::V1(i), 2 => Multi::V2(i), 3 => Multi::V3(i),
+        4 => Multi::V4(i), 5 => Multi::V5(i), 6 => Multi::V6(i), 7 => Multi::V7(i),
+        8 => Multi::V8(i), 9 => Multi::V9(i), 10 => Multi::V10(i), 11 => Multi::V11(i),
+        12 => Multi::V12(i), 13 => Multi::V13(i), 14 => Multi::V14(i), _ => Multi::V15(i),
+    }).collect();
+    _bench_copy(bencher, items);
+}
+fn multi_extend(bencher: &mut Bencher) {
+    let items: Vec<Multi> = (0..1024u64).map(|i| match i % 16 {
+        0 => Multi::V0(i), 1 => Multi::V1(i), 2 => Multi::V2(i), 3 => Multi::V3(i),
+        4 => Multi::V4(i), 5 => Multi::V5(i), 6 => Multi::V6(i), 7 => Multi::V7(i),
+        8 => Multi::V8(i), 9 => Multi::V9(i), 10 => Multi::V10(i), 11 => Multi::V11(i),
+        12 => Multi::V12(i), 13 => Multi::V13(i), 14 => Multi::V14(i), _ => Multi::V15(i),
+    }).collect();
+    _bench_extend(bencher, items);
+}
+
+benchmark_group!(multi, multi_copy, multi_extend);
+benchmark_main!(clone, copy, extend, multi);
