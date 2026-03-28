@@ -295,13 +295,13 @@ fn bench_derived_enum(n: usize, iters: u64) {
     // Project to the Click.0 column (all x values for Click variants).
     let di2 = bench_ns(iters, || {
         let borrowed: BorrowedOf<'_, Event> = decode(&store);
-        let x_col: &[u64] = borrowed.Click.0;
+        let x_col: &[u64] = borrowed.group_0.0;
         black_box(Index::get(&x_col, 0));
     });
 
     let borrowed: BorrowedOf<'_, Event> = decode(&store);
     let io2 = bench_ns(iters, || {
-        let x_col: &[u64] = borrowed.Click.0;
+        let x_col: &[u64] = borrowed.group_0.0;
         black_box(Index::get(&x_col, 0));
     });
 
