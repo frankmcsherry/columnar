@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1](https://github.com/frankmcsherry/columnar/compare/columnar-v0.12.0...columnar-v0.12.1) - 2026-03-29
+
+### Other
+
+- Correct Stash::length_in_bytes
+
 ## [0.12.0](https://github.com/frankmcsherry/columnar/compare/columnar-v0.11.1...columnar-v0.12.0) - 2026-03-25
 
 ### Added
