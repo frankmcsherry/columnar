@@ -511,14 +511,9 @@ pub mod stash {
             }
         }
         /// The number of bytes needed to write the contents using the [`indexed`] encoder.
-        pub fn length_in_bytes(&self) -> usize {
-            match self {
-                // We'll need one u64 for the length, then the length rounded up to a multiple of 8.
-                Stash::Typed(t) => crate::bytes::indexed::length_in_bytes(&t.borrow()),
-                Stash::Bytes(b) => b.len(),
-                Stash::Align(a) => 8 * a.len(),
-            }
-        }
+        ///
+        /// This may be less than the length of the contained bytes or words, if they overshoot.
+        pub fn length_in_bytes(&self) -> usize { crate::bytes::indexed::length_in_bytes(&self.borrow()) }
         /// Write the contents into a [`WriteBytes`](crate::bytes::WriteBytes) destination.
         pub fn write_bytes<W: crate::bytes::WriteBytes>(&self, writer: &mut W) -> Result<(), W::Error> {
             match self {
