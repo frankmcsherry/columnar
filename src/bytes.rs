@@ -52,8 +52,8 @@ pub mod indexed {
     use crate::AsBytes;
 
     /// Encoded length in number of `u64` words required.
-    pub fn length_in_words<'a, A>(bytes: &A) -> usize where A : AsBytes<'a> {
-        1 + bytes.as_bytes().map(|(_align, bytes)| 1 + bytes.len().div_ceil(8)).sum::<usize>()
+    pub fn length_in_words<'a, A>(item: &A) -> usize where A : AsBytes<'a> {
+        1 + (0..A::SLICE_COUNT).map(|i| { let (_, bytes) = item.get_byte_slice(i); 1 + bytes.len().div_ceil(8) }).sum::<usize>()
     }
     /// Encoded length in number of `u8` bytes required.
     pub fn length_in_bytes<'a, A>(bytes: &A) -> usize where A : AsBytes<'a> { 8 * length_in_words(bytes) }
@@ -70,90 +70,11 @@ pub mod indexed {
     ///
     /// The offsets are zero-based, rather than based on `store.len()`.
     /// If you call the method with a non-empty `store` be careful decoding.
-    pub fn encode<'a, A>(store: &mut Vec<u64>, iter: &A)
-    where A : AsBytes<'a>,
-    {
-        // Read 1: Number of offsets we will record, equal to the number of slices plus one.
-        // TODO: right-size `store` before first call to `push`.
-        let offsets = 1 + iter.as_bytes().count();
-        let offsets_end: u64 = TryInto::<u64>::try_into((offsets) * core::mem::size_of::<u64>()).unwrap();
-        store.push(offsets_end);
-        // Read 2: Establish each of the offsets based on lengths of byte slices.
-        let mut position_bytes = offsets_end;
-        for (align, bytes) in iter.as_bytes() {
-            assert!(align <= 8);
-            // Write length in bytes, but round up to words before updating `position_bytes`.
-            let to_push: u64 = position_bytes + TryInto::<u64>::try_into(bytes.len()).unwrap();
-            store.push(to_push);
-            let round_len: u64 = ((bytes.len() + 7) & !7).try_into().unwrap();
-            position_bytes += round_len;
-        }
-        // Read 3: Append each byte slice, with padding to align starts to `u64`.
-        for (_align, bytes) in iter.as_bytes() {
-            let whole_words = 8 * (bytes.len() / 8);
-            // We want to extend `store` by `bytes`, but `bytes` may not be `u64` aligned.
-            // In the latter case, init `store` and cast and copy onto it as a byte slice.
-            if let Ok(words) = bytemuck::try_cast_slice(&bytes[.. whole_words]) {
-                store.extend_from_slice(words);
-            }
-            else {
-                let store_len = store.len();
-                store.resize(store_len + whole_words/8, 0);
-                let slice = bytemuck::try_cast_slice_mut(&mut store[store_len..]).expect("&[u64] should convert to &[u8]");
-                slice.copy_from_slice(&bytes[.. whole_words]);
-            }
-            let remaining_bytes = &bytes[whole_words..];
-            if !remaining_bytes.is_empty() {
-                let mut remainder = 0u64;
-                let transmute: &mut [u8] = bytemuck::try_cast_slice_mut(core::slice::from_mut(&mut remainder)).expect("&[u64] should convert to &[u8]");
-                for (i, byte) in remaining_bytes.iter().enumerate() {
-                    transmute[i] = *byte;
-                }
-                store.push(remainder);
-            }
-        }
-    }
-
-    pub fn write<'a, A, W>(writer: &mut W, iter: &A) -> Result<(), W::Error>
-    where
-        A: AsBytes<'a>,
-        W: super::WriteBytes,
-    {
-        // Read 1: Number of offsets we will record, equal to the number of slices plus one.
-        let offsets = 1 + iter.as_bytes().count();
-        let offsets_end: u64 = TryInto::<u64>::try_into((offsets) * core::mem::size_of::<u64>()).unwrap();
-        writer.write_all(bytemuck::cast_slice(core::slice::from_ref(&offsets_end)))?;
-        // Read 2: Establish each of the offsets based on lengths of byte slices.
-        let mut position_bytes = offsets_end;
-        for (align, bytes) in iter.as_bytes() {
-            assert!(align <= 8);
-            // Write length in bytes, but round up to words before updating `position_bytes`.
-            let to_push: u64 = position_bytes + TryInto::<u64>::try_into(bytes.len()).unwrap();
-            writer.write_all(bytemuck::cast_slice(core::slice::from_ref(&to_push)))?;
-            let round_len: u64 = ((bytes.len() + 7) & !7).try_into().unwrap();
-            position_bytes += round_len;
-        }
-        // Read 3: Append each byte slice, with padding to align starts to `u64`.
-        for (_align, bytes) in iter.as_bytes() {
-            writer.write_all(bytes)?;
-            let padding = ((bytes.len() + 7) & !7) - bytes.len();
-            if padding > 0 {
-                writer.write_all(&[0u8;8][..padding])?;
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Encodes `item` into `u64` aligned words, using random access via `get_byte_slice`.
-    ///
-    /// This avoids building a deeply-nested iterator type. Instead, the caller
-    /// iterates `0..SLICE_COUNT` and each call dispatches through compile-time
-    /// constant branch chains. LLVM can unroll and constant-fold these.
-    pub fn encode_get<'a, A>(store: &mut Vec<u64>, item: &A)
+    pub fn encode<'a, A>(store: &mut Vec<u64>, item: &A)
     where A : AsBytes<'a>,
     {
         let count = A::SLICE_COUNT;
+        // Pass 1: Write the first offset (end of offset table), then each slice's end position.
         let offsets_end: u64 = TryInto::<u64>::try_into((1 + count) * core::mem::size_of::<u64>()).unwrap();
         store.push(offsets_end);
         let mut position_bytes = offsets_end;
@@ -165,6 +86,7 @@ pub mod indexed {
             let round_len: u64 = ((bytes.len() + 7) & !7).try_into().unwrap();
             position_bytes += round_len;
         }
+        // Pass 2: Append each byte slice, with padding to align starts to `u64`.
         for i in 0..count {
             let (_align, bytes) = item.get_byte_slice(i);
             let whole_words = 8 * (bytes.len() / 8);
@@ -187,6 +109,37 @@ pub mod indexed {
                 store.push(remainder);
             }
         }
+    }
+
+    pub fn write<'a, A, W>(writer: &mut W, item: &A) -> Result<(), W::Error>
+    where
+        A: AsBytes<'a>,
+        W: super::WriteBytes,
+    {
+        let count = A::SLICE_COUNT;
+        // Pass 1: Write the first offset (end of offset table), then each slice's end position.
+        let offsets_end: u64 = TryInto::<u64>::try_into((1 + count) * core::mem::size_of::<u64>()).unwrap();
+        writer.write_all(bytemuck::cast_slice(core::slice::from_ref(&offsets_end)))?;
+        let mut position_bytes = offsets_end;
+        for i in 0..count {
+            let (align, bytes) = item.get_byte_slice(i);
+            assert!(align <= 8);
+            let to_push: u64 = position_bytes + TryInto::<u64>::try_into(bytes.len()).unwrap();
+            writer.write_all(bytemuck::cast_slice(core::slice::from_ref(&to_push)))?;
+            let round_len: u64 = ((bytes.len() + 7) & !7).try_into().unwrap();
+            position_bytes += round_len;
+        }
+        // Pass 2: Append each byte slice, with padding to align starts to `u64`.
+        for i in 0..count {
+            let (_align, bytes) = item.get_byte_slice(i);
+            writer.write_all(bytes)?;
+            let padding = ((bytes.len() + 7) & !7) - bytes.len();
+            if padding > 0 {
+                writer.write_all(&[0u8;8][..padding])?;
+            }
+        }
+
+        Ok(())
     }
 
     /// Decodes an encoded sequence of byte slices. Each result will be `u64` aligned.
@@ -388,45 +341,6 @@ pub mod indexed {
             assert!(super::validate::<B>(&store).is_ok());
         }
 
-        /// Asserts that `encode_get` produces identical output to `encode`.
-        fn assert_encode_equiv<'a, AB: AsBytes<'a>>(item: &AB) {
-            let mut store_iter = Vec::new();
-            encode(&mut store_iter, item);
-
-            let mut store_get = Vec::new();
-            super::encode_get(&mut store_get, item);
-            assert_eq!(store_iter, store_get, "encode_get differs from encode");
-        }
-
-        #[test]
-        fn encode_methods_agree_result() {
-            let mut column: ContainerOf<Result<u64, String>> = Default::default();
-            for i in 0..100u64 {
-                column.push(&Ok::<u64, String>(i));
-                column.push(&Err::<u64, String>(format!("{:?}", i)));
-            }
-            assert_encode_equiv(&column.borrow());
-        }
-
-        #[test]
-        fn encode_methods_agree_tuple() {
-            let mut column: ContainerOf<(u64, String, Vec<u32>)> = Default::default();
-            for i in 0..50u64 {
-                column.push(&(i, format!("hello {i}"), vec![i as u32; i as usize]));
-            }
-            assert_encode_equiv(&column.borrow());
-        }
-
-        #[test]
-        fn encode_methods_agree_nested() {
-            let mut column: ContainerOf<(u64, Vec<(u32, u16)>, Option<String>)> = Default::default();
-            for i in 0..50u64 {
-                let v: Vec<(u32, u16)> = (0..i as u32).map(|j| (j, j as u16)).collect();
-                let s = if i % 3 == 0 { Some(format!("s{i}")) } else { None };
-                column.push(&(i, v, s));
-            }
-            assert_encode_equiv(&column.borrow());
-        }
     }
 }
 
