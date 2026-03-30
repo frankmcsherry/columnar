@@ -61,6 +61,7 @@ macro_rules! tuple_impl {
             const SLICE_COUNT: usize = 0 $(+ $name::SLICE_COUNT)*;
             #[inline]
             fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+                debug_assert!(index < Self::SLICE_COUNT);
                 let ($($name,)*) = self;
                 let mut _offset = 0;
                 $(

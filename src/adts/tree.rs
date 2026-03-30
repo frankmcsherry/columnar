@@ -192,6 +192,7 @@ impl<'a, TC: crate::AsBytes<'a>, BC: crate::AsBytes<'a>> crate::AsBytes<'a> for 
     const SLICE_COUNT: usize = BC::SLICE_COUNT + BC::SLICE_COUNT + TC::SLICE_COUNT;
     #[inline]
     fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+        debug_assert!(index < Self::SLICE_COUNT);
         if index < BC::SLICE_COUNT {
             self.groups.get_byte_slice(index)
         } else if index < BC::SLICE_COUNT + BC::SLICE_COUNT {

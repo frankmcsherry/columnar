@@ -52,6 +52,7 @@ pub mod rank_select {
         const SLICE_COUNT: usize = CC::SLICE_COUNT + <Bools<VC, &'a [u64]> as crate::AsBytes<'a>>::SLICE_COUNT;
         #[inline]
         fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+            debug_assert!(index < Self::SLICE_COUNT);
             if index < CC::SLICE_COUNT {
                 self.counts.get_byte_slice(index)
             } else {
@@ -263,6 +264,7 @@ pub mod result {
         const SLICE_COUNT: usize = <RankSelect<CC, VC, &'a [u64]> as crate::AsBytes<'a>>::SLICE_COUNT + SC::SLICE_COUNT + TC::SLICE_COUNT;
         #[inline]
         fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+            debug_assert!(index < Self::SLICE_COUNT);
             let idx_count = <RankSelect<CC, VC, &'a [u64]> as crate::AsBytes<'a>>::SLICE_COUNT;
             if index < idx_count {
                 self.indexes.get_byte_slice(index)
@@ -529,6 +531,7 @@ pub mod option {
         const SLICE_COUNT: usize = <RankSelect<CC, VC, &'a [u64]> as crate::AsBytes<'a>>::SLICE_COUNT + TC::SLICE_COUNT;
         #[inline]
         fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+            debug_assert!(index < Self::SLICE_COUNT);
             let idx_count = <RankSelect<CC, VC, &'a [u64]> as crate::AsBytes<'a>>::SLICE_COUNT;
             if index < idx_count {
                 self.indexes.get_byte_slice(index)
@@ -833,6 +836,7 @@ pub mod discriminant {
         const SLICE_COUNT: usize = <&'a [u8] as crate::AsBytes<'a>>::SLICE_COUNT + <&'a [u64] as crate::AsBytes<'a>>::SLICE_COUNT;
         #[inline]
         fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+            debug_assert!(index < Self::SLICE_COUNT);
             if index < <&'a [u8] as crate::AsBytes<'a>>::SLICE_COUNT {
                 self.variant.get_byte_slice(index)
             } else {

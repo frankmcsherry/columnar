@@ -301,6 +301,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
                 const SLICE_COUNT: usize = 0 #(+ <#container_types as ::columnar::AsBytes<'a>>::SLICE_COUNT)*;
                 #[inline]
                 fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+                    debug_assert!(index < Self::SLICE_COUNT);
                     let mut _offset = 0;
                     #(
                         if index < _offset + <#container_types as ::columnar::AsBytes<'a>>::SLICE_COUNT {
@@ -508,7 +509,8 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
         impl<'a> ::columnar::AsBytes<'a> for #c_ident <&'a u64> {
             const SLICE_COUNT: usize = 1;
             #[inline]
-            fn get_byte_slice(&self, _index: usize) -> (u64, &'a [u8]) {
+            fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+                debug_assert!(index < Self::SLICE_COUNT);
                 (8, ::columnar::bytemuck::cast_slice(::core::slice::from_ref(self.count)))
             }
         }
@@ -898,6 +900,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                 const SLICE_COUNT: usize = 0 #(+ <#container_types as ::columnar::AsBytes<'a>>::SLICE_COUNT)* + <::columnar::Discriminant<CVar, COff> as ::columnar::AsBytes<'a>>::SLICE_COUNT;
                 #[inline]
                 fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+                    debug_assert!(index < Self::SLICE_COUNT);
                     let mut _offset = 0;
                     #(
                         if index < _offset + <#container_types as ::columnar::AsBytes<'a>>::SLICE_COUNT {
@@ -1266,6 +1269,7 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
             const SLICE_COUNT: usize = CVar::SLICE_COUNT;
             #[inline]
             fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+                debug_assert!(index < Self::SLICE_COUNT);
                 self.variant.get_byte_slice(index)
             }
         }

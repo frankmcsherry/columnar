@@ -16,7 +16,8 @@ macro_rules! implement_columnable {
         impl<'a> crate::AsBytes<'a> for &'a [$index_type] {
             const SLICE_COUNT: usize = 1;
             #[inline]
-            fn get_byte_slice(&self, _index: usize) -> (u64, &'a [u8]) {
+            fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+                debug_assert!(index < Self::SLICE_COUNT);
                 (core::mem::align_of::<$index_type>() as u64, bytemuck::cast_slice(&self[..]))
             }
         }
@@ -44,7 +45,8 @@ macro_rules! implement_columnable {
         impl<'a, const N: usize> crate::AsBytes<'a> for &'a [[$index_type; N]] {
             const SLICE_COUNT: usize = 1;
             #[inline]
-            fn get_byte_slice(&self, _index: usize) -> (u64, &'a [u8]) {
+            fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+                debug_assert!(index < Self::SLICE_COUNT);
                 (core::mem::align_of::<$index_type>() as u64, bytemuck::cast_slice(&self[..]))
             }
         }
@@ -557,7 +559,8 @@ pub mod offsets {
         impl<'a, const K: u64> crate::AsBytes<'a> for Fixeds<K, &'a u64> {
             const SLICE_COUNT: usize = 1;
             #[inline]
-            fn get_byte_slice(&self, _index: usize) -> (u64, &'a [u8]) {
+            fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+                debug_assert!(index < Self::SLICE_COUNT);
                 (8, bytemuck::cast_slice(core::slice::from_ref(self.count)))
             }
         }
@@ -665,6 +668,7 @@ pub mod offsets {
             const SLICE_COUNT: usize = 1 + BC::SLICE_COUNT;
             #[inline]
             fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+                debug_assert!(index < Self::SLICE_COUNT);
                 if index < 1 {
                     (8u64, bytemuck::cast_slice(self.head))
                 } else {
@@ -879,7 +883,8 @@ mod empty {
     impl<'a> crate::AsBytes<'a> for crate::primitive::Empties<&'a u64> {
         const SLICE_COUNT: usize = 1;
         #[inline]
-        fn get_byte_slice(&self, _index: usize) -> (u64, &'a [u8]) {
+        fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+            debug_assert!(index < Self::SLICE_COUNT);
             (8, bytemuck::cast_slice(core::slice::from_ref(self.count)))
         }
     }
@@ -969,6 +974,7 @@ mod boolean {
         const SLICE_COUNT: usize = VC::SLICE_COUNT + 1;
         #[inline]
         fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+            debug_assert!(index < Self::SLICE_COUNT);
             if index < VC::SLICE_COUNT {
                 self.values.get_byte_slice(index)
             } else {
@@ -1125,6 +1131,7 @@ mod duration {
         const SLICE_COUNT: usize = SC::SLICE_COUNT + NC::SLICE_COUNT;
         #[inline]
         fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+            debug_assert!(index < Self::SLICE_COUNT);
             if index < SC::SLICE_COUNT {
                 self.seconds.get_byte_slice(index)
             } else {
