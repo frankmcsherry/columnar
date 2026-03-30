@@ -58,12 +58,19 @@ macro_rules! tuple_impl {
 
         #[allow(non_snake_case)]
         impl<'a, $($name: crate::AsBytes<'a>),*> crate::AsBytes<'a> for ($($name,)*) {
-            #[inline(always)]
-            fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
+            const SLICE_COUNT: usize = 0 $(+ $name::SLICE_COUNT)*;
+            #[inline]
+            fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+                debug_assert!(index < Self::SLICE_COUNT);
                 let ($($name,)*) = self;
-                let iter = None.into_iter();
-                $( let iter = crate::chain(iter, $name.as_bytes()); )*
-                iter
+                let mut _offset = 0;
+                $(
+                    if index < _offset + $name::SLICE_COUNT {
+                        return $name.get_byte_slice(index - _offset);
+                    }
+                    _offset += $name::SLICE_COUNT;
+                )*
+                panic!("get_byte_slice: index out of bounds")
             }
         }
         impl<'a, $($name: crate::FromBytes<'a>),*> crate::FromBytes<'a> for ($($name,)*) {

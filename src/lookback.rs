@@ -111,9 +111,10 @@ impl<TC: Clear> Clear for Repeats<TC> {
 }
 
 impl<'a, TC: crate::AsBytes<'a>, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for Repeats<TC, CC, VC, &'a [u64]> {
-    #[inline(always)]
-    fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-        self.inner.as_bytes()
+    const SLICE_COUNT: usize = <Options<TC, CC, VC, &'a [u64]> as crate::AsBytes<'a>>::SLICE_COUNT;
+    #[inline]
+    fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+        self.inner.get_byte_slice(index)
     }
 }
 
@@ -227,9 +228,10 @@ impl<TC: Clear, const N: u8> Clear for Lookbacks<TC, Vec<u8>, Vec<u64>, Vec<u64>
 }
 
 impl<'a, TC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>, CC: crate::AsBytes<'a>, RC: crate::AsBytes<'a>> crate::AsBytes<'a> for Lookbacks<TC, VC, CC, RC, &'a [u64]> {
-    #[inline(always)]
-    fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-        self.inner.as_bytes()
+    const SLICE_COUNT: usize = <Results<TC, VC, CC, RC, &'a [u64]> as crate::AsBytes<'a>>::SLICE_COUNT;
+    #[inline]
+    fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+        self.inner.get_byte_slice(index)
     }
 }
 

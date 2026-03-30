@@ -120,9 +120,15 @@ impl<BC: crate::common::PushIndexAs<u64>, TC: Container> Container for Vecs<TC, 
 }
 
 impl<'a, TC: crate::AsBytes<'a>, BC: crate::AsBytes<'a>> crate::AsBytes<'a> for Vecs<TC, BC> {
-    #[inline(always)]
-    fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-        crate::chain(self.bounds.as_bytes(), self.values.as_bytes())
+    const SLICE_COUNT: usize = BC::SLICE_COUNT + TC::SLICE_COUNT;
+    #[inline]
+    fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+        debug_assert!(index < Self::SLICE_COUNT);
+        if index < BC::SLICE_COUNT {
+            self.bounds.get_byte_slice(index)
+        } else {
+            self.values.get_byte_slice(index - BC::SLICE_COUNT)
+        }
     }
 }
 impl<'a, TC: crate::FromBytes<'a>, BC: crate::FromBytes<'a>> crate::FromBytes<'a> for Vecs<TC, BC> {

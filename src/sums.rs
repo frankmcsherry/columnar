@@ -49,9 +49,15 @@ pub mod rank_select {
     }
 
     impl<'a, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for RankSelect<CC, VC, &'a [u64]> {
-        #[inline(always)]
-        fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-            crate::chain(self.counts.as_bytes(), self.values.as_bytes())
+        const SLICE_COUNT: usize = CC::SLICE_COUNT + <Bools<VC, &'a [u64]> as crate::AsBytes<'a>>::SLICE_COUNT;
+        #[inline]
+        fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+            debug_assert!(index < Self::SLICE_COUNT);
+            if index < CC::SLICE_COUNT {
+                self.counts.get_byte_slice(index)
+            } else {
+                self.values.get_byte_slice(index - CC::SLICE_COUNT)
+            }
         }
     }
     impl<'a, CC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for RankSelect<CC, VC, &'a [u64]> {
@@ -255,11 +261,18 @@ pub mod result {
     }
 
     impl<'a, SC: crate::AsBytes<'a>, TC: crate::AsBytes<'a>, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for Results<SC, TC, CC, VC, &'a [u64]> {
-        #[inline(always)]
-        fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-            let iter = self.indexes.as_bytes();
-            let iter = crate::chain(iter, self.oks.as_bytes());
-            crate::chain(iter, self.errs.as_bytes())
+        const SLICE_COUNT: usize = <RankSelect<CC, VC, &'a [u64]> as crate::AsBytes<'a>>::SLICE_COUNT + SC::SLICE_COUNT + TC::SLICE_COUNT;
+        #[inline]
+        fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+            debug_assert!(index < Self::SLICE_COUNT);
+            let idx_count = <RankSelect<CC, VC, &'a [u64]> as crate::AsBytes<'a>>::SLICE_COUNT;
+            if index < idx_count {
+                self.indexes.get_byte_slice(index)
+            } else if index < idx_count + SC::SLICE_COUNT {
+                self.oks.get_byte_slice(index - idx_count)
+            } else {
+                self.errs.get_byte_slice(index - idx_count - SC::SLICE_COUNT)
+            }
         }
     }
     impl<'a, SC: crate::FromBytes<'a>, TC: crate::FromBytes<'a>, CC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for Results<SC, TC, CC, VC, &'a [u64]> {
@@ -515,9 +528,16 @@ pub mod option {
     }
 
     impl<'a, TC: crate::AsBytes<'a>, CC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for Options<TC, CC, VC, &'a [u64]> {
-        #[inline(always)]
-        fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-            crate::chain(self.indexes.as_bytes(), self.somes.as_bytes())
+        const SLICE_COUNT: usize = <RankSelect<CC, VC, &'a [u64]> as crate::AsBytes<'a>>::SLICE_COUNT + TC::SLICE_COUNT;
+        #[inline]
+        fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+            debug_assert!(index < Self::SLICE_COUNT);
+            let idx_count = <RankSelect<CC, VC, &'a [u64]> as crate::AsBytes<'a>>::SLICE_COUNT;
+            if index < idx_count {
+                self.indexes.get_byte_slice(index)
+            } else {
+                self.somes.get_byte_slice(index - idx_count)
+            }
         }
     }
 
@@ -811,13 +831,17 @@ pub mod discriminant {
     }
 
 
-    // AsBytes for borrowed form
-    impl<'a> crate::AsBytes<'a> for Discriminant<&'a [u8], &'a [u64]> {
-        #[inline(always)]
-        fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-            let variant = self.variant.as_bytes();
-            let offset = self.offset.as_bytes();
-            crate::chain(variant, offset)
+    // AsBytes for Discriminant, generic over container types.
+    impl<'a, CVar: crate::AsBytes<'a>, COff: crate::AsBytes<'a>> crate::AsBytes<'a> for Discriminant<CVar, COff> {
+        const SLICE_COUNT: usize = CVar::SLICE_COUNT + COff::SLICE_COUNT;
+        #[inline]
+        fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+            debug_assert!(index < Self::SLICE_COUNT);
+            if index < CVar::SLICE_COUNT {
+                self.variant.get_byte_slice(index)
+            } else {
+                self.offset.get_byte_slice(index - CVar::SLICE_COUNT)
+            }
         }
     }
 

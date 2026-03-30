@@ -14,7 +14,8 @@ impl<T: Len> Len for Rc<T> {
     #[inline(always)] fn len(&self) -> usize { self.as_ref().len() }
 }
 impl<'a, T: AsBytes<'a>> AsBytes<'a> for Rc<T> {
-    #[inline(always)] fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> { self.as_ref().as_bytes() }
+    const SLICE_COUNT: usize = T::SLICE_COUNT;
+    #[inline] fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) { self.as_ref().get_byte_slice(index) }
 }
 impl<'a, T: FromBytes<'a>> FromBytes<'a> for Rc<T> {
     const SLICE_COUNT: usize = T::SLICE_COUNT;

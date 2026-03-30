@@ -57,7 +57,8 @@ impl<'a, C: Container> Push<Boxed<C::Ref<'a>>> for Boxed<C> {
     }
 }
 impl<'a, C: AsBytes<'a>> AsBytes<'a> for Boxed<C> {
-    #[inline(always)] fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> { self.0.as_bytes() }
+    const SLICE_COUNT: usize = C::SLICE_COUNT;
+    #[inline] fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) { self.0.get_byte_slice(index) }
 }
 impl<'a, C: FromBytes<'a>> FromBytes<'a> for Boxed<C> {
     const SLICE_COUNT: usize = C::SLICE_COUNT;
