@@ -831,16 +831,16 @@ pub mod discriminant {
     }
 
 
-    // AsBytes for borrowed form
-    impl<'a> crate::AsBytes<'a> for Discriminant<&'a [u8], &'a [u64]> {
-        const SLICE_COUNT: usize = <&'a [u8] as crate::AsBytes<'a>>::SLICE_COUNT + <&'a [u64] as crate::AsBytes<'a>>::SLICE_COUNT;
+    // AsBytes for Discriminant, generic over container types.
+    impl<'a, CVar: crate::AsBytes<'a>, COff: crate::AsBytes<'a>> crate::AsBytes<'a> for Discriminant<CVar, COff> {
+        const SLICE_COUNT: usize = CVar::SLICE_COUNT + COff::SLICE_COUNT;
         #[inline]
         fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
             debug_assert!(index < Self::SLICE_COUNT);
-            if index < <&'a [u8] as crate::AsBytes<'a>>::SLICE_COUNT {
+            if index < CVar::SLICE_COUNT {
                 self.variant.get_byte_slice(index)
             } else {
-                self.offset.get_byte_slice(index - <&'a [u8] as crate::AsBytes<'a>>::SLICE_COUNT)
+                self.offset.get_byte_slice(index - CVar::SLICE_COUNT)
             }
         }
     }
