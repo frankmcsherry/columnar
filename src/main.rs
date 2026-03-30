@@ -71,8 +71,8 @@ fn main() {
 
     // Project down to columns and variants using field accessors.
     // This gets all ages from people in teams.
-    let solo_values: &[u64] = borrowed.Solo.1;
-    let team_values: &[u64] = borrowed.Team.values.1;
+    let solo_values: &[u64] = borrowed.group_0.1;
+    let team_values: &[u64] = borrowed.group_1.values.1;
     let total = solo_values.iter().sum::<u64>() + team_values.iter().sum::<u64>();
     println!("Present values summed: {:?}", total);
 }
@@ -288,5 +288,87 @@ mod test {
     #[derive(Columnar, Debug, Clone)]
     struct BoxedStr {
         value: Box<str>,
+    }
+
+    // Test shared storage: variants with the same field types share a container.
+    #[derive(Columnar, Debug)]
+    enum SharedTest {
+        Left(u64),
+        Right(u64),
+        Name(String),
+    }
+
+    #[test]
+    fn shared_storage_round_trip() {
+        use columnar::{Borrow, Index, Len, Push, Columnar};
+
+        let mut columns = <SharedTest as Columnar>::Container::default();
+        columns.push(&SharedTest::Left(10));
+        columns.push(&SharedTest::Right(20));
+        columns.push(&SharedTest::Name("hello".to_string()));
+        columns.push(&SharedTest::Left(30));
+        columns.push(&SharedTest::Right(40));
+        assert_eq!(columns.len(), 5);
+
+        // Left and Right share group_0; verify correct indexing.
+        match (&columns).get(0) {
+            SharedTestReference::Left(v) => assert_eq!(v, &10),
+            _ => panic!("expected Left"),
+        }
+        match (&columns).get(1) {
+            SharedTestReference::Right(v) => assert_eq!(v, &20),
+            _ => panic!("expected Right"),
+        }
+        match (&columns).get(2) {
+            SharedTestReference::Name(s) => assert_eq!(s, "hello".as_bytes()),
+            _ => panic!("expected Name"),
+        }
+        match (&columns).get(3) {
+            SharedTestReference::Left(v) => assert_eq!(v, &30),
+            _ => panic!("expected Left"),
+        }
+
+        // Verify the shared container has 4 elements (Left×2 + Right×2).
+        assert_eq!(columns.group_0.len(), 4);
+        // Name container has 1 element.
+        assert_eq!(columns.group_1.len(), 1);
+
+        // Round-trip through bytes.
+        use columnar::{AsBytes, ContainerBytes};
+        fn round_trip<'a, C: ContainerBytes>(container: &'a C) -> C::Borrowed<'a> {
+            let borrow = container.borrow();
+            let mut bytes_iter = borrow.as_bytes().map(|(_, bytes)| bytes);
+            columnar::FromBytes::from_bytes(&mut bytes_iter)
+        }
+        let borrowed = round_trip(&columns);
+        assert_eq!(borrowed.len(), 5);
+        match borrowed.get(4) {
+            SharedTestReference::Right(v) => assert_eq!(v, &40),
+            _ => panic!("expected Right"),
+        }
+    }
+
+    // Test shared storage with extend_from_self.
+    #[test]
+    fn shared_storage_extend() {
+        use columnar::{Borrow, Container, Index, Len, Push, Columnar};
+
+        let mut columns = <SharedTest as Columnar>::Container::default();
+        columns.push(&SharedTest::Left(1));
+        columns.push(&SharedTest::Right(2));
+        columns.push(&SharedTest::Name("x".to_string()));
+        columns.push(&SharedTest::Left(3));
+
+        let mut dest = <SharedTest as Columnar>::Container::default();
+        dest.extend_from_self(columns.borrow(), 1..3);
+        assert_eq!(dest.len(), 2);
+        match dest.borrow().get(0) {
+            SharedTestReference::Right(v) => assert_eq!(*v, 2),
+            _ => panic!("expected Right"),
+        }
+        match dest.borrow().get(1) {
+            SharedTestReference::Name(s) => assert_eq!(s, "x".as_bytes()),
+            _ => panic!("expected Name"),
+        }
     }
 }
