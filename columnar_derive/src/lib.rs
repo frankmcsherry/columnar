@@ -298,12 +298,17 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
 
         quote! {
             impl #impl_gen ::columnar::AsBytes<'a> for #c_ident #ty_gen #where_clause {
-                // type Borrowed<'columnar> = #c_ident < #(<#container_types as ::columnar::AsBytes>::Borrowed<'columnar>,)*>;
-                #[inline(always)]
-                fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                    let iter = None.into_iter();
-                    #( let iter = ::columnar::chain(iter, self.#names.as_bytes()); )*
-                    iter
+                const SLICE_COUNT: usize = 0 #(+ <#container_types as ::columnar::AsBytes<'a>>::SLICE_COUNT)*;
+                #[inline]
+                fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+                    let mut _offset = 0;
+                    #(
+                        if index < _offset + <#container_types as ::columnar::AsBytes<'a>>::SLICE_COUNT {
+                            return self.#names.get_byte_slice(index - _offset);
+                        }
+                        _offset += <#container_types as ::columnar::AsBytes<'a>>::SLICE_COUNT;
+                    )*
+                    panic!("get_byte_slice: index out of bounds")
                 }
             }
         }
@@ -501,10 +506,10 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
         }
 
         impl<'a> ::columnar::AsBytes<'a> for #c_ident <&'a u64> {
-            // type Borrowed<'columnar> = #c_ident;
-            #[inline(always)]
-            fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                ::core::iter::once((8, ::columnar::bytemuck::cast_slice(::core::slice::from_ref(self.count))))
+            const SLICE_COUNT: usize = 1;
+            #[inline]
+            fn get_byte_slice(&self, _index: usize) -> (u64, &'a [u8]) {
+                (8, ::columnar::bytemuck::cast_slice(::core::slice::from_ref(self.count)))
             }
         }
 
@@ -890,12 +895,17 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
         quote! {
             impl #impl_gen ::columnar::AsBytes<'a> for #c_ident #ty_gen #where_clause {
-                #[inline(always)]
-                fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                    let iter = None.into_iter();
-                    #( let iter = ::columnar::chain(iter,self.#names.as_bytes()); )*
-                    let iter = ::columnar::chain(iter, self.indexes.as_bytes());
-                    iter
+                const SLICE_COUNT: usize = 0 #(+ <#container_types as ::columnar::AsBytes<'a>>::SLICE_COUNT)* + <::columnar::Discriminant<CVar, COff> as ::columnar::AsBytes<'a>>::SLICE_COUNT;
+                #[inline]
+                fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+                    let mut _offset = 0;
+                    #(
+                        if index < _offset + <#container_types as ::columnar::AsBytes<'a>>::SLICE_COUNT {
+                            return self.#names.get_byte_slice(index - _offset);
+                        }
+                        _offset += <#container_types as ::columnar::AsBytes<'a>>::SLICE_COUNT;
+                    )*
+                    self.indexes.get_byte_slice(index - _offset)
                 }
             }
         }
@@ -1253,10 +1263,10 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
         }
 
         impl<'a, CVar: ::columnar::AsBytes<'a>> ::columnar::AsBytes<'a> for #c_ident <CVar> {
-            // type Borrowed<'columnar> = #c_ident < <CVar as ::columnar::AsBytes>::Borrowed<'columnar> >;
-            #[inline(always)]
-            fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                self.variant.as_bytes()
+            const SLICE_COUNT: usize = CVar::SLICE_COUNT;
+            #[inline]
+            fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+                self.variant.get_byte_slice(index)
             }
         }
 

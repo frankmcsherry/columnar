@@ -14,9 +14,10 @@ macro_rules! implement_columnable {
         }
 
         impl<'a> crate::AsBytes<'a> for &'a [$index_type] {
-            #[inline(always)]
-            fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                core::iter::once((core::mem::align_of::<$index_type>() as u64, bytemuck::cast_slice(&self[..])))
+            const SLICE_COUNT: usize = 1;
+            #[inline]
+            fn get_byte_slice(&self, _index: usize) -> (u64, &'a [u8]) {
+                (core::mem::align_of::<$index_type>() as u64, bytemuck::cast_slice(&self[..]))
             }
         }
         impl<'a> crate::FromBytes<'a> for &'a [$index_type] {
@@ -41,9 +42,10 @@ macro_rules! implement_columnable {
             }
         }
         impl<'a, const N: usize> crate::AsBytes<'a> for &'a [[$index_type; N]] {
-            #[inline(always)]
-            fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                core::iter::once((core::mem::align_of::<$index_type>() as u64, bytemuck::cast_slice(&self[..])))
+            const SLICE_COUNT: usize = 1;
+            #[inline]
+            fn get_byte_slice(&self, _index: usize) -> (u64, &'a [u8]) {
+                (core::mem::align_of::<$index_type>() as u64, bytemuck::cast_slice(&self[..]))
             }
         }
         impl<'a, const N: usize> crate::FromBytes<'a> for &'a [[$index_type; N]] {
@@ -140,9 +142,10 @@ mod sizes {
     impl<CV: Clear> Clear for Usizes<CV> { fn clear(&mut self) { self.values.clear() }}
 
     impl<'a, CV: crate::AsBytes<'a>> crate::AsBytes<'a> for crate::primitive::Usizes<CV> {
-        #[inline(always)]
-        fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-            self.values.as_bytes()
+        const SLICE_COUNT: usize = CV::SLICE_COUNT;
+        #[inline]
+        fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+            self.values.get_byte_slice(index)
         }
     }
 
@@ -216,9 +219,10 @@ mod sizes {
     impl<CV: Clear> Clear for Isizes<CV> { fn clear(&mut self) { self.values.clear() }}
 
     impl<'a, CV: crate::AsBytes<'a>> crate::AsBytes<'a> for crate::primitive::Isizes<CV> {
-        #[inline(always)]
-        fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-            self.values.as_bytes()
+        const SLICE_COUNT: usize = CV::SLICE_COUNT;
+        #[inline]
+        fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+            self.values.get_byte_slice(index)
         }
     }
 
@@ -297,9 +301,10 @@ mod chars {
     impl<CV: Clear> Clear for Chars<CV> { fn clear(&mut self) { self.values.clear() }}
 
     impl<'a, CV: crate::AsBytes<'a>> crate::AsBytes<'a> for Chars<CV> {
-        #[inline(always)]
-        fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-            self.values.as_bytes()
+        const SLICE_COUNT: usize = CV::SLICE_COUNT;
+        #[inline]
+        fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+            self.values.get_byte_slice(index)
         }
     }
 
@@ -378,9 +383,10 @@ mod larges {
     impl<CV: Clear> Clear for U128s<CV> { fn clear(&mut self) { self.values.clear() }}
 
     impl<'a, CV: crate::AsBytes<'a>> crate::AsBytes<'a> for U128s<CV> {
-        #[inline(always)]
-        fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-            self.values.as_bytes()
+        const SLICE_COUNT: usize = CV::SLICE_COUNT;
+        #[inline]
+        fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+            self.values.get_byte_slice(index)
         }
     }
 
@@ -449,9 +455,10 @@ mod larges {
     impl<CV: Clear> Clear for I128s<CV> { fn clear(&mut self) { self.values.clear() }}
 
     impl<'a, CV: crate::AsBytes<'a>> crate::AsBytes<'a> for I128s<CV> {
-        #[inline(always)]
-        fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-            self.values.as_bytes()
+        const SLICE_COUNT: usize = CV::SLICE_COUNT;
+        #[inline]
+        fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+            self.values.get_byte_slice(index)
         }
     }
 
@@ -548,9 +555,10 @@ pub mod offsets {
         }
 
         impl<'a, const K: u64> crate::AsBytes<'a> for Fixeds<K, &'a u64> {
-            #[inline(always)]
-            fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                core::iter::once((8, bytemuck::cast_slice(core::slice::from_ref(self.count))))
+            const SLICE_COUNT: usize = 1;
+            #[inline]
+            fn get_byte_slice(&self, _index: usize) -> (u64, &'a [u8]) {
+                (8, bytemuck::cast_slice(core::slice::from_ref(self.count)))
             }
         }
         impl<'a, const K: u64> crate::FromBytes<'a> for Fixeds<K, &'a u64> {
@@ -654,11 +662,14 @@ pub mod offsets {
         }
 
         impl<'a, BC: AsBytes<'a>> AsBytes<'a> for Strides<BC, &'a [u64]> {
-            #[inline(always)]
-            fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-                let head = core::iter::once((8u64, bytemuck::cast_slice(self.head)));
-                let bounds = self.bounds.as_bytes();
-                crate::chain(head, bounds)
+            const SLICE_COUNT: usize = 1 + BC::SLICE_COUNT;
+            #[inline]
+            fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+                if index < 1 {
+                    (8u64, bytemuck::cast_slice(self.head))
+                } else {
+                    self.bounds.get_byte_slice(index - 1)
+                }
             }
         }
         impl<'a, BC: FromBytes<'a>> FromBytes<'a> for Strides<BC, &'a [u64]> {
@@ -866,9 +877,10 @@ mod empty {
     }
 
     impl<'a> crate::AsBytes<'a> for crate::primitive::Empties<&'a u64> {
-        #[inline(always)]
-        fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-            core::iter::once((8, bytemuck::cast_slice(core::slice::from_ref(self.count))))
+        const SLICE_COUNT: usize = 1;
+        #[inline]
+        fn get_byte_slice(&self, _index: usize) -> (u64, &'a [u8]) {
+            (8, bytemuck::cast_slice(core::slice::from_ref(self.count)))
         }
     }
     impl<'a> crate::FromBytes<'a> for crate::primitive::Empties<&'a u64> {
@@ -954,10 +966,14 @@ mod boolean {
     }
 
     impl<'a, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for crate::primitive::Bools<VC, &'a [u64]> {
-        #[inline(always)]
-        fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-            let iter = self.values.as_bytes();
-            crate::chain_one(iter, (core::mem::align_of::<u64>() as u64, bytemuck::cast_slice(self.tail)))
+        const SLICE_COUNT: usize = VC::SLICE_COUNT + 1;
+        #[inline]
+        fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+            if index < VC::SLICE_COUNT {
+                self.values.get_byte_slice(index)
+            } else {
+                (core::mem::align_of::<u64>() as u64, bytemuck::cast_slice(self.tail))
+            }
         }
     }
 
@@ -1106,9 +1122,14 @@ mod duration {
     }
 
     impl<'a, SC: crate::AsBytes<'a>, NC: crate::AsBytes<'a>> crate::AsBytes<'a> for crate::primitive::Durations<SC, NC> {
-        #[inline(always)]
-        fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-            crate::chain(self.seconds.as_bytes(), self.nanoseconds.as_bytes())
+        const SLICE_COUNT: usize = SC::SLICE_COUNT + NC::SLICE_COUNT;
+        #[inline]
+        fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+            if index < SC::SLICE_COUNT {
+                self.seconds.get_byte_slice(index)
+            } else {
+                self.nanoseconds.get_byte_slice(index - SC::SLICE_COUNT)
+            }
         }
     }
     impl<'a, SC: crate::FromBytes<'a>, NC: crate::FromBytes<'a>> crate::FromBytes<'a> for crate::primitive::Durations<SC, NC> {

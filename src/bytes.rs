@@ -145,6 +145,50 @@ pub mod indexed {
         Ok(())
     }
 
+    /// Encodes `item` into `u64` aligned words, using random access via `get_byte_slice`.
+    ///
+    /// This avoids building a deeply-nested iterator type. Instead, the caller
+    /// iterates `0..SLICE_COUNT` and each call dispatches through compile-time
+    /// constant branch chains. LLVM can unroll and constant-fold these.
+    pub fn encode_get<'a, A>(store: &mut Vec<u64>, item: &A)
+    where A : AsBytes<'a>,
+    {
+        let count = A::SLICE_COUNT;
+        let offsets_end: u64 = TryInto::<u64>::try_into((1 + count) * core::mem::size_of::<u64>()).unwrap();
+        store.push(offsets_end);
+        let mut position_bytes = offsets_end;
+        for i in 0..count {
+            let (align, bytes) = item.get_byte_slice(i);
+            assert!(align <= 8);
+            let to_push: u64 = position_bytes + TryInto::<u64>::try_into(bytes.len()).unwrap();
+            store.push(to_push);
+            let round_len: u64 = ((bytes.len() + 7) & !7).try_into().unwrap();
+            position_bytes += round_len;
+        }
+        for i in 0..count {
+            let (_align, bytes) = item.get_byte_slice(i);
+            let whole_words = 8 * (bytes.len() / 8);
+            if let Ok(words) = bytemuck::try_cast_slice(&bytes[.. whole_words]) {
+                store.extend_from_slice(words);
+            }
+            else {
+                let store_len = store.len();
+                store.resize(store_len + whole_words/8, 0);
+                let slice = bytemuck::try_cast_slice_mut(&mut store[store_len..]).expect("&[u64] should convert to &[u8]");
+                slice.copy_from_slice(&bytes[.. whole_words]);
+            }
+            let remaining_bytes = &bytes[whole_words..];
+            if !remaining_bytes.is_empty() {
+                let mut remainder = 0u64;
+                let transmute: &mut [u8] = bytemuck::try_cast_slice_mut(core::slice::from_mut(&mut remainder)).expect("&[u64] should convert to &[u8]");
+                for (i, byte) in remaining_bytes.iter().enumerate() {
+                    transmute[i] = *byte;
+                }
+                store.push(remainder);
+            }
+        }
+    }
+
     /// Decodes an encoded sequence of byte slices. Each result will be `u64` aligned.
     #[inline(always)]
     pub fn decode(store: &[u64]) -> impl Iterator<Item=&[u8]> {
@@ -342,6 +386,46 @@ pub mod indexed {
 
             type B<'a> = crate::BorrowedOf<'a, (u64, String, Vec<u32>)>;
             assert!(super::validate::<B>(&store).is_ok());
+        }
+
+        /// Asserts that `encode_get` produces identical output to `encode`.
+        fn assert_encode_equiv<'a, AB: AsBytes<'a>>(item: &AB) {
+            let mut store_iter = Vec::new();
+            encode(&mut store_iter, item);
+
+            let mut store_get = Vec::new();
+            super::encode_get(&mut store_get, item);
+            assert_eq!(store_iter, store_get, "encode_get differs from encode");
+        }
+
+        #[test]
+        fn encode_methods_agree_result() {
+            let mut column: ContainerOf<Result<u64, String>> = Default::default();
+            for i in 0..100u64 {
+                column.push(&Ok::<u64, String>(i));
+                column.push(&Err::<u64, String>(format!("{:?}", i)));
+            }
+            assert_encode_equiv(&column.borrow());
+        }
+
+        #[test]
+        fn encode_methods_agree_tuple() {
+            let mut column: ContainerOf<(u64, String, Vec<u32>)> = Default::default();
+            for i in 0..50u64 {
+                column.push(&(i, format!("hello {i}"), vec![i as u32; i as usize]));
+            }
+            assert_encode_equiv(&column.borrow());
+        }
+
+        #[test]
+        fn encode_methods_agree_nested() {
+            let mut column: ContainerOf<(u64, Vec<(u32, u16)>, Option<String>)> = Default::default();
+            for i in 0..50u64 {
+                let v: Vec<(u32, u16)> = (0..i as u32).map(|j| (j, j as u16)).collect();
+                let s = if i % 3 == 0 { Some(format!("s{i}")) } else { None };
+                column.push(&(i, v, s));
+            }
+            assert_encode_equiv(&column.borrow());
         }
     }
 }

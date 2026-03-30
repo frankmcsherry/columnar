@@ -97,9 +97,14 @@ impl<BC: crate::common::PushIndexAs<u64>> Container for Strings<BC, Vec<u8>> {
 }
 
 impl<'a, BC: crate::AsBytes<'a>, VC: crate::AsBytes<'a>> crate::AsBytes<'a> for Strings<BC, VC> {
-    #[inline(always)]
-    fn as_bytes(&self) -> impl Iterator<Item=(u64, &'a [u8])> {
-        crate::chain(self.bounds.as_bytes(), self.values.as_bytes())
+    const SLICE_COUNT: usize = BC::SLICE_COUNT + VC::SLICE_COUNT;
+    #[inline]
+    fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+        if index < BC::SLICE_COUNT {
+            self.bounds.get_byte_slice(index)
+        } else {
+            self.values.get_byte_slice(index - BC::SLICE_COUNT)
+        }
     }
 }
 impl<'a, BC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>> crate::FromBytes<'a> for Strings<BC, VC> {
