@@ -698,10 +698,10 @@ pub mod common {
     /// benefit from specialized sequential access.
     macro_rules! impl_default_cursor {
         () => {
-            type Cursor<'a> = DefaultCursor<'a, Self> where Self: 'a;
+            type Cursor<'__cursor> = $crate::common::DefaultCursor<'__cursor, Self> where Self: '__cursor;
             #[inline]
             fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_> {
-                DefaultCursor::new(self, range)
+                $crate::common::DefaultCursor::new(self, range)
             }
         }
     }
