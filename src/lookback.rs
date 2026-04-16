@@ -39,12 +39,26 @@ impl<TC, CC, VC: Len, WC: IndexAs<u64>> Len for Repeats<TC, CC, VC, WC> {
 /// Cursor for sequential access to a [`Repeats`] container.
 ///
 /// Avoids per-element `rank()` calls by maintaining the count of
-/// `Some` values incrementally. One bit test per element.
+/// `Some` values incrementally. Caches the current bitvector word
+/// so only one fetch per 64 elements instead of per element.
 pub struct RepeatsCursor<'a, TC, CC, VC, WC> {
     inner: &'a Options<TC, CC, VC, WC>,
     cursor: usize,
     end: usize,
     somes_cursor: usize,
+    cached_word: u64,
+    word_index: usize,
+}
+
+impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>> RepeatsCursor<'_, TC, CC, VC, WC> {
+    #[inline(always)]
+    fn fetch_word(&self, block: usize) -> u64 {
+        if block == self.inner.indexes.values.values.len() {
+            self.inner.indexes.values.tail.index_as(0)
+        } else {
+            self.inner.indexes.values.values.index_as(block)
+        }
+    }
 }
 
 impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>> Iterator for RepeatsCursor<'_, TC, CC, VC, WC> {
@@ -52,7 +66,13 @@ impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         if self.cursor < self.end {
-            if self.inner.indexes.get(self.cursor) {
+            let block = self.cursor / 64;
+            let bit = self.cursor % 64;
+            if block != self.word_index {
+                self.word_index = block;
+                self.cached_word = self.fetch_word(block);
+            }
+            if (self.cached_word >> bit) & 1 == 1 {
                 self.somes_cursor += 1;
             }
             self.cursor += 1;
@@ -84,11 +104,21 @@ impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>
     }
     #[inline(always)] fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_> {
         let somes_cursor = if range.is_empty() { 0 } else { self.inner.indexes.rank(range.start) };
+        let block = range.start / 64;
+        let cached_word = if range.is_empty() {
+            0
+        } else if block == self.inner.indexes.values.values.len() {
+            self.inner.indexes.values.tail.index_as(0)
+        } else {
+            self.inner.indexes.values.values.index_as(block)
+        };
         RepeatsCursor {
             inner: &self.inner,
             cursor: range.start,
             end: range.end,
             somes_cursor,
+            cached_word,
+            word_index: block,
         }
     }
 }
@@ -208,12 +238,26 @@ impl<TC, VC, CC, RC: Len, WC: IndexAs<u64>, const N: u8> Len for Lookbacks<TC, V
 /// Cursor for sequential access to a [`Lookbacks`] container.
 ///
 /// Avoids per-element `rank()` calls by maintaining the count of
-/// `Ok` values incrementally.
+/// `Ok` values incrementally. Caches the current bitvector word
+/// so only one fetch per 64 elements instead of per element.
 pub struct LookbacksCursor<'a, TC, VC, CC, RC, WC> {
     inner: &'a Results<TC, VC, CC, RC, WC>,
     cursor: usize,
     end: usize,
     oks_cursor: usize,
+    cached_word: u64,
+    word_index: usize,
+}
+
+impl<TC: Index, VC: IndexAs<u8>, CC: IndexAs<u64> + Len, RC: IndexAs<u64> + Len, WC: IndexAs<u64>> LookbacksCursor<'_, TC, VC, CC, RC, WC> {
+    #[inline(always)]
+    fn fetch_word(&self, block: usize) -> u64 {
+        if block == self.inner.indexes.values.values.len() {
+            self.inner.indexes.values.tail.index_as(0)
+        } else {
+            self.inner.indexes.values.values.index_as(block)
+        }
+    }
 }
 
 impl<TC: Index, VC: IndexAs<u8>, CC: IndexAs<u64> + Len, RC: IndexAs<u64> + Len, WC: IndexAs<u64>> Iterator for LookbacksCursor<'_, TC, VC, CC, RC, WC> {
@@ -221,7 +265,13 @@ impl<TC: Index, VC: IndexAs<u8>, CC: IndexAs<u64> + Len, RC: IndexAs<u64> + Len,
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         if self.cursor < self.end {
-            let result = if self.inner.indexes.get(self.cursor) {
+            let block = self.cursor / 64;
+            let bit = self.cursor % 64;
+            if block != self.word_index {
+                self.word_index = block;
+                self.cached_word = self.fetch_word(block);
+            }
+            let result = if (self.cached_word >> bit) & 1 == 1 {
                 let item = self.inner.oks.get(self.oks_cursor);
                 self.oks_cursor += 1;
                 item
@@ -258,11 +308,21 @@ impl<TC: Index, VC: IndexAs<u8>, CC: IndexAs<u64> + Len, RC: IndexAs<u64> + Len,
     }
     #[inline(always)] fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_> {
         let oks_cursor = if range.is_empty() { 0 } else { self.inner.indexes.rank(range.start) };
+        let block = range.start / 64;
+        let cached_word = if range.is_empty() {
+            0
+        } else if block == self.inner.indexes.values.values.len() {
+            self.inner.indexes.values.tail.index_as(0)
+        } else {
+            self.inner.indexes.values.values.index_as(block)
+        };
         LookbacksCursor {
             inner: &self.inner,
             cursor: range.start,
             end: range.end,
             oks_cursor,
+            cached_word,
+            word_index: block,
         }
     }
 }
