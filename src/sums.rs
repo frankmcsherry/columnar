@@ -176,6 +176,7 @@ pub mod result {
 
     use crate::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, Borrow};
     use crate::RankSelect;
+    use crate::common::impl_default_cursor;
 
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[derive(Copy, Clone, Debug, Default, PartialEq)]
@@ -314,6 +315,7 @@ pub mod result {
         WC: IndexAs<u64>,
     {
         type Ref = Result<SC::Ref, TC::Ref>;
+        impl_default_cursor!();
         #[inline(always)]
         fn get(&self, index: usize) -> Self::Ref {
             if self.indexes.get(index) {
@@ -332,6 +334,7 @@ pub mod result {
         WC: IndexAs<u64>,
     {
         type Ref = Result<<&'a SC as Index>::Ref, <&'a TC as Index>::Ref>;
+        impl_default_cursor!();
         #[inline(always)]
         fn get(&self, index: usize) -> Self::Ref {
             if self.indexes.get(index) {
@@ -456,6 +459,7 @@ pub mod option {
 
     use crate::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, Borrow};
     use crate::RankSelect;
+    use crate::common::impl_default_cursor;
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[derive(Copy, Clone, Debug, Default, PartialEq)]
@@ -570,6 +574,7 @@ pub mod option {
 
     impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>> Index for Options<TC, CC, VC, WC> {
         type Ref = Option<TC::Ref>;
+        impl_default_cursor!();
         #[inline(always)]
         fn get(&self, index: usize) -> Self::Ref {
             if self.indexes.get(index) {
@@ -583,6 +588,7 @@ pub mod option {
     where &'a TC: Index
     {
         type Ref = Option<<&'a TC as Index>::Ref>;
+        impl_default_cursor!();
         #[inline(always)]
         fn get(&self, index: usize) -> Self::Ref {
             if self.indexes.get(index) {
@@ -689,6 +695,7 @@ pub mod discriminant {
 
     use alloc::{vec::Vec, string::String};
     use crate::{Clear, Container, Len, Index, IndexAs, Borrow};
+    use crate::common::impl_default_cursor;
 
     /// Tracks variant discriminants and offsets for enum containers.
     ///
@@ -790,6 +797,7 @@ pub mod discriminant {
     // Index for the borrowed form: returns (variant, offset).
     impl<'a> Index for Discriminant<&'a [u8], &'a [u64]> {
         type Ref = (u8, u64);
+        impl_default_cursor!();
         #[inline(always)]
         fn get(&self, index: usize) -> (u8, u64) {
             if self.is_heterogeneous() {

@@ -7,7 +7,23 @@ use crate::{Columnar, Container, Borrow, Len, Clear, Index, IndexMut, Push};
 // These are all macro based, because the implementations are very similar.
 // The macro requires two names, one for the store and one for pushable types.
 macro_rules! tuple_impl {
-    ( $($name:ident,$name2:ident,$idx:tt)+) => (
+    ( $cursor_name:ident; $($name:ident,$name2:ident,$idx:tt)+) => (
+
+        pub struct $cursor_name<$($name,)*>($(pub $name,)*);
+
+        impl<$($name: Iterator,)*> Iterator for $cursor_name<$($name,)*> {
+            type Item = ($($name::Item,)*);
+            #[inline(always)]
+            fn next(&mut self) -> Option<Self::Item> {
+                Some(($(self.$idx.next()?,)*))
+            }
+            #[inline(always)]
+            fn size_hint(&self) -> (usize, Option<usize>) {
+                self.0.size_hint()
+            }
+        }
+
+        impl<$($name: ExactSizeIterator,)*> ExactSizeIterator for $cursor_name<$($name,)*> {}
 
         impl<$($name: Columnar),*> Columnar for ($($name,)*) {
             #[inline(always)]
@@ -108,14 +124,20 @@ macro_rules! tuple_impl {
         }
         impl<$($name: Index),*> Index for ($($name,)*) {
             type Ref = ($($name::Ref,)*);
+            type Cursor<'a> = $cursor_name<$($name::Cursor<'a>,)*> where Self: 'a;
             #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref {
                 let ($($name,)*) = self;
                 ($($name.get(index),)*)
             }
+            #[inline(always)]
+            fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_> {
+                $cursor_name($(self.$idx.cursor(range.clone()),)*)
+            }
         }
         impl<'a, $($name),*> Index for &'a ($($name,)*) where $( &'a $name: Index),* {
             type Ref = ($(<&'a $name as Index>::Ref,)*);
+            crate::common::impl_default_cursor!();
             #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref {
                 let ($($name,)*) = self;
@@ -150,16 +172,16 @@ macro_rules! tuple_impl {
     )
 }
 
-tuple_impl!(A,AA,0);
-tuple_impl!(A,AA,0 B,BB,1);
-tuple_impl!(A,AA,0 B,BB,1 C,CC,2);
-tuple_impl!(A,AA,0 B,BB,1 C,CC,2 D,DD,3);
-tuple_impl!(A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4);
-tuple_impl!(A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5);
-tuple_impl!(A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5 G,GG,6);
-tuple_impl!(A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5 G,GG,6 H,HH,7);
-tuple_impl!(A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5 G,GG,6 H,HH,7 I,II,8);
-tuple_impl!(A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5 G,GG,6 H,HH,7 I,II,8 J,JJ,9);
+tuple_impl!(TupleCursor1; A,AA,0);
+tuple_impl!(TupleCursor2; A,AA,0 B,BB,1);
+tuple_impl!(TupleCursor3; A,AA,0 B,BB,1 C,CC,2);
+tuple_impl!(TupleCursor4; A,AA,0 B,BB,1 C,CC,2 D,DD,3);
+tuple_impl!(TupleCursor5; A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4);
+tuple_impl!(TupleCursor6; A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5);
+tuple_impl!(TupleCursor7; A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5 G,GG,6);
+tuple_impl!(TupleCursor8; A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5 G,GG,6 H,HH,7);
+tuple_impl!(TupleCursor9; A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5 G,GG,6 H,HH,7 I,II,8);
+tuple_impl!(TupleCursor10; A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5 G,GG,6 H,HH,7 I,II,8 J,JJ,9);
 
 #[cfg(test)]
 mod test {
@@ -182,5 +204,20 @@ mod test {
             assert_eq!((&column).get((2*i+1) as usize), (&i, &(i as u8), &b""[..]));
         }
 
+    }
+
+    #[test]
+    fn cursor_composition() {
+        use alloc::vec::Vec;
+        use crate::common::{Index, Push};
+
+        let mut column: crate::ContainerOf<(u64, u8)> = Default::default();
+        for i in 0..100u64 {
+            column.push((i, i as u8));
+        }
+
+        let cursor_values: Vec<_> = column.cursor(10..20).collect();
+        let get_values: Vec<_> = (10..20).map(|i| column.get(i)).collect();
+        assert_eq!(cursor_values, get_values);
     }
 }
