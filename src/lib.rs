@@ -307,6 +307,11 @@ pub mod common {
             /// This trait is most often implemented for lifetimed containers, and the `Ref` type
             /// will have a lifetime that depends on that of the containers, rather than `&self`.
             type Ref;
+            /// Iterator type for sequential access over a range.
+            ///
+            /// Types with efficient sequential strategies (e.g. [`Repeats`](crate::Repeats))
+            /// override this with a specialized iterator. Others use [`DefaultCursor`].
+            type Cursor<'a>: Iterator<Item = Self::Ref> where Self: 'a;
             /// Returns the reference type for location `index`.
             ///
             /// Implementations should most likely be marked `#[inline(always)]`.
@@ -314,9 +319,20 @@ pub mod common {
             /// as this prevents Rust/LLVM from eliding the test even if the return
             /// value is not actually consumed.
             fn get(&self, index: usize) -> Self::Ref;
+            /// Returns an iterator over `range` that may be more efficient than
+            /// repeated `get()` calls.
+            ///
+            /// A cursor pre-validates the range once at creation time. Callers must
+            /// ensure `range` is within bounds.
+            fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_>;
             #[inline(always)] fn last(&self) -> Option<Self::Ref> where Self: Len {
                 if self.is_empty() { None }
                 else { Some(self.get(self.len()-1)) }
+            }
+            /// Returns a cursor over all elements.
+            #[inline(always)]
+            fn cursor_iter(&self) -> Self::Cursor<'_> where Self: Len {
+                self.cursor(0..self.len())
             }
             /// Converts `&self` into an iterator.
             ///
@@ -343,23 +359,43 @@ pub mod common {
         // These implementations aim to reveal a longer lifetime, or to copy results to avoid a lifetime.
         impl<'a, T> Index for &'a [T] {
             type Ref = &'a T;
+            type Cursor<'b> = core::slice::Iter<'a, T> where Self: 'b;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { &self[index] }
+            #[inline(always)] fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_> {
+                self[range].iter()
+            }
         }
         impl<T: Copy> Index for [T] {
             type Ref = T;
+            type Cursor<'a> = core::iter::Copied<core::slice::Iter<'a, T>> where Self: 'a;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self[index] }
+            #[inline(always)] fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_> {
+                self[range].iter().copied()
+            }
         }
         impl<T: Copy, const N: usize> Index for [T; N] {
             type Ref = T;
+            type Cursor<'a> = core::iter::Copied<core::slice::Iter<'a, T>> where Self: 'a;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self[index] }
+            #[inline(always)] fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_> {
+                self[range].iter().copied()
+            }
         }
         impl<'a, T> Index for &'a Vec<T> {
             type Ref = &'a T;
+            type Cursor<'b> = core::slice::Iter<'a, T> where Self: 'b;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { &self[index] }
+            #[inline(always)] fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_> {
+                self[range].iter()
+            }
         }
         impl<T: Copy> Index for Vec<T> {
             type Ref = T;
+            type Cursor<'a> = core::iter::Copied<core::slice::Iter<'a, T>> where Self: 'a;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self[index] }
+            #[inline(always)] fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_> {
+                self[range].iter().copied()
+            }
         }
 
 
@@ -539,9 +575,13 @@ pub mod common {
 
     impl<S: Index> Index for Slice<S> {
         type Ref = S::Ref;
+        type Cursor<'a> = S::Cursor<'a> where Self: 'a;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
             assert!(index < self.upper - self.lower);
             self.slice.get(self.lower + index)
+        }
+        #[inline(always)] fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_> {
+            self.slice.cursor(self.lower + range.start .. self.lower + range.end)
         }
     }
     impl<'a, S> Index for &'a Slice<S>
@@ -549,9 +589,13 @@ pub mod common {
         &'a S : Index,
     {
         type Ref = <&'a S as Index>::Ref;
+        type Cursor<'b> = <&'a S as Index>::Cursor<'b> where Self: 'b;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
             assert!(index < self.upper - self.lower);
             (&self.slice).get(self.lower + index)
+        }
+        #[inline(always)] fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_> {
+            (&self.slice).cursor(self.lower + range.start .. self.lower + range.end)
         }
     }
 
@@ -608,6 +652,60 @@ pub mod common {
     }
 
     impl<S: Index + Len> ExactSizeIterator for IterOwn<S> { }
+
+    /// Cursor that delegates to [`Index::get`] for types without specialized iteration.
+    ///
+    /// Used as the default `Cursor` type for containers that do not benefit from
+    /// a specialized sequential access strategy.
+    pub struct DefaultCursor<'a, S: ?Sized> {
+        slice: &'a S,
+        cursor: usize,
+        end: usize,
+    }
+
+    impl<'a, S: ?Sized> DefaultCursor<'a, S> {
+        #[inline(always)]
+        pub fn new(slice: &'a S, range: core::ops::Range<usize>) -> Self {
+            DefaultCursor { slice, cursor: range.start, end: range.end }
+        }
+    }
+
+    impl<'a, S: Index + ?Sized> Iterator for DefaultCursor<'a, S> {
+        type Item = S::Ref;
+        #[inline(always)]
+        fn next(&mut self) -> Option<Self::Item> {
+            if self.cursor < self.end {
+                let result = self.slice.get(self.cursor);
+                self.cursor += 1;
+                Some(result)
+            } else {
+                None
+            }
+        }
+        #[inline(always)]
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            let remaining = self.end - self.cursor;
+            (remaining, Some(remaining))
+        }
+    }
+
+    impl<S: Index + ?Sized> ExactSizeIterator for DefaultCursor<'_, S> {}
+
+    /// Generates the default `Cursor` and `cursor()` implementation for `Index`.
+    ///
+    /// Expands to a `type Cursor<'a> = DefaultCursor<'a, Self>` and a `cursor()`
+    /// method that wraps `get()`. Use this in `Index` impls for types that do not
+    /// benefit from specialized sequential access.
+    macro_rules! impl_default_cursor {
+        () => {
+            type Cursor<'a> = DefaultCursor<'a, Self> where Self: 'a;
+            #[inline]
+            fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_> {
+                DefaultCursor::new(self, range)
+            }
+        }
+    }
+    pub(crate) use impl_default_cursor;
 
     /// A type that can be viewed as byte slices with lifetime `'a`.
     ///
