@@ -232,6 +232,11 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         quote! {
             impl #impl_gen ::columnar::Index for #c_ident #ty_gen #where_clause {
                 type Ref = #index_type;
+                type Cursor<'__cursor> = ::columnar::common::DefaultCursor<'__cursor, Self> where Self: '__cursor;
+                #[inline(always)]
+                fn cursor(&self, range: ::core::ops::Range<usize>) -> Self::Cursor<'_> {
+                    ::columnar::common::DefaultCursor::new(self, range)
+                }
                 #[inline(always)]
                 fn get(&self, index: usize) -> Self::Ref {
                     #r_ident { #(#names: self.#names.get(index),)* }
@@ -250,6 +255,11 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         quote! {
             impl #impl_gen ::columnar::Index for &'columnar #c_ident #ty_gen #where_clause {
                 type Ref = #index_type;
+                type Cursor<'__cursor> = ::columnar::common::DefaultCursor<'__cursor, Self> where Self: '__cursor;
+                #[inline(always)]
+                fn cursor(&self, range: ::core::ops::Range<usize>) -> Self::Cursor<'_> {
+                    ::columnar::common::DefaultCursor::new(self, range)
+                }
                 #[inline(always)]
                 fn get(&self, index: usize) -> Self::Ref {
                     #r_ident { #(#names: (&self.#names).get(index),)* }
@@ -477,6 +487,11 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
 
         impl<CW> ::columnar::Index for #c_ident<CW> {
             type Ref = #name;
+            type Cursor<'__cursor> = ::columnar::common::DefaultCursor<'__cursor, Self> where Self: '__cursor;
+            #[inline(always)]
+            fn cursor(&self, range: ::core::ops::Range<usize>) -> Self::Cursor<'_> {
+                ::columnar::common::DefaultCursor::new(self, range)
+            }
             #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref {
                 #name
@@ -485,6 +500,11 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
 
         impl<'columnar, CW> ::columnar::Index for &'columnar #c_ident<CW> {
             type Ref = #name;
+            type Cursor<'__cursor> = ::columnar::common::DefaultCursor<'__cursor, Self> where Self: '__cursor;
+            #[inline(always)]
+            fn cursor(&self, range: ::core::ops::Range<usize>) -> Self::Cursor<'_> {
+                ::columnar::common::DefaultCursor::new(self, range)
+            }
             #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref {
                 #name
@@ -820,6 +840,11 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         quote! {
             impl #impl_gen ::columnar::Index for #c_ident #ty_gen #where_clause {
                 type Ref = #index_type;
+                type Cursor<'__cursor> = ::columnar::common::DefaultCursor<'__cursor, Self> where Self: '__cursor;
+                #[inline(always)]
+                fn cursor(&self, range: ::core::ops::Range<usize>) -> Self::Cursor<'_> {
+                    ::columnar::common::DefaultCursor::new(self, range)
+                }
                 #[inline(always)]
                 fn get(&self, index: usize) -> Self::Ref {
                     let (variant, offset) = self.indexes.get(index);
@@ -845,6 +870,11 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         quote! {
             impl #impl_gen ::columnar::Index for &'columnar #c_ident #ty_gen #where_clause {
                 type Ref = #index_type;
+                type Cursor<'__cursor> = ::columnar::common::DefaultCursor<'__cursor, Self> where Self: '__cursor;
+                #[inline(always)]
+                fn cursor(&self, range: ::core::ops::Range<usize>) -> Self::Cursor<'_> {
+                    ::columnar::common::DefaultCursor::new(self, range)
+                }
                 #[inline(always)]
                 fn get(&self, index: usize) -> Self::Ref {
                     let (variant, offset) = self.indexes.get(index);
@@ -1231,6 +1261,11 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
 
         impl<CVar: ::columnar::Len + ::columnar::IndexAs<u8>> ::columnar::Index for #c_ident <CVar> {
             type Ref = #name;
+            type Cursor<'__cursor> = ::columnar::common::DefaultCursor<'__cursor, Self> where Self: '__cursor;
+            #[inline(always)]
+            fn cursor(&self, range: ::core::ops::Range<usize>) -> Self::Cursor<'_> {
+                ::columnar::common::DefaultCursor::new(self, range)
+            }
             #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref {
                 match self.variant.index_as(index) {
@@ -1242,6 +1277,11 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
 
         impl<'columnar, CVar: ::columnar::Len + ::columnar::IndexAs<u8>> ::columnar::Index for &'columnar #c_ident <CVar> {
             type Ref = #name;
+            type Cursor<'__cursor> = ::columnar::common::DefaultCursor<'__cursor, Self> where Self: '__cursor;
+            #[inline(always)]
+            fn cursor(&self, range: ::core::ops::Range<usize>) -> Self::Cursor<'_> {
+                ::columnar::common::DefaultCursor::new(self, range)
+            }
             #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref {
                 match self.variant.index_as(index) {
