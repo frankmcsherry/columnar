@@ -589,13 +589,10 @@ pub mod common {
         &'a S : Index,
     {
         type Ref = <&'a S as Index>::Ref;
-        type Cursor<'b> = <&'a S as Index>::Cursor<'b> where Self: 'b;
+        impl_default_cursor!();
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
             assert!(index < self.upper - self.lower);
             (&self.slice).get(self.lower + index)
-        }
-        #[inline(always)] fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_> {
-            (&self.slice).cursor(self.lower + range.start .. self.lower + range.end)
         }
     }
 

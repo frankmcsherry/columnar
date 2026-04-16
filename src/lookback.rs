@@ -5,6 +5,7 @@
 use alloc::{vec::Vec, string::String};
 
 use crate::{Options, Results, Push, Index, Len, Clear, Borrow, Container, IndexAs};
+use crate::common::impl_default_cursor;
 
 /// A container that encodes repeated values with a `None` variant, at the cost of extra bits for every record.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -35,8 +36,43 @@ impl<TC, CC, VC: Len, WC: IndexAs<u64>> Len for Repeats<TC, CC, VC, WC> {
     #[inline(always)] fn len(&self) -> usize { self.inner.len() }
 }
 
+/// Cursor for sequential access to a [`Repeats`] container.
+///
+/// Avoids per-element `rank()` calls by maintaining the count of
+/// `Some` values incrementally. One bit test per element.
+pub struct RepeatsCursor<'a, TC, CC, VC, WC> {
+    inner: &'a Options<TC, CC, VC, WC>,
+    cursor: usize,
+    end: usize,
+    somes_cursor: usize,
+}
+
+impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>> Iterator for RepeatsCursor<'_, TC, CC, VC, WC> {
+    type Item = TC::Ref;
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.cursor < self.end {
+            if self.inner.indexes.get(self.cursor) {
+                self.somes_cursor += 1;
+            }
+            self.cursor += 1;
+            Some(self.inner.somes.get(self.somes_cursor - 1))
+        } else {
+            None
+        }
+    }
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.end - self.cursor;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>> ExactSizeIterator for RepeatsCursor<'_, TC, CC, VC, WC> {}
+
 impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>> Index for Repeats<TC, CC, VC, WC> {
     type Ref = TC::Ref;
+    type Cursor<'a> = RepeatsCursor<'a, TC, CC, VC, WC> where Self: 'a;
     #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
         match self.inner.get(index) {
             Some(item) => item,
@@ -46,6 +82,15 @@ impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>
             },
         }
     }
+    #[inline(always)] fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_> {
+        let somes_cursor = if range.is_empty() { 0 } else { self.inner.indexes.rank(range.start) };
+        RepeatsCursor {
+            inner: &self.inner,
+            cursor: range.start,
+            end: range.end,
+            somes_cursor,
+        }
+    }
 }
 
 impl<'a, TC> Index for &'a Repeats<TC>
@@ -53,6 +98,7 @@ where
     &'a TC: Index,
 {
     type Ref = <&'a TC as Index>::Ref;
+    impl_default_cursor!();
     #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
         match (&self.inner).get(index) {
             Some(item) => item,
@@ -159,8 +205,48 @@ impl<TC, VC, CC, RC: Len, WC: IndexAs<u64>, const N: u8> Len for Lookbacks<TC, V
     #[inline(always)] fn len(&self) -> usize { self.inner.len() }
 }
 
+/// Cursor for sequential access to a [`Lookbacks`] container.
+///
+/// Avoids per-element `rank()` calls by maintaining the count of
+/// `Ok` values incrementally.
+pub struct LookbacksCursor<'a, TC, VC, CC, RC, WC> {
+    inner: &'a Results<TC, VC, CC, RC, WC>,
+    cursor: usize,
+    end: usize,
+    oks_cursor: usize,
+}
+
+impl<TC: Index, VC: IndexAs<u8>, CC: IndexAs<u64> + Len, RC: IndexAs<u64> + Len, WC: IndexAs<u64>> Iterator for LookbacksCursor<'_, TC, VC, CC, RC, WC> {
+    type Item = TC::Ref;
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.cursor < self.end {
+            let result = if self.inner.indexes.get(self.cursor) {
+                let item = self.inner.oks.get(self.oks_cursor);
+                self.oks_cursor += 1;
+                item
+            } else {
+                let back: u8 = self.inner.errs.index_as(self.cursor - self.oks_cursor);
+                self.inner.oks.get(self.oks_cursor - 1 - (back as usize))
+            };
+            self.cursor += 1;
+            Some(result)
+        } else {
+            None
+        }
+    }
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.end - self.cursor;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<TC: Index, VC: IndexAs<u8>, CC: IndexAs<u64> + Len, RC: IndexAs<u64> + Len, WC: IndexAs<u64>> ExactSizeIterator for LookbacksCursor<'_, TC, VC, CC, RC, WC> {}
+
 impl<TC: Index, VC: IndexAs<u8>, CC: IndexAs<u64> + Len, RC: IndexAs<u64> + Len, WC: IndexAs<u64>, const N: u8> Index for Lookbacks<TC, VC, CC, RC, WC, N> {
     type Ref = TC::Ref;
+    type Cursor<'a> = LookbacksCursor<'a, TC, VC, CC, RC, WC> where Self: 'a;
     #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
         let rank = self.inner.indexes.rank(index);
         if self.inner.indexes.get(index) {
@@ -170,6 +256,15 @@ impl<TC: Index, VC: IndexAs<u8>, CC: IndexAs<u64> + Len, RC: IndexAs<u64> + Len,
             self.inner.oks.get(rank - 1 - (back as usize))
         }
     }
+    #[inline(always)] fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_> {
+        let oks_cursor = if range.is_empty() { 0 } else { self.inner.indexes.rank(range.start) };
+        LookbacksCursor {
+            inner: &self.inner,
+            cursor: range.start,
+            end: range.end,
+            oks_cursor,
+        }
+    }
 }
 
 impl<'a, TC, const N: u8> Index for &'a Lookbacks<TC, Vec<u8>, Vec<u64>, Vec<u64>, [u64; 2], N>
@@ -177,6 +272,7 @@ where
     &'a TC: Index,
 {
     type Ref = <&'a TC as Index>::Ref;
+    impl_default_cursor!();
     #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
         let rank = self.inner.indexes.rank(index);
         if self.inner.indexes.get(index) {

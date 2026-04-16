@@ -137,16 +137,11 @@ macro_rules! tuple_impl {
         }
         impl<'a, $($name),*> Index for &'a ($($name,)*) where $( &'a $name: Index),* {
             type Ref = ($(<&'a $name as Index>::Ref,)*);
-            type Cursor<'b> = $cursor_name<$(<&'a $name as Index>::Cursor<'b>,)*> where Self: 'b;
+            crate::common::impl_default_cursor!();
             #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref {
                 let ($($name,)*) = self;
                 ($($name.get(index),)*)
-            }
-            #[inline(always)]
-            fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_> {
-                let ($($name,)*) = self;
-                $cursor_name($($name.cursor(range.clone()),)*)
             }
         }
 
