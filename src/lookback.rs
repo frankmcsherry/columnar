@@ -673,4 +673,82 @@ mod test {
             assert_eq!(*borrowed.get(i as usize), i * 1000);
         }
     }
+
+    // --- cursor tests ---
+
+    #[test]
+    fn cursor_matches_get() {
+        let mut repeats: Repeats<Vec<u64>> = Default::default();
+        for i in 0..200u64 {
+            repeats.push(&(i / 3));
+        }
+        let borrowed = repeats.borrow();
+        for start in [0, 1, 50, 100, 199] {
+            for end in [start, start + 1, 200] {
+                let cursor_values: Vec<u64> = borrowed.cursor(start..end).map(|x| *x).collect();
+                let get_values: Vec<u64> = (start..end).map(|i| *borrowed.get(i)).collect();
+                assert_eq!(cursor_values, get_values, "mismatch at range {}..{}", start, end);
+            }
+        }
+    }
+
+    #[test]
+    fn cursor_iter_full() {
+        let repeats = repeats_from(&[1, 1, 2, 2, 3, 3, 1]);
+        let borrowed = repeats.borrow();
+        let values: Vec<u64> = borrowed.cursor_iter().map(|x| *x).collect();
+        assert_eq!(values, vec![1, 1, 2, 2, 3, 3, 1]);
+    }
+
+    #[test]
+    fn cursor_exact_size() {
+        let repeats = repeats_from(&[1, 1, 2, 3, 3]);
+        let borrowed = repeats.borrow();
+        let cursor = borrowed.cursor(1..4);
+        assert_eq!(cursor.len(), 3);
+    }
+
+    #[test]
+    fn cursor_empty_range() {
+        let repeats = repeats_from(&[1, 2, 3]);
+        let borrowed = repeats.borrow();
+        let values: Vec<u64> = borrowed.cursor(2..2).map(|x| *x).collect();
+        assert!(values.is_empty());
+    }
+
+    #[test]
+    fn cursor_all_repeats() {
+        let mut repeats: Repeats<Vec<u64>> = Default::default();
+        for _ in 0..100 {
+            repeats.push(&42u64);
+        }
+        let borrowed = repeats.borrow();
+        let values: Vec<u64> = borrowed.cursor(0..100).map(|x| *x).collect();
+        assert!(values.iter().all(|&x| x == 42));
+        assert_eq!(values.len(), 100);
+    }
+
+    #[test]
+    fn lookbacks_cursor_matches_get() {
+        let mut lookbacks: Lookbacks<Vec<u64>> = Default::default();
+        for i in 0..200u64 {
+            lookbacks.push(&(i % 7));
+        }
+        let borrowed = lookbacks.borrow();
+        for start in [0, 1, 50, 100, 199] {
+            for end in [start, start + 1, 200] {
+                let cursor_values: Vec<u64> = borrowed.cursor(start..end).map(|x| *x).collect();
+                let get_values: Vec<u64> = (start..end).map(|i| *borrowed.get(i)).collect();
+                assert_eq!(cursor_values, get_values, "mismatch at range {}..{}", start, end);
+            }
+        }
+    }
+
+    #[test]
+    fn lookbacks_cursor_iter_full() {
+        let lookbacks = lookbacks_from(&[10, 20, 10, 30, 20]);
+        let borrowed = lookbacks.borrow();
+        let values: Vec<u64> = borrowed.cursor_iter().map(|x| *x).collect();
+        assert_eq!(values, vec![10, 20, 10, 30, 20]);
+    }
 }

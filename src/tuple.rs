@@ -205,4 +205,19 @@ mod test {
         }
 
     }
+
+    #[test]
+    fn cursor_composition() {
+        use alloc::vec::Vec;
+        use crate::common::{Index, Push};
+
+        let mut column: crate::ContainerOf<(u64, u8)> = Default::default();
+        for i in 0..100u64 {
+            column.push((i, i as u8));
+        }
+
+        let cursor_values: Vec<_> = column.cursor(10..20).collect();
+        let get_values: Vec<_> = (10..20).map(|i| column.get(i)).collect();
+        assert_eq!(cursor_values, get_values);
+    }
 }
