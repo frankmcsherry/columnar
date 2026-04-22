@@ -43,6 +43,9 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
     let r_name = format!("{}Reference", name);
     let r_ident = syn::Ident::new(&r_name, name.span());
 
+    let cursor_name = format!("{}ContainerCursor", name);
+    let cursor_ident = syn::Ident::new(&cursor_name, name.span());
+
     let named = match &data_struct.fields {
         syn::Fields::Named(_) => true,
         syn::Fields::Unnamed(_) => false,
@@ -222,6 +225,23 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         }
     };
 
+    let cursor_struct = {
+        quote! {
+            /// Composed cursor for the derived container: zips field cursors.
+            #vis struct #cursor_ident < '__cursor, #(#container_types: ::columnar::Index + '__cursor),* > {
+                #( pub #names: <#container_types as ::columnar::Index>::Cursor<'__cursor>, )*
+            }
+
+            impl< '__cursor, #(#container_types: ::columnar::Index + '__cursor),* > Iterator for #cursor_ident < '__cursor, #(#container_types),* > {
+                type Item = #r_ident < #(<#container_types as ::columnar::Index>::Ref,)* >;
+                #[inline(always)]
+                fn next(&mut self) -> Option<Self::Item> {
+                    Some(#r_ident { #( #names: self.#names.next()?, )* })
+                }
+            }
+        }
+    };
+
     let index_own = {
         let impl_gen = quote! { < #(#container_types),* > };
         let ty_gen = quote! { < #(#container_types),* > };
@@ -232,10 +252,10 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         quote! {
             impl #impl_gen ::columnar::Index for #c_ident #ty_gen #where_clause {
                 type Ref = #index_type;
-                type Cursor<'__cursor> = ::columnar::common::DefaultCursor<'__cursor, Self> where Self: '__cursor;
+                type Cursor<'__cursor> = #cursor_ident <'__cursor, #(#container_types),*> where Self: '__cursor;
                 #[inline(always)]
                 fn cursor(&self, range: ::core::ops::Range<usize>) -> Self::Cursor<'_> {
-                    ::columnar::common::DefaultCursor::new(self, range)
+                    #cursor_ident { #( #names: self.#names.cursor(range.clone()), )* }
                 }
                 #[inline(always)]
                 fn get(&self, index: usize) -> Self::Ref {
@@ -427,6 +447,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
 
         #container_struct
         #reference_struct
+        #cursor_struct
 
         #partial_eq
 
