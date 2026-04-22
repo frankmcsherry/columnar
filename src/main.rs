@@ -1,4 +1,4 @@
-use columnar::{Columnar, ContainerBytes, Borrow};
+use columnar::{Columnar, ContainerBytes};
 
 #[derive(Columnar)]
 enum Group<T> {
@@ -24,7 +24,9 @@ fn main() {
 
     // Iterated column values should match the original `roster`.
     use columnar::Index;
-    for (col, row) in columns.into_index_iter().zip(roster) {
+    use columnar::Borrow;
+    let borrowed = columns.borrow();
+    for (col, row) in borrowed.index_iter().zip(roster) {
         match (col, row) {
             (GroupReference::Solo(p0), Group::Solo(p1)) => {
                 assert_eq!(p0.0, p1.0.as_bytes());
@@ -140,7 +142,8 @@ mod test {
             Test1 { foo: vec![5, 6, 7], bar: 8 },
         ];
         let test1c = columnar::Columnar::as_columns(test1s.iter());
-        for (a, b) in test1s.into_iter().zip((&test1c).into_index_iter()) {
+        use columnar::Borrow;
+        for (a, b) in test1s.into_iter().zip(test1c.borrow().index_iter()) {
             assert_eq!(a.foo.len(), b.foo.len());
             assert_eq!(a.bar, *b.bar);
         }
@@ -153,7 +156,8 @@ mod test {
 
         println!("{:?}", test3c);
 
-        let iterc = (&test3c).into_index_iter();
+        let test3c_borrowed = test3c.borrow();
+        let iterc = test3c_borrowed.index_iter();
 
         for (a, b) in test3s.into_iter().zip(iterc) {
             match (a, &b) {

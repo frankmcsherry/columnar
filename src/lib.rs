@@ -255,7 +255,6 @@ pub mod common {
 
         use alloc::vec::Vec;
         use crate::Len;
-        use crate::common::IterOwn;
 
         /// A type that can be mutably accessed by `usize`.
         pub trait IndexMut {
@@ -340,16 +339,6 @@ pub mod common {
             #[inline(always)]
             fn index_iter(&self) -> Self::Cursor<'_> where Self: Len {
                 self.cursor(0..self.len())
-            }
-            /// Converts `self` into an iterator.
-            ///
-            /// This has an awkward name to avoid collision with `into_iter()`, which may also be implemented.
-            #[inline(always)]
-            fn into_index_iter(self) -> IterOwn<Self> where Self: Sized {
-                IterOwn {
-                    index: 0,
-                    slice: self,
-                }
             }
         }
 
@@ -606,8 +595,9 @@ pub mod common {
         ///
         /// This method exists rather than an `IntoIterator` implementation to avoid
         /// a conflicting implementation for pushing an `I: IntoIterator` into `Vecs`.
+        /// Uses the slow `get()`-based path because the iterator owns the `Slice`.
         pub fn into_iter(self) -> IterOwn<Slice<S>> {
-            self.into_index_iter()
+            IterOwn::new(0, self)
         }
     }
 
@@ -617,6 +607,7 @@ pub mod common {
         }
     }
 
+    /// Owned iterator adapter used by [`Slice::into_iter`] — calls `get()` per element.
     pub struct IterOwn<S> {
         index: usize,
         slice: S,
