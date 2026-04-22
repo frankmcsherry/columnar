@@ -5,6 +5,7 @@
 use alloc::{vec::Vec, string::String};
 
 use crate::{Borrow, Index, IndexAs, Len, Clear, Push};
+use crate::common::impl_default_cursor;
 
 /// A tree node with a value and children.
 #[derive(Clone)]
@@ -98,6 +99,7 @@ impl<TC, BC: Len> Len for Trees<TC, BC> {
 
 impl<TC: Index + Copy, BC: IndexAs<u64> + Len + Copy> Index for Trees<TC, BC> {
     type Ref = TreesRef<TC, BC>;
+    impl_default_cursor!();
     #[inline(always)]
     fn get(&self, index: usize) -> Self::Ref {
         let root = self.groups.index_as(index) as usize;
@@ -117,6 +119,7 @@ where
     &'a BC: IndexAs<u64>,
 {
     type Ref = TreesRef<&'a TC, &'a BC>;
+    impl_default_cursor!();
     #[inline(always)]
     fn get(&self, index: usize) -> Self::Ref {
         let root = self.groups.index_as(index) as usize;

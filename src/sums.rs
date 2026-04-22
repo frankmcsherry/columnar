@@ -176,6 +176,7 @@ pub mod result {
 
     use crate::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, Borrow};
     use crate::RankSelect;
+    use crate::common::impl_default_cursor;
 
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[derive(Copy, Clone, Debug, Default, PartialEq)]
@@ -314,6 +315,7 @@ pub mod result {
         WC: IndexAs<u64>,
     {
         type Ref = Result<SC::Ref, TC::Ref>;
+        impl_default_cursor!();
         #[inline(always)]
         fn get(&self, index: usize) -> Self::Ref {
             if self.indexes.get(index) {
@@ -332,6 +334,7 @@ pub mod result {
         WC: IndexAs<u64>,
     {
         type Ref = Result<<&'a SC as Index>::Ref, <&'a TC as Index>::Ref>;
+        impl_default_cursor!();
         #[inline(always)]
         fn get(&self, index: usize) -> Self::Ref {
             if self.indexes.get(index) {
@@ -456,6 +459,7 @@ pub mod option {
 
     use crate::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, Borrow};
     use crate::RankSelect;
+    use crate::common::impl_default_cursor;
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[derive(Copy, Clone, Debug, Default, PartialEq)]
@@ -570,6 +574,7 @@ pub mod option {
 
     impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>> Index for Options<TC, CC, VC, WC> {
         type Ref = Option<TC::Ref>;
+        impl_default_cursor!();
         #[inline(always)]
         fn get(&self, index: usize) -> Self::Ref {
             if self.indexes.get(index) {
@@ -583,6 +588,7 @@ pub mod option {
     where &'a TC: Index
     {
         type Ref = Option<<&'a TC as Index>::Ref>;
+        impl_default_cursor!();
         #[inline(always)]
         fn get(&self, index: usize) -> Self::Ref {
             if self.indexes.get(index) {
@@ -664,15 +670,14 @@ pub mod option {
             // Type annotation is important to avoid some inference overflow.
             let store: Options<Vec<i32>> = Columnar::into_columns((0..100).map(Some));
             assert_eq!(store.len(), 100);
-            assert!((&store).index_iter().zip(0..100).all(|(a, b)| a == Some(&b)));
+            assert!(store.index_iter().zip(0..100).all(|(a, b)| a == Some(b)));
         }
 
         #[test]
         fn round_trip_none() {
             let store = Columnar::into_columns((0..100).map(|_x| None::<i32>));
             assert_eq!(store.len(), 100);
-            let foo = &store;
-            assert!(foo.index_iter().zip(0..100).all(|(a, _b)| a == None));
+            assert!(store.index_iter().zip(0..100).all(|(a, _b)| a == None));
         }
 
         #[test]
@@ -680,7 +685,7 @@ pub mod option {
             // Type annotation is important to avoid some inference overflow.
             let store: Options<Vec<i32>>  = Columnar::into_columns((0..100).map(|x| if x % 2 == 0 { Some(x) } else { None }));
             assert_eq!(store.len(), 100);
-            assert!((&store).index_iter().zip(0..100).all(|(a, b)| a == if b % 2 == 0 { Some(&b) } else { None }));
+            assert!(store.index_iter().zip(0..100).all(|(a, b)| a == if b % 2 == 0 { Some(b) } else { None }));
         }
     }
 }
@@ -689,6 +694,7 @@ pub mod discriminant {
 
     use alloc::{vec::Vec, string::String};
     use crate::{Clear, Container, Len, Index, IndexAs, Borrow};
+    use crate::common::impl_default_cursor;
 
     /// Tracks variant discriminants and offsets for enum containers.
     ///
@@ -790,6 +796,7 @@ pub mod discriminant {
     // Index for the borrowed form: returns (variant, offset).
     impl<'a> Index for Discriminant<&'a [u8], &'a [u64]> {
         type Ref = (u8, u64);
+        impl_default_cursor!();
         #[inline(always)]
         fn get(&self, index: usize) -> (u8, u64) {
             if self.is_heterogeneous() {

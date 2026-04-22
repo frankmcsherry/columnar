@@ -5,6 +5,7 @@
 use alloc::{vec::Vec, string::String};
 
 use crate::{Options, Results, Push, Index, Len, Clear, Borrow, Container, IndexAs};
+use crate::common::impl_default_cursor;
 
 /// A container that encodes repeated values with a `None` variant, at the cost of extra bits for every record.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -35,8 +36,66 @@ impl<TC, CC, VC: Len, WC: IndexAs<u64>> Len for Repeats<TC, CC, VC, WC> {
     #[inline(always)] fn len(&self) -> usize { self.inner.len() }
 }
 
+/// Cursor for sequential access to a [`Repeats`] container.
+///
+/// Avoids per-element `rank()` calls by maintaining the count of
+/// `Some` values incrementally. Caches the current bitvector word
+/// so only one fetch per 64 elements instead of per element.
+pub struct RepeatsCursor<'a, TC, CC, VC, WC> {
+    inner: &'a Options<TC, CC, VC, WC>,
+    cursor: usize,
+    end: usize,
+    somes_cursor: usize,
+    cached_word: u64,
+    word_index: usize,
+}
+
+impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>> RepeatsCursor<'_, TC, CC, VC, WC> {
+    #[inline(always)]
+    fn fetch_word(&self, block: usize) -> u64 {
+        if block == self.inner.indexes.values.values.len() {
+            self.inner.indexes.values.tail.index_as(0)
+        } else {
+            self.inner.indexes.values.values.index_as(block)
+        }
+    }
+}
+
+impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>> Iterator for RepeatsCursor<'_, TC, CC, VC, WC> {
+    type Item = TC::Ref;
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.cursor < self.end {
+            let block = self.cursor / 64;
+            let bit = self.cursor % 64;
+            if block != self.word_index {
+                self.word_index = block;
+                self.cached_word = self.fetch_word(block);
+            }
+            if (self.cached_word >> bit) & 1 == 1 {
+                self.somes_cursor += 1;
+            }
+            self.cursor += 1;
+            // Invariant: Repeats containers always start with a `Some`, so by the time we
+            // read a `None` (somes_cursor not incremented this step) somes_cursor >= 1.
+            debug_assert!(self.somes_cursor > 0, "Repeats container has no leading Some value");
+            Some(self.inner.somes.get(self.somes_cursor - 1))
+        } else {
+            None
+        }
+    }
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.end - self.cursor;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>> ExactSizeIterator for RepeatsCursor<'_, TC, CC, VC, WC> {}
+
 impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>> Index for Repeats<TC, CC, VC, WC> {
     type Ref = TC::Ref;
+    type Cursor<'a> = RepeatsCursor<'a, TC, CC, VC, WC> where Self: 'a;
     #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
         match self.inner.get(index) {
             Some(item) => item,
@@ -46,6 +105,25 @@ impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>
             },
         }
     }
+    #[inline(always)] fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_> {
+        let somes_cursor = if range.is_empty() { 0 } else { self.inner.indexes.rank(range.start) };
+        let block = range.start / 64;
+        let cached_word = if range.is_empty() {
+            0
+        } else if block == self.inner.indexes.values.values.len() {
+            self.inner.indexes.values.tail.index_as(0)
+        } else {
+            self.inner.indexes.values.values.index_as(block)
+        };
+        RepeatsCursor {
+            inner: &self.inner,
+            cursor: range.start,
+            end: range.end,
+            somes_cursor,
+            cached_word,
+            word_index: block,
+        }
+    }
 }
 
 impl<'a, TC> Index for &'a Repeats<TC>
@@ -53,6 +131,7 @@ where
     &'a TC: Index,
 {
     type Ref = <&'a TC as Index>::Ref;
+    impl_default_cursor!();
     #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
         match (&self.inner).get(index) {
             Some(item) => item,
@@ -159,8 +238,71 @@ impl<TC, VC, CC, RC: Len, WC: IndexAs<u64>, const N: u8> Len for Lookbacks<TC, V
     #[inline(always)] fn len(&self) -> usize { self.inner.len() }
 }
 
+/// Cursor for sequential access to a [`Lookbacks`] container.
+///
+/// Avoids per-element `rank()` calls by maintaining the count of
+/// `Ok` values incrementally. Caches the current bitvector word
+/// so only one fetch per 64 elements instead of per element.
+pub struct LookbacksCursor<'a, TC, VC, CC, RC, WC> {
+    inner: &'a Results<TC, VC, CC, RC, WC>,
+    cursor: usize,
+    end: usize,
+    oks_cursor: usize,
+    cached_word: u64,
+    word_index: usize,
+}
+
+impl<TC: Index, VC: IndexAs<u8>, CC: IndexAs<u64> + Len, RC: IndexAs<u64> + Len, WC: IndexAs<u64>> LookbacksCursor<'_, TC, VC, CC, RC, WC> {
+    #[inline(always)]
+    fn fetch_word(&self, block: usize) -> u64 {
+        if block == self.inner.indexes.values.values.len() {
+            self.inner.indexes.values.tail.index_as(0)
+        } else {
+            self.inner.indexes.values.values.index_as(block)
+        }
+    }
+}
+
+impl<TC: Index, VC: IndexAs<u8>, CC: IndexAs<u64> + Len, RC: IndexAs<u64> + Len, WC: IndexAs<u64>> Iterator for LookbacksCursor<'_, TC, VC, CC, RC, WC> {
+    type Item = TC::Ref;
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.cursor < self.end {
+            let block = self.cursor / 64;
+            let bit = self.cursor % 64;
+            if block != self.word_index {
+                self.word_index = block;
+                self.cached_word = self.fetch_word(block);
+            }
+            let result = if (self.cached_word >> bit) & 1 == 1 {
+                let item = self.inner.oks.get(self.oks_cursor);
+                self.oks_cursor += 1;
+                item
+            } else {
+                // Invariant: Lookbacks containers always start with an `Ok`, so by the time
+                // we read an `Err` oks_cursor >= 1.
+                debug_assert!(self.oks_cursor > 0, "Lookbacks container has no leading Ok value");
+                let back: u8 = self.inner.errs.index_as(self.cursor - self.oks_cursor);
+                self.inner.oks.get(self.oks_cursor - 1 - (back as usize))
+            };
+            self.cursor += 1;
+            Some(result)
+        } else {
+            None
+        }
+    }
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.end - self.cursor;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<TC: Index, VC: IndexAs<u8>, CC: IndexAs<u64> + Len, RC: IndexAs<u64> + Len, WC: IndexAs<u64>> ExactSizeIterator for LookbacksCursor<'_, TC, VC, CC, RC, WC> {}
+
 impl<TC: Index, VC: IndexAs<u8>, CC: IndexAs<u64> + Len, RC: IndexAs<u64> + Len, WC: IndexAs<u64>, const N: u8> Index for Lookbacks<TC, VC, CC, RC, WC, N> {
     type Ref = TC::Ref;
+    type Cursor<'a> = LookbacksCursor<'a, TC, VC, CC, RC, WC> where Self: 'a;
     #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
         let rank = self.inner.indexes.rank(index);
         if self.inner.indexes.get(index) {
@@ -170,6 +312,25 @@ impl<TC: Index, VC: IndexAs<u8>, CC: IndexAs<u64> + Len, RC: IndexAs<u64> + Len,
             self.inner.oks.get(rank - 1 - (back as usize))
         }
     }
+    #[inline(always)] fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_> {
+        let oks_cursor = if range.is_empty() { 0 } else { self.inner.indexes.rank(range.start) };
+        let block = range.start / 64;
+        let cached_word = if range.is_empty() {
+            0
+        } else if block == self.inner.indexes.values.values.len() {
+            self.inner.indexes.values.tail.index_as(0)
+        } else {
+            self.inner.indexes.values.values.index_as(block)
+        };
+        LookbacksCursor {
+            inner: &self.inner,
+            cursor: range.start,
+            end: range.end,
+            oks_cursor,
+            cached_word,
+            word_index: block,
+        }
+    }
 }
 
 impl<'a, TC, const N: u8> Index for &'a Lookbacks<TC, Vec<u8>, Vec<u64>, Vec<u64>, [u64; 2], N>
@@ -177,6 +338,7 @@ where
     &'a TC: Index,
 {
     type Ref = <&'a TC as Index>::Ref;
+    impl_default_cursor!();
     #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
         let rank = self.inner.indexes.rank(index);
         if self.inner.indexes.get(index) {
@@ -576,5 +738,89 @@ mod test {
         for i in 0..100u64 {
             assert_eq!(*borrowed.get(i as usize), i * 1000);
         }
+    }
+
+    // --- cursor tests ---
+
+    #[test]
+    fn cursor_matches_get() {
+        // 300 elements crosses multiple word boundaries (64, 128, 192, 256)
+        // and includes ranges starting / ending exactly on / near boundaries.
+        let mut repeats: Repeats<Vec<u64>> = Default::default();
+        for i in 0..300u64 {
+            repeats.push(&(i / 3));
+        }
+        let borrowed = repeats.borrow();
+        let probes = [0, 1, 63, 64, 65, 127, 128, 129, 191, 192, 193, 255, 256, 257, 299];
+        for &start in &probes {
+            for &end in &probes {
+                if end < start { continue; }
+                let cursor_values: Vec<u64> = borrowed.cursor(start..end).map(|x| *x).collect();
+                let get_values: Vec<u64> = (start..end).map(|i| *borrowed.get(i)).collect();
+                assert_eq!(cursor_values, get_values, "mismatch at range {}..{}", start, end);
+            }
+        }
+    }
+
+    #[test]
+    fn cursor_iter_full() {
+        let repeats = repeats_from(&[1, 1, 2, 2, 3, 3, 1]);
+        let borrowed = repeats.borrow();
+        let values: Vec<u64> = borrowed.index_iter().map(|x| *x).collect();
+        assert_eq!(values, vec![1, 1, 2, 2, 3, 3, 1]);
+    }
+
+    #[test]
+    fn cursor_exact_size() {
+        let repeats = repeats_from(&[1, 1, 2, 3, 3]);
+        let borrowed = repeats.borrow();
+        let cursor = borrowed.cursor(1..4);
+        assert_eq!(cursor.len(), 3);
+    }
+
+    #[test]
+    fn cursor_empty_range() {
+        let repeats = repeats_from(&[1, 2, 3]);
+        let borrowed = repeats.borrow();
+        let values: Vec<u64> = borrowed.cursor(2..2).map(|x| *x).collect();
+        assert!(values.is_empty());
+    }
+
+    #[test]
+    fn cursor_all_repeats() {
+        let mut repeats: Repeats<Vec<u64>> = Default::default();
+        for _ in 0..100 {
+            repeats.push(&42u64);
+        }
+        let borrowed = repeats.borrow();
+        let values: Vec<u64> = borrowed.cursor(0..100).map(|x| *x).collect();
+        assert!(values.iter().all(|&x| x == 42));
+        assert_eq!(values.len(), 100);
+    }
+
+    #[test]
+    fn lookbacks_cursor_matches_get() {
+        let mut lookbacks: Lookbacks<Vec<u64>> = Default::default();
+        for i in 0..300u64 {
+            lookbacks.push(&(i % 7));
+        }
+        let borrowed = lookbacks.borrow();
+        let probes = [0, 1, 63, 64, 65, 127, 128, 129, 191, 192, 193, 255, 256, 257, 299];
+        for &start in &probes {
+            for &end in &probes {
+                if end < start { continue; }
+                let cursor_values: Vec<u64> = borrowed.cursor(start..end).map(|x| *x).collect();
+                let get_values: Vec<u64> = (start..end).map(|i| *borrowed.get(i)).collect();
+                assert_eq!(cursor_values, get_values, "mismatch at range {}..{}", start, end);
+            }
+        }
+    }
+
+    #[test]
+    fn lookbacks_cursor_iter_full() {
+        let lookbacks = lookbacks_from(&[10, 20, 10, 30, 20]);
+        let borrowed = lookbacks.borrow();
+        let values: Vec<u64> = borrowed.index_iter().map(|x| *x).collect();
+        assert_eq!(values, vec![10, 20, 10, 30, 20]);
     }
 }
