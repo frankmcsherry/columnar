@@ -76,6 +76,9 @@ impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>
                 self.somes_cursor += 1;
             }
             self.cursor += 1;
+            // Invariant: Repeats containers always start with a `Some`, so by the time we
+            // read a `None` (somes_cursor not incremented this step) somes_cursor >= 1.
+            debug_assert!(self.somes_cursor > 0, "Repeats container has no leading Some value");
             Some(self.inner.somes.get(self.somes_cursor - 1))
         } else {
             None
@@ -276,6 +279,9 @@ impl<TC: Index, VC: IndexAs<u8>, CC: IndexAs<u64> + Len, RC: IndexAs<u64> + Len,
                 self.oks_cursor += 1;
                 item
             } else {
+                // Invariant: Lookbacks containers always start with an `Ok`, so by the time
+                // we read an `Err` oks_cursor >= 1.
+                debug_assert!(self.oks_cursor > 0, "Lookbacks container has no leading Ok value");
                 let back: u8 = self.inner.errs.index_as(self.cursor - self.oks_cursor);
                 self.inner.oks.get(self.oks_cursor - 1 - (back as usize))
             };
@@ -738,13 +744,17 @@ mod test {
 
     #[test]
     fn cursor_matches_get() {
+        // 300 elements crosses multiple word boundaries (64, 128, 192, 256)
+        // and includes ranges starting / ending exactly on / near boundaries.
         let mut repeats: Repeats<Vec<u64>> = Default::default();
-        for i in 0..200u64 {
+        for i in 0..300u64 {
             repeats.push(&(i / 3));
         }
         let borrowed = repeats.borrow();
-        for start in [0, 1, 50, 100, 199] {
-            for end in [start, start + 1, 200] {
+        let probes = [0, 1, 63, 64, 65, 127, 128, 129, 191, 192, 193, 255, 256, 257, 299];
+        for &start in &probes {
+            for &end in &probes {
+                if end < start { continue; }
                 let cursor_values: Vec<u64> = borrowed.cursor(start..end).map(|x| *x).collect();
                 let get_values: Vec<u64> = (start..end).map(|i| *borrowed.get(i)).collect();
                 assert_eq!(cursor_values, get_values, "mismatch at range {}..{}", start, end);
@@ -791,12 +801,14 @@ mod test {
     #[test]
     fn lookbacks_cursor_matches_get() {
         let mut lookbacks: Lookbacks<Vec<u64>> = Default::default();
-        for i in 0..200u64 {
+        for i in 0..300u64 {
             lookbacks.push(&(i % 7));
         }
         let borrowed = lookbacks.borrow();
-        for start in [0, 1, 50, 100, 199] {
-            for end in [start, start + 1, 200] {
+        let probes = [0, 1, 63, 64, 65, 127, 128, 129, 191, 192, 193, 255, 256, 257, 299];
+        for &start in &probes {
+            for &end in &probes {
+                if end < start { continue; }
                 let cursor_values: Vec<u64> = borrowed.cursor(start..end).map(|x| *x).collect();
                 let get_values: Vec<u64> = (start..end).map(|i| *borrowed.get(i)).collect();
                 assert_eq!(cursor_values, get_values, "mismatch at range {}..{}", start, end);

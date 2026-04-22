@@ -226,6 +226,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
     };
 
     let cursor_struct = {
+        let first_name = &names[0];
         quote! {
             /// Composed cursor for the derived container: zips field cursors.
             #vis struct #cursor_ident < '__cursor, #(#container_types: ::columnar::Index + '__cursor),* > {
@@ -238,7 +239,14 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
                 fn next(&mut self) -> Option<Self::Item> {
                     Some(#r_ident { #( #names: self.#names.next()?, )* })
                 }
+                #[inline(always)]
+                fn size_hint(&self) -> (usize, Option<usize>) {
+                    self.#first_name.size_hint()
+                }
             }
+
+            impl< '__cursor, #(#container_types: ::columnar::Index + '__cursor),* > ExactSizeIterator for #cursor_ident < '__cursor, #(#container_types),* >
+                where #(<#container_types as ::columnar::Index>::Cursor<'__cursor>: ExactSizeIterator),* {}
         }
     };
 
