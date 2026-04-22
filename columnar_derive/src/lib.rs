@@ -77,12 +77,13 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
     let derive = quote! { #[derive(Copy, Clone, Debug, Default)] };
 
     let container_struct = {
+        let field_docs: Vec<String> = names.iter().map(|n| format!("Container for `{}`.", n)).collect();
         quote! {
             /// Derived columnar container for a struct.
             #derive
             #vis struct #c_ident < #(#container_types),* >{
                 #(
-                    /// Container for #names.
+                    #[doc = #field_docs]
                     pub #names : #container_types,
                 )*
             }
@@ -104,13 +105,14 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
             quote! {}
         };
 
+        let field_docs: Vec<String> = names.iter().map(|n| format!("Field for `{}`.", n)).collect();
         quote! {
             /// Derived columnar reference for a struct.
             #[derive(Copy, Clone, Debug)]
             #attr
             #vis struct #r_ident #ty_gen {
                 #(
-                    /// Field for #names.
+                    #[doc = #field_docs]
                     pub #names : #reference_types,
                 )*
             }
@@ -227,10 +229,14 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
 
     let cursor_struct = {
         let first_name = &names[0];
+        let field_docs: Vec<String> = names.iter().map(|n| format!("Cursor for `{}`.", n)).collect();
         quote! {
             /// Composed cursor for the derived container: zips field cursors.
             #vis struct #cursor_ident < '__cursor, #(#container_types: ::columnar::Index + '__cursor),* > {
-                #( pub #names: <#container_types as ::columnar::Index>::Cursor<'__cursor>, )*
+                #(
+                    #[doc = #field_docs]
+                    pub #names: <#container_types as ::columnar::Index>::Cursor<'__cursor>,
+                )*
             }
 
             impl< '__cursor, #(#container_types: ::columnar::Index + '__cursor),* > Iterator for #cursor_ident < '__cursor, #(#container_types),* > {
