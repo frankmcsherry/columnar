@@ -670,15 +670,14 @@ pub mod option {
             // Type annotation is important to avoid some inference overflow.
             let store: Options<Vec<i32>> = Columnar::into_columns((0..100).map(Some));
             assert_eq!(store.len(), 100);
-            assert!((&store).index_iter().zip(0..100).all(|(a, b)| a == Some(&b)));
+            assert!(store.index_iter().zip(0..100).all(|(a, b)| a == Some(b)));
         }
 
         #[test]
         fn round_trip_none() {
             let store = Columnar::into_columns((0..100).map(|_x| None::<i32>));
             assert_eq!(store.len(), 100);
-            let foo = &store;
-            assert!(foo.index_iter().zip(0..100).all(|(a, _b)| a == None));
+            assert!(store.index_iter().zip(0..100).all(|(a, _b)| a == None));
         }
 
         #[test]
@@ -686,7 +685,7 @@ pub mod option {
             // Type annotation is important to avoid some inference overflow.
             let store: Options<Vec<i32>>  = Columnar::into_columns((0..100).map(|x| if x % 2 == 0 { Some(x) } else { None }));
             assert_eq!(store.len(), 100);
-            assert!((&store).index_iter().zip(0..100).all(|(a, b)| a == if b % 2 == 0 { Some(&b) } else { None }));
+            assert!(store.index_iter().zip(0..100).all(|(a, b)| a == if b % 2 == 0 { Some(b) } else { None }));
         }
     }
 }

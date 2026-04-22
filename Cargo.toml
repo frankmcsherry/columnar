@@ -65,3 +65,7 @@ harness = false
 [[bench]]
 name = "derived_cursor"
 harness = false
+
+[[bench]]
+name = "options_cursor"
+harness = false

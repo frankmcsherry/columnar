@@ -330,19 +330,16 @@ pub mod common {
                 else { Some(self.get(self.len()-1)) }
             }
             /// Returns a cursor over all elements.
-            #[inline(always)]
-            fn cursor_iter(&self) -> Self::Cursor<'_> where Self: Len {
-                self.cursor(0..self.len())
-            }
-            /// Converts `&self` into an iterator.
+            ///
+            /// Delegates to [`Self::cursor`] over `0..self.len()`. Specialized
+            /// container types (e.g. [`Repeats`](crate::Repeats)) return a
+            /// fast cursor that avoids per-element `rank()` calls; others
+            /// fall back to [`DefaultCursor`] which wraps `get()`.
             ///
             /// This has an awkward name to avoid collision with `iter()`, which may also be implemented.
             #[inline(always)]
-            fn index_iter(&self) -> IterOwn<&Self> {
-                IterOwn {
-                    index: 0,
-                    slice: self,
-                }
+            fn index_iter(&self) -> Self::Cursor<'_> where Self: Len {
+                self.cursor(0..self.len())
             }
             /// Converts `self` into an iterator.
             ///

@@ -756,7 +756,7 @@ mod test {
     fn cursor_iter_full() {
         let repeats = repeats_from(&[1, 1, 2, 2, 3, 3, 1]);
         let borrowed = repeats.borrow();
-        let values: Vec<u64> = borrowed.cursor_iter().map(|x| *x).collect();
+        let values: Vec<u64> = borrowed.index_iter().map(|x| *x).collect();
         assert_eq!(values, vec![1, 1, 2, 2, 3, 3, 1]);
     }
 
@@ -808,7 +808,7 @@ mod test {
     fn lookbacks_cursor_iter_full() {
         let lookbacks = lookbacks_from(&[10, 20, 10, 30, 20]);
         let borrowed = lookbacks.borrow();
-        let values: Vec<u64> = borrowed.cursor_iter().map(|x| *x).collect();
+        let values: Vec<u64> = borrowed.index_iter().map(|x| *x).collect();
         assert_eq!(values, vec![10, 20, 10, 30, 20]);
     }
 }

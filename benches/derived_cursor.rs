@@ -48,7 +48,7 @@ fn derived_cursor(bencher: &mut Bencher) {
     bencher.bytes = (N * 16) as u64;
     bencher.iter(|| {
         let mut sum = 0u64;
-        for row in borrowed.cursor_iter() {
+        for row in borrowed.index_iter() {
             sum = sum.wrapping_add(*row.key).wrapping_add(*row.val);
         }
         bencher::black_box(sum);
@@ -69,7 +69,7 @@ fn tuple_cursor(bencher: &mut Bencher) {
     bencher.bytes = (N * 16) as u64;
     bencher.iter(|| {
         let mut sum = 0u64;
-        for (k, v) in borrowed.cursor_iter() {
+        for (k, v) in borrowed.index_iter() {
             sum = sum.wrapping_add(*k).wrapping_add(*v);
         }
         bencher::black_box(sum);
