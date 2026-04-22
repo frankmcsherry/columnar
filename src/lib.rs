@@ -103,13 +103,14 @@ pub type BorrowedOf<'a, T> = <ContainerOf<T> as Borrow>::Borrowed<'a>;
 /// Equivalent to `<ContainerOf<T> as Borrow>::Ref<'a>`.
 pub type Ref<'a, T> = <ContainerOf<T> as Borrow>::Ref<'a>;
 
-/// For a lifetime, the cursor type over the borrowed container of columnar type `T`.
+/// For a lifetime, the cursor type over an [`Index`](common::Index)-implementing container.
 ///
-/// Equivalent to `<BorrowedOf<'a, T> as Index>::Cursor<'a>`.
+/// Equivalent to `<C as Index>::Cursor<'a>`.
 ///
-/// Useful for naming iterator types returned by `container.borrow().index_iter()`,
-/// for example in the associated-type slot of a trait impl.
-pub type CursorOf<'a, T> = <BorrowedOf<'a, T> as common::Index>::Cursor<'a>;
+/// Useful for naming iterator types in trait associated-type slots.
+/// For a columnar user type `T`, compose with [`BorrowedOf`]:
+/// `CursorOf<'a, BorrowedOf<'a, T>>`.
+pub type CursorOf<'a, C> = <C as common::Index>::Cursor<'a>;
 
 /// A type that can be borrowed into a preferred reference type.
 pub trait Borrow: Len + Clone + 'static {
