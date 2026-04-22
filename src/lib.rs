@@ -295,6 +295,7 @@ pub mod common {
 
         use alloc::vec::Vec;
         use crate::Len;
+        use super::IterOwn;
 
         /// A type that can be mutably accessed by `usize`.
         pub trait IndexMut {
@@ -390,6 +391,19 @@ pub mod common {
             #[inline(always)]
             fn index_iter(&self) -> Self::Cursor<'_> where Self: Len {
                 self.cursor(0..self.len())
+            }
+            /// Converts `self` into an iterator, owning the container.
+            ///
+            /// Always uses the slow `get()`-based path ([`IterOwn`]); specialized cursors
+            /// borrow from the container, so the fast path is only available via
+            /// [`Self::index_iter`] or [`Self::cursor`]. Useful when you need to consume
+            /// a `Copy` borrowed container (e.g. to return an iterator whose lifetime is
+            /// tied to the borrowed value's inner references rather than a `&self` borrow).
+            ///
+            /// This has an awkward name to avoid collision with `into_iter()`, which may also be implemented.
+            #[inline(always)]
+            fn into_index_iter(self) -> IterOwn<Self> where Self: Sized {
+                IterOwn::new(0, self)
             }
         }
 

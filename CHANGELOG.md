@@ -15,11 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `Index::index_iter` returns `Self::Cursor<'_>` instead of `IterOwn<&Self>`, so existing callers pick up specialized cursors automatically; `container.borrow().index_iter()` now compiles, which previously required `into_index_iter` to sidestep a missing `&&[T]: Index` impl
-
-### Removed
-
-- `Index::into_index_iter`; use `container.borrow().index_iter()` or `Slice::into_iter` instead
+- `Index::index_iter` returns `Self::Cursor<'_>` instead of `IterOwn<&Self>`, so existing callers pick up specialized cursors automatically; `container.borrow().index_iter()` now compiles, which previously required `into_index_iter` to sidestep a missing `&&[T]: Index` impl. `into_index_iter` remains as a slow-path escape hatch for consuming iteration.
 
 ## [0.12.1](https://github.com/frankmcsherry/columnar/compare/columnar-v0.12.0...columnar-v0.12.1) - 2026-03-29
 

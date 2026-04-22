@@ -47,7 +47,7 @@ impl Op {
                 Ok(aa.iter().map(|a| -a).collect())
             },
             (Op::Len, [.., Err(aa)]) => {
-                Ok(aa.index_iter().map(|a| a.len() as i32).collect())
+                Ok(aa.into_index_iter().map(|a| a.len() as i32).collect())
             },
             (Op::Fmt, [.., Ok(aa)]) => {
                 let mut result = Strings::default();
