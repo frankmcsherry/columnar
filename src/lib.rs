@@ -251,6 +251,37 @@ pub mod common {
     /// There are several traits, with a core distinction being whether the returned reference depends on the lifetime of `&self`.
     /// For one trait `Index` the result does not depend on this lifetime.
     /// There is a third trait `IndexMut` that allows mutable access, that may be less commonly implemented.
+    ///
+    /// # Design notes
+    ///
+    /// ## `Ref` is not a GAT, deliberately
+    ///
+    /// Borrowed containers (e.g. `&'a [T]`, `Bools<&'a [u64], &'a [u64]>`) carry their own
+    /// lifetime, and we want `get()` to return references tied to *that* lifetime — not to
+    /// the `&self` borrow of the call. A GAT `Ref<'a>` would unify those lifetimes and
+    /// force every returned reference to live only as long as the `&self` borrow, losing
+    /// the property that borrowed containers can hand out refs at their own lifetime.
+    ///
+    /// ## `Cursor<'a>` *is* a GAT
+    ///
+    /// Cursors own nothing; they borrow from the container to hold live iteration state.
+    /// That state is tied to the `&self` call, so a GAT is the correct shape. The tension
+    /// with `Ref` disappears because cursors carry data-flow state, not data references.
+    /// Specialized cursors (e.g. [`crate::Repeats`]) avoid per-element `rank()` by
+    /// maintaining counters incrementally; trivial containers use [`crate::common::DefaultCursor`].
+    ///
+    /// ## Composition is the point
+    ///
+    /// Tuple and derived-struct `Index` impls compose field cursors into a compound cursor
+    /// (`TupleCursorN`, `FooContainerCursor`). A `Repeats` field deep inside a derived
+    /// struct still gets rank-free iteration when accessed via `index_iter()`, because
+    /// the outer cursor type zips the inner specialized cursors.
+    ///
+    /// ## Ref-form impls (`&'a Container`) use `DefaultCursor`
+    ///
+    /// Composed cursors for the `&'a` form would need lifetime gymnastics around
+    /// intermediate borrows that don't work generically. The hot path is always
+    /// `container.borrow().index_iter()`, which hits the owned-form specialized cursor.
     pub mod index {
 
         use alloc::vec::Vec;
@@ -283,11 +314,18 @@ pub mod common {
             #[inline(always)] fn get_mut(&mut self, index: usize) -> Self::IndexMut<'_> { &mut self[index] }
         }
 
-        /// A type that can be accessed by `usize` but without borrowing `self`.
+        /// A type that can be accessed by `usize` but without borrowing `self`
+        /// for the returned reference.
         ///
-        /// This can be useful for types which include their own lifetimes, and
-        /// which wish to express that their reference has the same lifetime.
-        /// In the GAT `Index`, the `Ref<'_>` lifetime would be tied to `&self`.
+        /// [`Self::Ref`] is not a GAT: its lifetime is fixed by the container
+        /// rather than tied to `&self`. This lets borrowed containers return
+        /// references at their own lifetime, outliving the `&self` borrow.
+        ///
+        /// [`Self::Cursor`] *is* a GAT, holding live iteration state for the
+        /// duration of a `&self` borrow. Specialized cursors (e.g. for
+        /// [`crate::Repeats`]) avoid per-element work like `rank()`; trivial
+        /// containers fall back to [`crate::common::DefaultCursor`], which wraps `get()`.
+        /// See the module docs for the full rationale.
         ///
         /// This trait may be challenging to implement for owning containers,
         /// for example `Vec<_>`, which would need their `Ref` type to depend
@@ -300,6 +338,10 @@ pub mod common {
         /// do not then go on to examine the values. If you plan to access a field
         /// (for tuples or structs) or variant match (for enums) you should perform
         /// this before calling `get(index)` when able.
+        ///
+        /// For sequential iteration, prefer [`Self::cursor`] / [`Self::index_iter`]:
+        /// they may be significantly faster than repeated `get()` by avoiding per-element
+        /// setup (such as `rank()` in [`crate::Repeats`] / [`crate::Lookbacks`]).
         pub trait Index {
             /// The type returned by the `get` method.
             ///
@@ -309,7 +351,7 @@ pub mod common {
             /// Iterator type for sequential access over a range.
             ///
             /// Types with efficient sequential strategies (e.g. [`Repeats`](crate::Repeats))
-            /// override this with a specialized iterator. Others use [`DefaultCursor`].
+            /// override this with a specialized iterator. Others use [`crate::common::DefaultCursor`].
             type Cursor<'a>: Iterator<Item = Self::Ref> where Self: 'a;
             /// Returns the reference type for location `index`.
             ///
@@ -333,7 +375,7 @@ pub mod common {
             /// Delegates to [`Self::cursor`] over `0..self.len()`. Specialized
             /// container types (e.g. [`Repeats`](crate::Repeats)) return a
             /// fast cursor that avoids per-element `rank()` calls; others
-            /// fall back to [`DefaultCursor`] which wraps `get()`.
+            /// fall back to [`crate::common::DefaultCursor`] which wraps `get()`.
             ///
             /// This has an awkward name to avoid collision with `iter()`, which may also be implemented.
             #[inline(always)]
