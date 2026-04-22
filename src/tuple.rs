@@ -220,4 +220,28 @@ mod test {
         let get_values: Vec<_> = (10..20).map(|i| column.get(i)).collect();
         assert_eq!(cursor_values, get_values);
     }
+
+    /// `.borrow().index_iter()` used to fail on columnar 0.12 because
+    /// `index_iter(&self) -> IterOwn<&Self>` needed `&&[T]: Index`.
+    /// With the cursor-based `index_iter`, this pattern compiles and
+    /// uses the composed cursor path.
+    #[test]
+    fn borrow_then_index_iter() {
+        use alloc::vec::Vec;
+        use crate::common::{Index, Push};
+        use crate::Borrow;
+
+        let mut column: crate::ContainerOf<(u64, u8)> = Default::default();
+        for i in 0..100u64 {
+            column.push((i, i as u8));
+        }
+
+        let borrowed = column.borrow();
+        let values: Vec<_> = borrowed.index_iter().collect();
+        assert_eq!(values.len(), 100);
+        for (i, (k, v)) in values.iter().enumerate() {
+            assert_eq!(**k, i as u64);
+            assert_eq!(**v, i as u8);
+        }
+    }
 }
