@@ -69,3 +69,7 @@ harness = false
 [[bench]]
 name = "options_cursor"
 harness = false
+
+[[bench]]
+name = "repeats_cursor"
+harness = false
