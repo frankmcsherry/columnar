@@ -7,7 +7,39 @@ use crate::{Columnar, Container, Borrow, Len, Clear, Index, IndexMut, Push};
 // These are all macro based, because the implementations are very similar.
 // The macro requires two names, one for the store and one for pushable types.
 macro_rules! tuple_impl {
-    ( $($name:ident,$name2:ident,$idx:tt)+) => (
+    ( $seq_iter_name:ident ; $($name:ident,$name2:ident,$idx:tt)+) => (
+
+        /// Composed sequence iterator for tuples: zips field `Sequence::Iter`s.
+        pub struct $seq_iter_name<$($name,)*>($(pub $name,)*);
+
+        impl<$($name: Iterator,)*> Iterator for $seq_iter_name<$($name,)*> {
+            type Item = ($($name::Item,)*);
+            #[inline(always)]
+            fn next(&mut self) -> Option<Self::Item> {
+                Some(($(self.$idx.next()?,)*))
+            }
+            #[inline(always)]
+            fn size_hint(&self) -> (usize, Option<usize>) {
+                self.0.size_hint()
+            }
+        }
+
+        impl<$($name: ExactSizeIterator,)*> ExactSizeIterator for $seq_iter_name<$($name,)*> {}
+
+        impl<$($name: crate::Sequence),*> crate::Sequence for ($($name,)*) {
+            type Ref = ($($name::Ref,)*);
+            type Iter = $seq_iter_name<$($name::Iter,)*>;
+            #[inline(always)]
+            fn seq_iter(self) -> Self::Iter {
+                let ($($name,)*) = self;
+                $seq_iter_name($($name.seq_iter(),)*)
+            }
+            #[inline(always)]
+            fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+                let ($($name,)*) = self;
+                $seq_iter_name($($name.seq_iter_range(range.clone()),)*)
+            }
+        }
 
         impl<$($name: Columnar),*> Columnar for ($($name,)*) {
             #[inline(always)]
@@ -150,16 +182,16 @@ macro_rules! tuple_impl {
     )
 }
 
-tuple_impl!(A,AA,0);
-tuple_impl!(A,AA,0 B,BB,1);
-tuple_impl!(A,AA,0 B,BB,1 C,CC,2);
-tuple_impl!(A,AA,0 B,BB,1 C,CC,2 D,DD,3);
-tuple_impl!(A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4);
-tuple_impl!(A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5);
-tuple_impl!(A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5 G,GG,6);
-tuple_impl!(A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5 G,GG,6 H,HH,7);
-tuple_impl!(A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5 G,GG,6 H,HH,7 I,II,8);
-tuple_impl!(A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5 G,GG,6 H,HH,7 I,II,8 J,JJ,9);
+tuple_impl!(TupleSeqIter1; A,AA,0);
+tuple_impl!(TupleSeqIter2; A,AA,0 B,BB,1);
+tuple_impl!(TupleSeqIter3; A,AA,0 B,BB,1 C,CC,2);
+tuple_impl!(TupleSeqIter4; A,AA,0 B,BB,1 C,CC,2 D,DD,3);
+tuple_impl!(TupleSeqIter5; A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4);
+tuple_impl!(TupleSeqIter6; A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5);
+tuple_impl!(TupleSeqIter7; A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5 G,GG,6);
+tuple_impl!(TupleSeqIter8; A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5 G,GG,6 H,HH,7);
+tuple_impl!(TupleSeqIter9; A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5 G,GG,6 H,HH,7 I,II,8);
+tuple_impl!(TupleSeqIter10; A,AA,0 B,BB,1 C,CC,2 D,DD,3 E,EE,4 F,FF,5 G,GG,6 H,HH,7 I,II,8 J,JJ,9);
 
 #[cfg(test)]
 mod test {
@@ -182,5 +214,137 @@ mod test {
             assert_eq!((&column).get((2*i+1) as usize), (&i, &(i as u8), &b""[..]));
         }
 
+    }
+
+    #[test]
+    fn tuple_seq_iter_parity() {
+        use alloc::vec::Vec;
+        use crate::common::{Index, Push};
+        use crate::{Borrow, Sequence};
+
+        let mut column: crate::ContainerOf<(u64, u8)> = Default::default();
+        for i in 0..100u64 {
+            column.push((i, i as u8));
+        }
+        let borrowed = column.borrow();
+        let via_seq: Vec<_> = borrowed.seq_iter().collect();
+        let via_get: Vec<_> = (0..100).map(|i| borrowed.get(i)).collect();
+        assert_eq!(via_seq, via_get);
+    }
+
+    #[test]
+    fn tuple_seq_iter_range_parity() {
+        use alloc::vec::Vec;
+        use crate::common::{Index, Push};
+        use crate::{Borrow, Sequence};
+
+        let mut column: crate::ContainerOf<(u64, u8)> = Default::default();
+        for i in 0..100u64 {
+            column.push((i, i as u8));
+        }
+        let borrowed = column.borrow();
+        let via_seq: Vec<_> = borrowed.seq_iter_range(10..20).collect();
+        let via_get: Vec<_> = (10..20).map(|i| borrowed.get(i)).collect();
+        assert_eq!(via_seq, via_get);
+    }
+
+    #[test]
+    fn derived_struct_seq_iter() {
+        use alloc::vec::Vec;
+        use crate::common::{Index, Push};
+        use crate::{Borrow, Columnar, Sequence};
+
+        #[derive(Columnar, Debug, PartialEq)]
+        #[columnar(derive(PartialEq))]
+        struct Row { key: u64, val: u64 }
+
+        let mut column: <Row as Columnar>::Container = Default::default();
+        for i in 0..50u64 {
+            column.push(&Row { key: i, val: i * 10 });
+        }
+        let borrowed = column.borrow();
+        let via_seq: Vec<_> = borrowed.seq_iter().collect();
+        let via_get: Vec<_> = (0..50).map(|i| borrowed.get(i)).collect();
+        assert_eq!(via_seq, via_get);
+    }
+
+    #[test]
+    fn borrow_then_seq_iter_no_temp_issue() {
+        use alloc::vec::Vec;
+        use crate::common::Push;
+        use crate::{Borrow, Sequence};
+
+        fn collect_values(container: &crate::ContainerOf<(u64, u8)>) -> Vec<(u64, u8)> {
+            container.borrow().seq_iter().map(|(k, v)| (*k, *v)).collect()
+        }
+
+        let mut column: crate::ContainerOf<(u64, u8)> = Default::default();
+        for i in 0..10u64 {
+            column.push((i, i as u8));
+        }
+        let got = collect_values(&column);
+        assert_eq!(got.len(), 10);
+        assert_eq!(got[0], (0u64, 0u8));
+        assert_eq!(got[9], (9u64, 9u8));
+    }
+
+    #[test]
+    fn ref_container_seq_iter() {
+        use alloc::vec::Vec;
+        use crate::common::Push;
+        use crate::{Borrow, Sequence};
+
+        let mut column: crate::ContainerOf<(u64, u8)> = Default::default();
+        for i in 0..10u64 {
+            column.push((i, i as u8));
+        }
+        let ref_column = &column;
+        let via_seq: Vec<_> = ref_column.borrow().seq_iter().collect();
+        assert_eq!(via_seq.len(), 10);
+    }
+
+    #[test]
+    fn drain_hrtb_resolves() {
+        use alloc::vec::Vec;
+        use crate::{ContainerBytes, Sequence, Columnar};
+
+        // Minimal stand-in for timely's DrainContainer.
+        trait MockDrain {
+            type Item<'a> where Self: 'a;
+            type Iter<'a>: Iterator<Item = Self::Item<'a>> where Self: 'a;
+            fn drain<'a>(&'a mut self) -> Self::Iter<'a>;
+        }
+
+        struct MockColumn<C: ContainerBytes>(C);
+
+        // Deviation from spec: the spec wrote
+        //   `for<'a> C::Borrowed<'a>: Sequence<Ref = <C as Borrow>::Ref<'a>>`
+        // but that HRTB binding triggers E0582 ("binding for associated type
+        // `Ref` references lifetime `'a`, which does not appear in the trait
+        // input types"). Dropping the `Ref = ...` binding and projecting
+        // `Item`/`Iter` through `Sequence` directly resolves cleanly and
+        // still proves the HRTB is usable at the implementor boundary.
+        impl<C> MockDrain for MockColumn<C>
+        where
+            C: ContainerBytes,
+            for<'a> C::Borrowed<'a>: Sequence,
+        {
+            type Item<'a> = <C::Borrowed<'a> as Sequence>::Ref where Self: 'a;
+            type Iter<'a> = <C::Borrowed<'a> as Sequence>::Iter where Self: 'a;
+            fn drain<'a>(&'a mut self) -> Self::Iter<'a> {
+                self.0.borrow().seq_iter()
+            }
+        }
+
+        // `<u64 as Columnar>::Container` is `Vec<u64>`; inherent `Vec::push`
+        // shadows `Push<&u64>`, so the spec's `container.push(&i)` fails to
+        // compile. Passing `i` by value routes through inherent push.
+        let mut container: <u64 as Columnar>::Container = Default::default();
+        for i in 0..20u64 {
+            container.push(i);
+        }
+        let mut col = MockColumn(container);
+        let drained: Vec<_> = col.drain().collect();
+        assert_eq!(drained.len(), 20);
     }
 }

@@ -69,6 +69,22 @@ impl<C: Index> Index for Boxed<C> {
     type Ref = Boxed<C::Ref>;
     #[inline(always)] fn get(&self, index: usize) -> Self::Ref { Boxed(self.0.get(index)) }
 }
+impl<C: Index + Len> crate::Sequence for Boxed<C>
+where
+    Self: Copy,
+{
+    type Ref = <Self as crate::Index>::Ref;
+    type Iter = crate::common::IterOwn<Self>;
+    #[inline(always)]
+    fn seq_iter(self) -> Self::Iter {
+        let len = crate::Len::len(&self);
+        crate::common::IterOwn::with_range(self, 0..len)
+    }
+    #[inline(always)]
+    fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+        crate::common::IterOwn::with_range(self, range)
+    }
+}
 impl<C: IndexMut> IndexMut for Boxed<C> {
     type IndexMut<'a> = Boxed<C::IndexMut<'a>> where Self: 'a;
     #[inline(always)] fn get_mut(&mut self, index: usize) -> Self::IndexMut<'_> { Boxed(self.0.get_mut(index)) }

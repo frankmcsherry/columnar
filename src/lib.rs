@@ -17,11 +17,17 @@ use alloc::vec::Vec;
 extern crate columnar_derive;
 pub use columnar_derive::Columnar;
 
+// Allow the derive macro's `::columnar::...` paths to resolve to this crate
+// from within its own tests.
+#[cfg(test)]
+extern crate self as columnar;
+
 pub mod adts;
 pub mod boxed;
 pub mod bytes;
 pub mod lookback;
 pub mod primitive;
+pub mod sequence;
 pub mod string;
 pub mod sums;
 pub mod vector;
@@ -35,6 +41,7 @@ pub use vector::Vecs;
 pub use string::Strings;
 pub use sums::{rank_select::RankSelect, result::Results, option::Options, discriminant::Discriminant};
 pub use lookback::{Repeats, Lookbacks};
+pub use sequence::Sequence;
 
 /// A type that can be represented in columnar form.
 ///
@@ -251,11 +258,24 @@ pub mod common {
     /// There are several traits, with a core distinction being whether the returned reference depends on the lifetime of `&self`.
     /// For one trait `Index` the result does not depend on this lifetime.
     /// There is a third trait `IndexMut` that allows mutable access, that may be less commonly implemented.
+    ///
+    /// # Design notes
+    ///
+    /// ## `Ref` is not a GAT, deliberately
+    ///
+    /// Borrowed containers (e.g. `&'a [T]`, `Bools<&'a [u64], &'a [u64]>`) carry their own
+    /// lifetime, and we want `get()` to return references tied to *that* lifetime — not to
+    /// the `&self` borrow of the call. A GAT `Ref<'a>` would unify those lifetimes and
+    /// force every returned reference to live only as long as the `&self` borrow, losing
+    /// the property that borrowed containers can hand out refs at their own lifetime.
+    ///
+    /// Sequential iteration lives on the separate [`crate::Sequence`] trait, implemented
+    /// on `Copy` borrowed types. Specialized fast paths (e.g. [`crate::Repeats`],
+    /// [`crate::Lookbacks`], tuples, derived structs) live under `Sequence::Iter`.
     pub mod index {
 
         use alloc::vec::Vec;
         use crate::Len;
-        use crate::common::IterOwn;
 
         /// A type that can be mutably accessed by `usize`.
         pub trait IndexMut {
@@ -284,11 +304,13 @@ pub mod common {
             #[inline(always)] fn get_mut(&mut self, index: usize) -> Self::IndexMut<'_> { &mut self[index] }
         }
 
-        /// A type that can be accessed by `usize` but without borrowing `self`.
+        /// A type that can be accessed by `usize` but without borrowing `self`
+        /// for the returned reference.
         ///
-        /// This can be useful for types which include their own lifetimes, and
-        /// which wish to express that their reference has the same lifetime.
-        /// In the GAT `Index`, the `Ref<'_>` lifetime would be tied to `&self`.
+        /// [`Self::Ref`] is not a GAT: its lifetime is fixed by the container
+        /// rather than tied to `&self`. This lets borrowed containers return
+        /// references at their own lifetime, outliving the `&self` borrow.
+        /// See the module docs for the full rationale.
         ///
         /// This trait may be challenging to implement for owning containers,
         /// for example `Vec<_>`, which would need their `Ref` type to depend
@@ -301,6 +323,10 @@ pub mod common {
         /// do not then go on to examine the values. If you plan to access a field
         /// (for tuples or structs) or variant match (for enums) you should perform
         /// this before calling `get(index)` when able.
+        ///
+        /// For sequential iteration, prefer [`crate::Sequence`] on the borrowed form:
+        /// it may be significantly faster than repeated `get()` by avoiding per-element
+        /// setup (such as `rank()` in [`crate::Repeats`] / [`crate::Lookbacks`]).
         pub trait Index {
             /// The type returned by the `get` method.
             ///
@@ -318,32 +344,22 @@ pub mod common {
                 if self.is_empty() { None }
                 else { Some(self.get(self.len()-1)) }
             }
-            /// Converts `&self` into an iterator.
-            ///
-            /// This has an awkward name to avoid collision with `iter()`, which may also be implemented.
-            #[inline(always)]
-            fn index_iter(&self) -> IterOwn<&Self> {
-                IterOwn {
-                    index: 0,
-                    slice: self,
-                }
-            }
-            /// Converts `self` into an iterator.
-            ///
-            /// This has an awkward name to avoid collision with `into_iter()`, which may also be implemented.
-            #[inline(always)]
-            fn into_index_iter(self) -> IterOwn<Self> where Self: Sized {
-                IterOwn {
-                    index: 0,
-                    slice: self,
-                }
-            }
         }
 
         // These implementations aim to reveal a longer lifetime, or to copy results to avoid a lifetime.
         impl<'a, T> Index for &'a [T] {
             type Ref = &'a T;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { &self[index] }
+        }
+        impl<'a, T> crate::Sequence for &'a [T] {
+            type Ref = &'a T;
+            type Iter = core::slice::Iter<'a, T>;
+            #[inline(always)]
+            fn seq_iter(self) -> Self::Iter { self.iter() }
+            #[inline(always)]
+            fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+                self[range].iter()
+            }
         }
         impl<T: Copy> Index for [T] {
             type Ref = T;
@@ -356,6 +372,16 @@ pub mod common {
         impl<'a, T> Index for &'a Vec<T> {
             type Ref = &'a T;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { &self[index] }
+        }
+        impl<'a, T> crate::Sequence for &'a Vec<T> {
+            type Ref = &'a T;
+            type Iter = core::slice::Iter<'a, T>;
+            #[inline(always)]
+            fn seq_iter(self) -> Self::Iter { self.iter() }
+            #[inline(always)]
+            fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+                self[range].iter()
+            }
         }
         impl<T: Copy> Index for Vec<T> {
             type Ref = T;
@@ -554,6 +580,21 @@ pub mod common {
             (&self.slice).get(self.lower + index)
         }
     }
+    impl<'a, S> crate::Sequence for &'a Slice<S>
+    where
+        &'a S: crate::Index + crate::Sequence<Ref = <&'a S as crate::Index>::Ref>,
+    {
+        type Ref = <&'a S as crate::Index>::Ref;
+        type Iter = <&'a S as crate::Sequence>::Iter;
+        #[inline(always)]
+        fn seq_iter(self) -> Self::Iter {
+            (&self.slice).seq_iter_range(self.lower..self.upper)
+        }
+        #[inline(always)]
+        fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+            (&self.slice).seq_iter_range(self.lower + range.start..self.lower + range.end)
+        }
+    }
 
     impl<S: IndexMut> IndexMut for Slice<S> {
         type IndexMut<'a> = S::IndexMut<'a> where S: 'a;
@@ -568,8 +609,9 @@ pub mod common {
         ///
         /// This method exists rather than an `IntoIterator` implementation to avoid
         /// a conflicting implementation for pushing an `I: IntoIterator` into `Vecs`.
+        /// Uses the slow `get()`-based path because the iterator owns the `Slice`.
         pub fn into_iter(self) -> IterOwn<Slice<S>> {
-            self.into_index_iter()
+            IterOwn::new(0, self)
         }
     }
 
@@ -579,21 +621,28 @@ pub mod common {
         }
     }
 
+    /// Owned iterator adapter used by [`Slice::into_iter`] — calls `get()` per element.
     pub struct IterOwn<S> {
         index: usize,
         slice: S,
+        end: Option<usize>,
     }
 
     impl<S> IterOwn<S> {
         pub fn new(index: usize, slice: S) -> Self {
-            Self { index, slice }
+            Self { index, slice, end: None }
+        }
+        /// Construct with an explicit `end` (exclusive).
+        pub fn with_range(slice: S, range: core::ops::Range<usize>) -> Self {
+            Self { index: range.start, slice, end: Some(range.end) }
         }
     }
 
     impl<S: Index + Len> Iterator for IterOwn<S> {
         type Item = S::Ref;
         #[inline(always)] fn next(&mut self) -> Option<Self::Item> {
-            if self.index < self.slice.len() {
+            let end = self.end.unwrap_or_else(|| self.slice.len());
+            if self.index < end {
                 let result = self.slice.get(self.index);
                 self.index += 1;
                 Some(result)
@@ -603,7 +652,9 @@ pub mod common {
         }
         #[inline(always)]
         fn size_hint(&self) -> (usize, Option<usize>) {
-            (self.slice.len() - self.index, Some(self.slice.len() - self.index))
+            let end = self.end.unwrap_or_else(|| self.slice.len());
+            let remaining = end - self.index;
+            (remaining, Some(remaining))
         }
     }
 

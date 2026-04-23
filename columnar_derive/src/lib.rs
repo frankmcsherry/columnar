@@ -74,12 +74,13 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
     let derive = quote! { #[derive(Copy, Clone, Debug, Default)] };
 
     let container_struct = {
+        let field_docs: Vec<String> = names.iter().map(|n| format!("Container for `{}`.", n)).collect();
         quote! {
             /// Derived columnar container for a struct.
             #derive
             #vis struct #c_ident < #(#container_types),* >{
                 #(
-                    /// Container for #names.
+                    #[doc = #field_docs]
                     pub #names : #container_types,
                 )*
             }
@@ -101,13 +102,14 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
             quote! {}
         };
 
+        let field_docs: Vec<String> = names.iter().map(|n| format!("Field for `{}`.", n)).collect();
         quote! {
             /// Derived columnar reference for a struct.
             #[derive(Copy, Clone, Debug)]
             #attr
             #vis struct #r_ident #ty_gen {
                 #(
-                    /// Field for #names.
+                    #[doc = #field_docs]
                     pub #names : #reference_types,
                 )*
             }
@@ -217,6 +219,55 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
                 fn push(&mut self, item: #index_type) {
                     #destructure_self
                     #(#push)*
+                }
+            }
+        }
+    };
+
+    let seq_iter_struct = {
+        let seq_iter_ident = syn::Ident::new(&format!("{}SeqIter", c_ident), c_ident.span());
+        let first_name = &names[0];
+        quote! {
+            /// Composed SeqIter for the derived container: zips field `Sequence::Iter`s.
+            #vis struct #seq_iter_ident < #(#container_types),* > {
+                #( pub #names: #container_types, )*
+            }
+
+            impl< #(#container_types: Iterator),* > Iterator for #seq_iter_ident < #(#container_types),* > {
+                type Item = #r_ident < #(#container_types::Item,)* >;
+                #[inline(always)]
+                fn next(&mut self) -> Option<Self::Item> {
+                    Some(#r_ident { #( #names: self.#names.next()?, )* })
+                }
+                #[inline(always)]
+                fn size_hint(&self) -> (usize, Option<usize>) {
+                    self.#first_name.size_hint()
+                }
+            }
+
+            impl< #(#container_types: ExactSizeIterator),* > ExactSizeIterator for #seq_iter_ident < #(#container_types),* > {}
+        }
+    };
+
+    let sequence_impl = {
+        let seq_iter_ident = syn::Ident::new(&format!("{}SeqIter", c_ident), c_ident.span());
+        let impl_gen = quote! { < #(#container_types: ::columnar::Sequence),* > };
+        let ty_gen = quote! { < #(#container_types),* > };
+
+        quote! {
+            impl #impl_gen ::columnar::Sequence for #c_ident #ty_gen
+            where
+                #c_ident #ty_gen : Copy + ::columnar::Len,
+            {
+                type Ref = #r_ident < #(<#container_types as ::columnar::Sequence>::Ref,)* >;
+                type Iter = #seq_iter_ident < #(<#container_types as ::columnar::Sequence>::Iter,)* >;
+                #[inline(always)]
+                fn seq_iter(self) -> Self::Iter {
+                    #seq_iter_ident { #( #names: <#container_types as ::columnar::Sequence>::seq_iter(self.#names), )* }
+                }
+                #[inline(always)]
+                fn seq_iter_range(self, range: ::core::ops::Range<usize>) -> Self::Iter {
+                    #seq_iter_ident { #( #names: <#container_types as ::columnar::Sequence>::seq_iter_range(self.#names, range.clone()), )* }
                 }
             }
         }
@@ -417,6 +468,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
 
         #container_struct
         #reference_struct
+        #seq_iter_struct
 
         #partial_eq
 
@@ -433,6 +485,8 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         #from_bytes
 
         #columnar_impl
+
+        #sequence_impl
 
     }.into()
 }

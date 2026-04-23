@@ -23,8 +23,8 @@ fn main() {
     let mut columns = Columnar::as_columns(roster.iter());
 
     // Iterated column values should match the original `roster`.
-    use columnar::Index;
-    for (col, row) in columns.into_index_iter().zip(roster) {
+    use columnar::common::IterOwn;
+    for (col, row) in IterOwn::new(0, &columns).zip(roster) {
         match (col, row) {
             (GroupReference::Solo(p0), Group::Solo(p1)) => {
                 assert_eq!(p0.0, p1.0.as_bytes());
@@ -133,14 +133,14 @@ mod test {
     #[test]
     fn round_trip() {
 
-        use columnar::Index;
+        use columnar::common::IterOwn;
 
         let test1s = vec![
             Test1 { foo: vec![1, 2, 3], bar: 4 },
             Test1 { foo: vec![5, 6, 7], bar: 8 },
         ];
         let test1c = columnar::Columnar::as_columns(test1s.iter());
-        for (a, b) in test1s.into_iter().zip((&test1c).into_index_iter()) {
+        for (a, b) in test1s.into_iter().zip(IterOwn::new(0, &test1c)) {
             assert_eq!(a.foo.len(), b.foo.len());
             assert_eq!(a.bar, *b.bar);
         }
@@ -153,7 +153,7 @@ mod test {
 
         println!("{:?}", test3c);
 
-        let iterc = (&test3c).into_index_iter();
+        let iterc = IterOwn::new(0, &test3c);
 
         for (a, b) in test3s.into_iter().zip(iterc) {
             match (a, &b) {
