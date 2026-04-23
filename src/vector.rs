@@ -175,6 +175,22 @@ impl<TC: Copy, BC: Len+IndexAs<u64>> Index for Vecs<TC, BC> {
         Slice::new(lower, upper, self.values)
     }
 }
+impl<TC: Copy, BC: Len+IndexAs<u64>> crate::Sequence for Vecs<TC, BC>
+where
+    Self: Copy,
+{
+    type Ref = <Self as Index>::Ref;
+    type Iter = crate::common::IterOwn<Self>;
+    #[inline(always)]
+    fn seq_iter(self) -> Self::Iter {
+        let len = crate::Len::len(&self);
+        crate::common::IterOwn::with_range(self, 0..len)
+    }
+    #[inline(always)]
+    fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+        crate::common::IterOwn::with_range(self, range)
+    }
+}
 impl<'a, TC, BC: Len+IndexAs<u64>> Index for &'a Vecs<TC, BC> {
     type Ref = Slice<&'a TC>;
     #[inline(always)]
@@ -182,6 +198,19 @@ impl<'a, TC, BC: Len+IndexAs<u64>> Index for &'a Vecs<TC, BC> {
         let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
         let upper = self.bounds.index_as(index);
         Slice::new(lower, upper, &self.values)
+    }
+}
+impl<'a, TC, BC: Len+IndexAs<u64>> crate::Sequence for &'a Vecs<TC, BC> {
+    type Ref = <Self as Index>::Ref;
+    type Iter = crate::common::IterOwn<Self>;
+    #[inline(always)]
+    fn seq_iter(self) -> Self::Iter {
+        let len = crate::Len::len(&self);
+        crate::common::IterOwn::with_range(self, 0..len)
+    }
+    #[inline(always)]
+    fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+        crate::common::IterOwn::with_range(self, range)
     }
 }
 impl<TC, BC: Len+IndexAs<u64>> IndexMut for Vecs<TC, BC> {

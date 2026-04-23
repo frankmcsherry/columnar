@@ -157,6 +157,22 @@ impl<'a, BC: Len+IndexAs<u64>> Index for Strings<BC, &'a [u8]> {
         &self.values[lower .. upper]
     }
 }
+impl<'a, BC: Len+IndexAs<u64>> crate::Sequence for Strings<BC, &'a [u8]>
+where
+    Self: Copy,
+{
+    type Ref = <Self as Index>::Ref;
+    type Iter = crate::common::IterOwn<Self>;
+    #[inline(always)]
+    fn seq_iter(self) -> Self::Iter {
+        let len = crate::Len::len(&self);
+        crate::common::IterOwn::with_range(self, 0..len)
+    }
+    #[inline(always)]
+    fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+        crate::common::IterOwn::with_range(self, range)
+    }
+}
 impl<'a, BC: Len+IndexAs<u64>> Index for &'a Strings<BC, Vec<u8>> {
     type Ref = &'a [u8];
     #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
@@ -165,6 +181,19 @@ impl<'a, BC: Len+IndexAs<u64>> Index for &'a Strings<BC, Vec<u8>> {
         let lower: usize = lower.try_into().expect("bounds must fit in `usize`");
         let upper: usize = upper.try_into().expect("bounds must fit in `usize`");
         &self.values[lower .. upper]
+    }
+}
+impl<'a, BC: Len+IndexAs<u64>> crate::Sequence for &'a Strings<BC, Vec<u8>> {
+    type Ref = <Self as Index>::Ref;
+    type Iter = crate::common::IterOwn<Self>;
+    #[inline(always)]
+    fn seq_iter(self) -> Self::Iter {
+        let len = crate::Len::len(&self);
+        crate::common::IterOwn::with_range(self, 0..len)
+    }
+    #[inline(always)]
+    fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+        crate::common::IterOwn::with_range(self, range)
     }
 }
 

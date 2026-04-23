@@ -47,7 +47,8 @@ impl Op {
                 Ok(aa.iter().map(|a| -a).collect())
             },
             (Op::Len, [.., Err(aa)]) => {
-                Ok(aa.into_index_iter().map(|a| a.len() as i32).collect())
+                use columnar::Len;
+                Ok((0..aa.len()).map(|i| aa.get(i).len() as i32).collect())
             },
             (Op::Fmt, [.., Ok(aa)]) => {
                 let mut result = Strings::default();

@@ -48,6 +48,99 @@ impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>
     }
 }
 
+/// Iterator for sequential access to a [`Repeats::Borrowed`] view.
+///
+/// Avoids per-element `rank()` by maintaining the count of `Some` values
+/// incrementally, and caches the current bitvector word so only one fetch
+/// per 64 elements happens instead of per element. Holds the Borrowed by
+/// value; its lifetime is the Borrowed's inner `'a`, not any outer shell.
+pub struct RepeatsSeqIter<TC, CC, VC, WC> {
+    inner: Options<TC, CC, VC, WC>,
+    cursor: usize,
+    end: usize,
+    somes_cursor: usize,
+    cached_word: u64,
+    word_index: usize,
+}
+
+impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>> RepeatsSeqIter<TC, CC, VC, WC> {
+    #[inline(always)]
+    fn fetch_word(&self, block: usize) -> u64 {
+        if block == self.inner.indexes.values.values.len() {
+            self.inner.indexes.values.tail.index_as(0)
+        } else {
+            self.inner.indexes.values.values.index_as(block)
+        }
+    }
+}
+
+impl<TC: Index + Copy, CC: IndexAs<u64> + Len + Copy, VC: IndexAs<u64> + Len + Copy, WC: IndexAs<u64> + Copy> Iterator for RepeatsSeqIter<TC, CC, VC, WC> {
+    type Item = TC::Ref;
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.cursor < self.end {
+            let block = self.cursor / 64;
+            let bit = self.cursor % 64;
+            if block != self.word_index {
+                self.word_index = block;
+                self.cached_word = self.fetch_word(block);
+            }
+            if (self.cached_word >> bit) & 1 == 1 {
+                self.somes_cursor += 1;
+            }
+            self.cursor += 1;
+            debug_assert!(self.somes_cursor > 0, "Repeats container has no leading Some value");
+            Some(self.inner.somes.get(self.somes_cursor - 1))
+        } else {
+            None
+        }
+    }
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.end - self.cursor;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<TC: Index + Copy, CC: IndexAs<u64> + Len + Copy, VC: IndexAs<u64> + Len + Copy, WC: IndexAs<u64> + Copy> ExactSizeIterator for RepeatsSeqIter<TC, CC, VC, WC> {}
+
+impl<TC, CC, VC, WC> crate::Sequence for Repeats<TC, CC, VC, WC>
+where
+    Repeats<TC, CC, VC, WC>: Copy + Index<Ref = TC::Ref>,
+    TC: Index + Copy,
+    CC: IndexAs<u64> + Len + Copy,
+    VC: IndexAs<u64> + Len + Copy,
+    WC: IndexAs<u64> + Copy,
+{
+    type Ref = TC::Ref;
+    type Iter = RepeatsSeqIter<TC, CC, VC, WC>;
+    #[inline(always)]
+    fn seq_iter(self) -> Self::Iter {
+        let len = self.len();
+        self.seq_iter_range(0..len)
+    }
+    #[inline(always)]
+    fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+        let somes_cursor = if range.is_empty() { 0 } else { self.inner.indexes.rank(range.start) };
+        let block = range.start / 64;
+        let cached_word = if range.is_empty() {
+            0
+        } else if block == self.inner.indexes.values.values.len() {
+            self.inner.indexes.values.tail.index_as(0)
+        } else {
+            self.inner.indexes.values.values.index_as(block)
+        };
+        RepeatsSeqIter {
+            inner: self.inner,
+            cursor: range.start,
+            end: range.end,
+            somes_cursor,
+            cached_word,
+            word_index: block,
+        }
+    }
+}
+
 impl<'a, TC> Index for &'a Repeats<TC>
 where
     &'a TC: Index,
@@ -168,6 +261,104 @@ impl<TC: Index, VC: IndexAs<u8>, CC: IndexAs<u64> + Len, RC: IndexAs<u64> + Len,
         } else {
             let back: u8 = self.inner.errs.index_as(index - rank);
             self.inner.oks.get(rank - 1 - (back as usize))
+        }
+    }
+}
+
+/// Iterator for sequential access to a [`Lookbacks::Borrowed`] view.
+///
+/// Avoids per-element `rank()` by maintaining the count of `Ok` values
+/// incrementally, and caches the current bitvector word so only one fetch
+/// per 64 elements happens instead of per element.
+pub struct LookbacksSeqIter<TC, VC, CC, RC, WC> {
+    inner: Results<TC, VC, CC, RC, WC>,
+    cursor: usize,
+    end: usize,
+    oks_cursor: usize,
+    cached_word: u64,
+    word_index: usize,
+}
+
+impl<TC: Index, VC: IndexAs<u8>, CC: IndexAs<u64> + Len, RC: IndexAs<u64> + Len, WC: IndexAs<u64>> LookbacksSeqIter<TC, VC, CC, RC, WC> {
+    #[inline(always)]
+    fn fetch_word(&self, block: usize) -> u64 {
+        if block == self.inner.indexes.values.values.len() {
+            self.inner.indexes.values.tail.index_as(0)
+        } else {
+            self.inner.indexes.values.values.index_as(block)
+        }
+    }
+}
+
+impl<TC: Index + Copy, VC: IndexAs<u8> + Copy, CC: IndexAs<u64> + Len + Copy, RC: IndexAs<u64> + Len + Copy, WC: IndexAs<u64> + Copy> Iterator for LookbacksSeqIter<TC, VC, CC, RC, WC> {
+    type Item = TC::Ref;
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.cursor < self.end {
+            let block = self.cursor / 64;
+            let bit = self.cursor % 64;
+            if block != self.word_index {
+                self.word_index = block;
+                self.cached_word = self.fetch_word(block);
+            }
+            let result = if (self.cached_word >> bit) & 1 == 1 {
+                let item = self.inner.oks.get(self.oks_cursor);
+                self.oks_cursor += 1;
+                item
+            } else {
+                debug_assert!(self.oks_cursor > 0, "Lookbacks container has no leading Ok value");
+                let back: u8 = self.inner.errs.index_as(self.cursor - self.oks_cursor);
+                self.inner.oks.get(self.oks_cursor - 1 - (back as usize))
+            };
+            self.cursor += 1;
+            Some(result)
+        } else {
+            None
+        }
+    }
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.end - self.cursor;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<TC: Index + Copy, VC: IndexAs<u8> + Copy, CC: IndexAs<u64> + Len + Copy, RC: IndexAs<u64> + Len + Copy, WC: IndexAs<u64> + Copy> ExactSizeIterator for LookbacksSeqIter<TC, VC, CC, RC, WC> {}
+
+impl<TC, VC, CC, RC, WC, const N: u8> crate::Sequence for Lookbacks<TC, VC, CC, RC, WC, N>
+where
+    Lookbacks<TC, VC, CC, RC, WC, N>: Copy + Index<Ref = TC::Ref>,
+    TC: Index + Copy,
+    VC: IndexAs<u8> + Copy,
+    CC: IndexAs<u64> + Len + Copy,
+    RC: IndexAs<u64> + Len + Copy,
+    WC: IndexAs<u64> + Copy,
+{
+    type Ref = TC::Ref;
+    type Iter = LookbacksSeqIter<TC, VC, CC, RC, WC>;
+    #[inline(always)]
+    fn seq_iter(self) -> Self::Iter {
+        let len = self.len();
+        self.seq_iter_range(0..len)
+    }
+    #[inline(always)]
+    fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+        let oks_cursor = if range.is_empty() { 0 } else { self.inner.indexes.rank(range.start) };
+        let block = range.start / 64;
+        let cached_word = if range.is_empty() {
+            0
+        } else if block == self.inner.indexes.values.values.len() {
+            self.inner.indexes.values.tail.index_as(0)
+        } else {
+            self.inner.indexes.values.values.index_as(block)
+        };
+        LookbacksSeqIter {
+            inner: self.inner,
+            cursor: range.start,
+            end: range.end,
+            oks_cursor,
+            cached_word,
+            word_index: block,
         }
     }
 }
@@ -575,6 +766,112 @@ mod test {
         let borrowed = lookbacks.borrow();
         for i in 0..100u64 {
             assert_eq!(*borrowed.get(i as usize), i * 1000);
+        }
+    }
+
+    // --- sequence iteration tests ---
+
+    #[test]
+    fn seq_iter_exact_size() {
+        use crate::Sequence;
+        let repeats = repeats_from(&[1, 1, 2, 3, 3]);
+        let borrowed = repeats.borrow();
+        let iter = borrowed.seq_iter_range(1..4);
+        assert_eq!(iter.len(), 3);
+    }
+
+    #[test]
+    fn seq_iter_all_repeats() {
+        use crate::Sequence;
+        let mut repeats: Repeats<Vec<u64>> = Default::default();
+        for _ in 0..100 {
+            repeats.push(&42u64);
+        }
+        let borrowed = repeats.borrow();
+        let values: Vec<u64> = borrowed.seq_iter_range(0..100).map(|x| *x).collect();
+        assert!(values.iter().all(|&x| x == 42));
+        assert_eq!(values.len(), 100);
+    }
+
+    #[test]
+    fn lookbacks_seq_iter_full() {
+        use crate::Sequence;
+        let lookbacks = lookbacks_from(&[10, 20, 10, 30, 20]);
+        let borrowed = lookbacks.borrow();
+        let values: Vec<u64> = borrowed.seq_iter().map(|x| *x).collect();
+        assert_eq!(values, vec![10, 20, 10, 30, 20]);
+    }
+
+    #[test]
+    fn repeats_seq_iter_parity() {
+        use crate::Sequence;
+        let mut repeats: Repeats<Vec<u64>> = Default::default();
+        for i in 0..300u64 {
+            repeats.push(&(i / 3));
+        }
+        let borrowed = repeats.borrow();
+        let via_seq: Vec<u64> = borrowed.seq_iter().map(|x| *x).collect();
+        let via_get: Vec<u64> = (0..borrowed.len()).map(|i| *borrowed.get(i)).collect();
+        assert_eq!(via_seq, via_get);
+    }
+
+    #[test]
+    fn repeats_seq_iter_range_word_boundaries() {
+        use crate::Sequence;
+        let mut repeats: Repeats<Vec<u64>> = Default::default();
+        for i in 0..300u64 {
+            repeats.push(&(i / 5));
+        }
+        let borrowed = repeats.borrow();
+        let probes = [0, 1, 63, 64, 65, 127, 128, 129, 191, 192, 193, 255, 256, 257, 299];
+        for &start in &probes {
+            for &end in &probes {
+                if end < start { continue; }
+                let via_seq: Vec<u64> = borrowed.seq_iter_range(start..end).map(|x| *x).collect();
+                let via_get: Vec<u64> = (start..end).map(|i| *borrowed.get(i)).collect();
+                assert_eq!(via_seq, via_get, "mismatch at range {}..{}", start, end);
+            }
+        }
+    }
+
+    #[test]
+    fn repeats_seq_iter_empty_range() {
+        use crate::Sequence;
+        let repeats = repeats_from(&[1, 2, 3]);
+        let borrowed = repeats.borrow();
+        let via_seq: Vec<u64> = borrowed.seq_iter_range(2..2).map(|x| *x).collect();
+        assert!(via_seq.is_empty());
+    }
+
+    #[test]
+    fn lookbacks_seq_iter_parity() {
+        use crate::Sequence;
+        let mut lookbacks: Lookbacks<Vec<u64>> = Default::default();
+        for i in 0..300u64 {
+            lookbacks.push(&(i % 7));
+        }
+        let borrowed = lookbacks.borrow();
+        let via_seq: Vec<u64> = borrowed.seq_iter().map(|x| *x).collect();
+        let via_get: Vec<u64> = (0..borrowed.len()).map(|i| *borrowed.get(i)).collect();
+        assert_eq!(via_seq, via_get);
+    }
+
+    #[test]
+    fn lookbacks_seq_iter_range_word_boundaries() {
+        use crate::Sequence;
+        let mut lookbacks: Lookbacks<Vec<u64>> = Default::default();
+        for i in 0..300u64 {
+            lookbacks.push(&(i % 11));
+        }
+        let borrowed = lookbacks.borrow();
+        let probes = [0, 1, 63, 64, 65, 127, 128, 129, 191, 192, 193, 255, 256, 257, 299];
+        for &start in &probes {
+            for &end in &probes {
+                if end < start { continue; }
+                let via_seq: Vec<u64> = borrowed.seq_iter_range(start..end).map(|x| *x).collect();
+                let via_get: Vec<u64> = (start..end).map(|i| *borrowed.get(i)).collect();
+                assert_eq!(via_seq, via_get, "mismatch at range {}..{}", start, end);
+            }
         }
     }
 }

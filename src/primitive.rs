@@ -129,9 +129,38 @@ mod sizes {
         type Ref = usize;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().expect("Usizes values should fit in `usize`") }
     }
+    impl<CV: IndexAs<u64> + Len> crate::Sequence for Usizes<CV>
+    where
+        Self: Copy,
+    {
+        type Ref = <Self as crate::Index>::Ref;
+        type Iter = crate::common::IterOwn<Self>;
+        #[inline(always)]
+        fn seq_iter(self) -> Self::Iter {
+            let len = crate::Len::len(&self);
+            crate::common::IterOwn::with_range(self, 0..len)
+        }
+        #[inline(always)]
+        fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+            crate::common::IterOwn::with_range(self, range)
+        }
+    }
     impl<CV: IndexAs<u64>> Index for &Usizes<CV> {
         type Ref = usize;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().expect("Usizes values should fit in `usize`") }
+    }
+    impl<'a, CV: IndexAs<u64> + Len> crate::Sequence for &'a Usizes<CV> {
+        type Ref = <Self as crate::Index>::Ref;
+        type Iter = crate::common::IterOwn<Self>;
+        #[inline(always)]
+        fn seq_iter(self) -> Self::Iter {
+            let len = crate::Len::len(&self);
+            crate::common::IterOwn::with_range(self, 0..len)
+        }
+        #[inline(always)]
+        fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+            crate::common::IterOwn::with_range(self, range)
+        }
     }
     impl<CV: for<'a> Push<&'a u64>> Push<usize> for Usizes<CV> {
         #[inline]
@@ -206,9 +235,38 @@ mod sizes {
         type Ref = isize;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().expect("Isizes values should fit in `isize`") }
     }
+    impl<CV: IndexAs<i64> + Len> crate::Sequence for Isizes<CV>
+    where
+        Self: Copy,
+    {
+        type Ref = <Self as crate::Index>::Ref;
+        type Iter = crate::common::IterOwn<Self>;
+        #[inline(always)]
+        fn seq_iter(self) -> Self::Iter {
+            let len = crate::Len::len(&self);
+            crate::common::IterOwn::with_range(self, 0..len)
+        }
+        #[inline(always)]
+        fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+            crate::common::IterOwn::with_range(self, range)
+        }
+    }
     impl<CV: IndexAs<i64>> Index for &Isizes<CV> {
         type Ref = isize;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().expect("Isizes values should fit in `isize`") }
+    }
+    impl<'a, CV: IndexAs<i64> + Len> crate::Sequence for &'a Isizes<CV> {
+        type Ref = <Self as crate::Index>::Ref;
+        type Iter = crate::common::IterOwn<Self>;
+        #[inline(always)]
+        fn seq_iter(self) -> Self::Iter {
+            let len = crate::Len::len(&self);
+            crate::common::IterOwn::with_range(self, 0..len)
+        }
+        #[inline(always)]
+        fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+            crate::common::IterOwn::with_range(self, range)
+        }
     }
     impl<CV: for<'a> Push<&'a i64>> Push<isize> for Isizes<CV> {
         #[inline]
@@ -288,9 +346,38 @@ mod chars {
         type Ref = char;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref { char::from_u32(self.values.index_as(index)).unwrap() }
     }
+    impl<CV: IndexAs<Encoded> + Len> crate::Sequence for Chars<CV>
+    where
+        Self: Copy,
+    {
+        type Ref = <Self as crate::Index>::Ref;
+        type Iter = crate::common::IterOwn<Self>;
+        #[inline(always)]
+        fn seq_iter(self) -> Self::Iter {
+            let len = crate::Len::len(&self);
+            crate::common::IterOwn::with_range(self, 0..len)
+        }
+        #[inline(always)]
+        fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+            crate::common::IterOwn::with_range(self, range)
+        }
+    }
     impl<CV: IndexAs<Encoded>> Index for &Chars<CV> {
         type Ref = char;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref { char::from_u32(self.values.index_as(index)).unwrap() }
+    }
+    impl<'a, CV: IndexAs<Encoded> + Len> crate::Sequence for &'a Chars<CV> {
+        type Ref = <Self as crate::Index>::Ref;
+        type Iter = crate::common::IterOwn<Self>;
+        #[inline(always)]
+        fn seq_iter(self) -> Self::Iter {
+            let len = crate::Len::len(&self);
+            crate::common::IterOwn::with_range(self, 0..len)
+        }
+        #[inline(always)]
+        fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+            crate::common::IterOwn::with_range(self, range)
+        }
     }
     impl<CV: for<'a> Push<&'a Encoded>> Push<char> for Chars<CV> {
         #[inline]
@@ -370,9 +457,38 @@ mod larges {
         type Ref = u128;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref { u128::from_le_bytes(self.values.index_as(index)) }
     }
+    impl<CV: IndexAs<Encoded> + Len> crate::Sequence for U128s<CV>
+    where
+        Self: Copy,
+    {
+        type Ref = <Self as crate::Index>::Ref;
+        type Iter = crate::common::IterOwn<Self>;
+        #[inline(always)]
+        fn seq_iter(self) -> Self::Iter {
+            let len = crate::Len::len(&self);
+            crate::common::IterOwn::with_range(self, 0..len)
+        }
+        #[inline(always)]
+        fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+            crate::common::IterOwn::with_range(self, range)
+        }
+    }
     impl<CV: IndexAs<Encoded>> Index for &U128s<CV> {
         type Ref = u128;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref { u128::from_le_bytes(self.values.index_as(index)) }
+    }
+    impl<'a, CV: IndexAs<Encoded> + Len> crate::Sequence for &'a U128s<CV> {
+        type Ref = <Self as crate::Index>::Ref;
+        type Iter = crate::common::IterOwn<Self>;
+        #[inline(always)]
+        fn seq_iter(self) -> Self::Iter {
+            let len = crate::Len::len(&self);
+            crate::common::IterOwn::with_range(self, 0..len)
+        }
+        #[inline(always)]
+        fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+            crate::common::IterOwn::with_range(self, range)
+        }
     }
     impl<CV: for<'a> Push<&'a Encoded>> Push<u128> for U128s<CV> {
         #[inline]
@@ -442,9 +558,38 @@ mod larges {
         type Ref = i128;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref { i128::from_le_bytes(self.values.index_as(index)) }
     }
+    impl<CV: IndexAs<Encoded> + Len> crate::Sequence for I128s<CV>
+    where
+        Self: Copy,
+    {
+        type Ref = <Self as crate::Index>::Ref;
+        type Iter = crate::common::IterOwn<Self>;
+        #[inline(always)]
+        fn seq_iter(self) -> Self::Iter {
+            let len = crate::Len::len(&self);
+            crate::common::IterOwn::with_range(self, 0..len)
+        }
+        #[inline(always)]
+        fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+            crate::common::IterOwn::with_range(self, range)
+        }
+    }
     impl<CV: IndexAs<Encoded>> Index for &I128s<CV> {
         type Ref = i128;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref { i128::from_le_bytes(self.values.index_as(index)) }
+    }
+    impl<'a, CV: IndexAs<Encoded> + Len> crate::Sequence for &'a I128s<CV> {
+        type Ref = <Self as crate::Index>::Ref;
+        type Iter = crate::common::IterOwn<Self>;
+        #[inline(always)]
+        fn seq_iter(self) -> Self::Iter {
+            let len = crate::Len::len(&self);
+            crate::common::IterOwn::with_range(self, 0..len)
+        }
+        #[inline(always)]
+        fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+            crate::common::IterOwn::with_range(self, range)
+        }
     }
     impl<CV: for<'a> Push<&'a Encoded>> Push<i128> for I128s<CV> {
         #[inline]
@@ -535,10 +680,39 @@ pub mod offsets {
             #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref { (index as u64 + 1) * K }
         }
+        impl<const K: u64, CC: CopyAs<u64>> crate::Sequence for Fixeds<K, CC>
+        where
+            Self: Copy,
+        {
+            type Ref = <Self as crate::Index>::Ref;
+            type Iter = crate::common::IterOwn<Self>;
+            #[inline(always)]
+            fn seq_iter(self) -> Self::Iter {
+                let len = crate::Len::len(&self);
+                crate::common::IterOwn::with_range(self, 0..len)
+            }
+            #[inline(always)]
+            fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+                crate::common::IterOwn::with_range(self, range)
+            }
+        }
         impl<'a, const K: u64, CC> Index for &'a Fixeds<K, CC> {
             type Ref = u64;
             #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref { (index as u64 + 1) * K }
+        }
+        impl<'a, const K: u64, CC: CopyAs<u64>> crate::Sequence for &'a Fixeds<K, CC> {
+            type Ref = <Self as crate::Index>::Ref;
+            type Iter = crate::common::IterOwn<Self>;
+            #[inline(always)]
+            fn seq_iter(self) -> Self::Iter {
+                let len = crate::Len::len(&self);
+                crate::common::IterOwn::with_range(self, 0..len)
+            }
+            #[inline(always)]
+            fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+                crate::common::IterOwn::with_range(self, range)
+            }
         }
 
         impl<'a, const K: u64, T> Push<T> for Fixeds<K> {
@@ -661,6 +835,22 @@ pub mod offsets {
                 let length = self.head.index_as(1);
                 let stride = self.head.index_as(0);
                 if index < length { (index+1) * stride } else { self.bounds.index_as((index - length) as usize) }
+            }
+        }
+        impl<BC: IndexAs<u64> + Len, HC: IndexAs<u64>> crate::Sequence for Strides<BC, HC>
+        where
+            Self: Copy,
+        {
+            type Ref = <Self as crate::Index>::Ref;
+            type Iter = crate::common::IterOwn<Self>;
+            #[inline(always)]
+            fn seq_iter(self) -> Self::Iter {
+                let len = crate::Len::len(&self);
+                crate::common::IterOwn::with_range(self, 0..len)
+            }
+            #[inline(always)]
+            fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+                crate::common::IterOwn::with_range(self, range)
             }
         }
 
@@ -851,10 +1041,39 @@ mod empty {
         #[inline(always)]
         fn get(&self, _index: usize) -> Self::Ref { }
     }
+    impl<CC: CopyAs<u64>> crate::Sequence for Empties<CC>
+    where
+        Self: Copy,
+    {
+        type Ref = <Self as crate::Index>::Ref;
+        type Iter = crate::common::IterOwn<Self>;
+        #[inline(always)]
+        fn seq_iter(self) -> Self::Iter {
+            let len = crate::Len::len(&self);
+            crate::common::IterOwn::with_range(self, 0..len)
+        }
+        #[inline(always)]
+        fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+            crate::common::IterOwn::with_range(self, range)
+        }
+    }
     impl<'a, CC> Index for &'a Empties<CC> {
         type Ref = &'a ();
         #[inline(always)]
         fn get(&self, _index: usize) -> Self::Ref { &() }
+    }
+    impl<'a, CC: CopyAs<u64>> crate::Sequence for &'a Empties<CC> {
+        type Ref = <Self as crate::Index>::Ref;
+        type Iter = crate::common::IterOwn<Self>;
+        #[inline(always)]
+        fn seq_iter(self) -> Self::Iter {
+            let len = crate::Len::len(&self);
+            crate::common::IterOwn::with_range(self, 0..len)
+        }
+        #[inline(always)]
+        fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+            crate::common::IterOwn::with_range(self, range)
+        }
     }
     impl Push<()> for Empties {
         // TODO: check for overflow?
@@ -1033,11 +1252,40 @@ mod boolean {
             (word >> bit) & 1 == 1
         }
     }
+    impl<VC: Len + IndexAs<u64>, TC: IndexAs<u64>> crate::Sequence for Bools<VC, TC>
+    where
+        Self: Copy,
+    {
+        type Ref = <Self as crate::Index>::Ref;
+        type Iter = crate::common::IterOwn<Self>;
+        #[inline(always)]
+        fn seq_iter(self) -> Self::Iter {
+            let len = crate::Len::len(&self);
+            crate::common::IterOwn::with_range(self, 0..len)
+        }
+        #[inline(always)]
+        fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+            crate::common::IterOwn::with_range(self, range)
+        }
+    }
 
     impl<VC: Len + IndexAs<u64>, TC: IndexAs<u64>> Index for &Bools<VC, TC> {
         type Ref = bool;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
             (*self).get(index)
+        }
+    }
+    impl<'a, VC: Len + IndexAs<u64>, TC: IndexAs<u64>> crate::Sequence for &'a Bools<VC, TC> {
+        type Ref = <Self as crate::Index>::Ref;
+        type Iter = crate::common::IterOwn<Self>;
+        #[inline(always)]
+        fn seq_iter(self) -> Self::Iter {
+            let len = crate::Len::len(&self);
+            crate::common::IterOwn::with_range(self, 0..len)
+        }
+        #[inline(always)]
+        fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+            crate::common::IterOwn::with_range(self, range)
         }
     }
 
@@ -1167,10 +1415,39 @@ mod duration {
             Duration::new(self.seconds.index_as(index), self.nanoseconds.index_as(index))
         }
     }
+    impl<SC: IndexAs<u64> + Len, NC: IndexAs<u32>> crate::Sequence for Durations<SC, NC>
+    where
+        Self: Copy,
+    {
+        type Ref = <Self as crate::Index>::Ref;
+        type Iter = crate::common::IterOwn<Self>;
+        #[inline(always)]
+        fn seq_iter(self) -> Self::Iter {
+            let len = crate::Len::len(&self);
+            crate::common::IterOwn::with_range(self, 0..len)
+        }
+        #[inline(always)]
+        fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+            crate::common::IterOwn::with_range(self, range)
+        }
+    }
     impl<SC: IndexAs<u64>, NC: IndexAs<u32>> Index for &Durations<SC, NC> {
         type Ref = Duration;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
             Duration::new(self.seconds.index_as(index), self.nanoseconds.index_as(index))
+        }
+    }
+    impl<'a, SC: IndexAs<u64> + Len, NC: IndexAs<u32>> crate::Sequence for &'a Durations<SC, NC> {
+        type Ref = <Self as crate::Index>::Ref;
+        type Iter = crate::common::IterOwn<Self>;
+        #[inline(always)]
+        fn seq_iter(self) -> Self::Iter {
+            let len = crate::Len::len(&self);
+            crate::common::IterOwn::with_range(self, 0..len)
+        }
+        #[inline(always)]
+        fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+            crate::common::IterOwn::with_range(self, range)
         }
     }
 

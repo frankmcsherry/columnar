@@ -110,6 +110,22 @@ impl<TC: Index + Copy, BC: IndexAs<u64> + Len + Copy> Index for Trees<TC, BC> {
         }
     }
 }
+impl<TC: Index + Copy, BC: IndexAs<u64> + Len + Copy> crate::Sequence for Trees<TC, BC>
+where
+    Self: Copy,
+{
+    type Ref = <Self as Index>::Ref;
+    type Iter = crate::common::IterOwn<Self>;
+    #[inline(always)]
+    fn seq_iter(self) -> Self::Iter {
+        let len = crate::Len::len(&self);
+        crate::common::IterOwn::with_range(self, 0..len)
+    }
+    #[inline(always)]
+    fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+        crate::common::IterOwn::with_range(self, range)
+    }
+}
 
 impl<'a, TC, BC: IndexAs<u64> + Len> Index for &'a Trees<TC, BC>
 where
@@ -127,6 +143,23 @@ where
             values: &self.values,
             bounds: &self.bounds,
         }
+    }
+}
+impl<'a, TC, BC: IndexAs<u64> + Len> crate::Sequence for &'a Trees<TC, BC>
+where
+    &'a TC: Index,
+    &'a BC: IndexAs<u64>,
+{
+    type Ref = <Self as Index>::Ref;
+    type Iter = crate::common::IterOwn<Self>;
+    #[inline(always)]
+    fn seq_iter(self) -> Self::Iter {
+        let len = crate::Len::len(&self);
+        crate::common::IterOwn::with_range(self, 0..len)
+    }
+    #[inline(always)]
+    fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+        crate::common::IterOwn::with_range(self, range)
     }
 }
 

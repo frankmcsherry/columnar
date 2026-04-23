@@ -323,6 +323,27 @@ pub mod result {
             }
         }
     }
+    impl<SC, TC, CC, VC, WC> crate::Sequence for Results<SC, TC, CC, VC, WC>
+    where
+        Self: Copy,
+        SC: Index,
+        TC: Index,
+        CC: IndexAs<u64> + Len,
+        VC: IndexAs<u64> + Len,
+        WC: IndexAs<u64>,
+    {
+        type Ref = <Self as Index>::Ref;
+        type Iter = crate::common::IterOwn<Self>;
+        #[inline(always)]
+        fn seq_iter(self) -> Self::Iter {
+            let len = crate::Len::len(&self);
+            crate::common::IterOwn::with_range(self, 0..len)
+        }
+        #[inline(always)]
+        fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+            crate::common::IterOwn::with_range(self, range)
+        }
+    }
     impl<'a, SC, TC, CC, VC, WC> Index for &'a Results<SC, TC, CC, VC, WC>
     where
         &'a SC: Index,
@@ -339,6 +360,26 @@ pub mod result {
             } else {
                 Err((&self.errs).get(index - self.indexes.rank(index)))
             }
+        }
+    }
+    impl<'a, SC, TC, CC, VC, WC> crate::Sequence for &'a Results<SC, TC, CC, VC, WC>
+    where
+        &'a SC: Index,
+        &'a TC: Index,
+        CC: IndexAs<u64> + Len,
+        VC: IndexAs<u64> + Len,
+        WC: IndexAs<u64>,
+    {
+        type Ref = <Self as Index>::Ref;
+        type Iter = crate::common::IterOwn<Self>;
+        #[inline(always)]
+        fn seq_iter(self) -> Self::Iter {
+            let len = crate::Len::len(&self);
+            crate::common::IterOwn::with_range(self, 0..len)
+        }
+        #[inline(always)]
+        fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+            crate::common::IterOwn::with_range(self, range)
         }
     }
 
@@ -579,6 +620,22 @@ pub mod option {
             }
         }
     }
+    impl<TC: Index, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>> crate::Sequence for Options<TC, CC, VC, WC>
+    where
+        Self: Copy,
+    {
+        type Ref = <Self as Index>::Ref;
+        type Iter = crate::common::IterOwn<Self>;
+        #[inline(always)]
+        fn seq_iter(self) -> Self::Iter {
+            let len = crate::Len::len(&self);
+            crate::common::IterOwn::with_range(self, 0..len)
+        }
+        #[inline(always)]
+        fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+            crate::common::IterOwn::with_range(self, range)
+        }
+    }
     impl<'a, TC, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>> Index for &'a Options<TC, CC, VC, WC>
     where &'a TC: Index
     {
@@ -590,6 +647,22 @@ pub mod option {
             } else {
                 None
             }
+        }
+    }
+    impl<'a, TC, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len, WC: IndexAs<u64>> crate::Sequence for &'a Options<TC, CC, VC, WC>
+    where
+        &'a TC: Index,
+    {
+        type Ref = <Self as Index>::Ref;
+        type Iter = crate::common::IterOwn<Self>;
+        #[inline(always)]
+        fn seq_iter(self) -> Self::Iter {
+            let len = crate::Len::len(&self);
+            crate::common::IterOwn::with_range(self, 0..len)
+        }
+        #[inline(always)]
+        fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+            crate::common::IterOwn::with_range(self, range)
         }
     }
     impl<TC: IndexMut, CC: IndexAs<u64> + Len, VC: IndexAs<u64> + Len> IndexMut for Options<TC, CC, VC> {
@@ -664,15 +737,14 @@ pub mod option {
             // Type annotation is important to avoid some inference overflow.
             let store: Options<Vec<i32>> = Columnar::into_columns((0..100).map(Some));
             assert_eq!(store.len(), 100);
-            assert!((&store).index_iter().zip(0..100).all(|(a, b)| a == Some(&b)));
+            assert!((0..store.len()).map(|i| store.get(i)).zip(0..100).all(|(a, b)| a == Some(b)));
         }
 
         #[test]
         fn round_trip_none() {
             let store = Columnar::into_columns((0..100).map(|_x| None::<i32>));
             assert_eq!(store.len(), 100);
-            let foo = &store;
-            assert!(foo.index_iter().zip(0..100).all(|(a, _b)| a == None));
+            assert!((0..store.len()).map(|i| store.get(i)).zip(0..100).all(|(a, _b)| a == None));
         }
 
         #[test]
@@ -680,7 +752,7 @@ pub mod option {
             // Type annotation is important to avoid some inference overflow.
             let store: Options<Vec<i32>>  = Columnar::into_columns((0..100).map(|x| if x % 2 == 0 { Some(x) } else { None }));
             assert_eq!(store.len(), 100);
-            assert!((&store).index_iter().zip(0..100).all(|(a, b)| a == if b % 2 == 0 { Some(&b) } else { None }));
+            assert!((0..store.len()).map(|i| store.get(i)).zip(0..100).all(|(a, b)| a == if b % 2 == 0 { Some(b) } else { None }));
         }
     }
 }
@@ -797,6 +869,19 @@ pub mod discriminant {
             } else {
                 ((self.offset[0] - 1) as u8, index as u64)
             }
+        }
+    }
+    impl<'a> crate::Sequence for Discriminant<&'a [u8], &'a [u64]> {
+        type Ref = <Self as Index>::Ref;
+        type Iter = crate::common::IterOwn<Self>;
+        #[inline(always)]
+        fn seq_iter(self) -> Self::Iter {
+            let len = crate::Len::len(&self);
+            crate::common::IterOwn::with_range(self, 0..len)
+        }
+        #[inline(always)]
+        fn seq_iter_range(self, range: core::ops::Range<usize>) -> Self::Iter {
+            crate::common::IterOwn::with_range(self, range)
         }
     }
 
