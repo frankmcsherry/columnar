@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Sequence` trait on `Borrowed` views for fast sequential iteration; `Repeats` and `Lookbacks` skip per-element `rank()` via incremental counters and cached bitvector words, yielding ~11x faster iteration. Composition through tuples and `#[derive(Columnar)]` structs propagates the fast path automatically. Iterators consume the `Copy` borrowed view by value so the iterator lifetime is the borrowed data's inner lifetime, not any outer shell — `container.borrow().seq_iter()` works without temp-borrow dangling.
+
+### Removed
+
+- `Index::Cursor<'a>` GAT, `Index::cursor`, `Index::index_iter`, `Index::into_index_iter`, `DefaultCursor`, `impl_default_cursor!`, `CursorOf<'a, C>`. Replaced by `Sequence` on the `Borrowed` side. Callers that consumed a `&Container` iterator can construct `common::IterOwn::new(0, &container)` directly.
+
 ## [0.12.1](https://github.com/frankmcsherry/columnar/compare/columnar-v0.12.0...columnar-v0.12.1) - 2026-03-29
 
 ### Other
