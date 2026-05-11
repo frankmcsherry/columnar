@@ -16,7 +16,7 @@ impl<T: Columnar> Columnar for Box<T> {
 }
 
 /// A newtype wrapper around `T` that implements `Deref` and `DerefMut`.
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, Hash)]
 pub struct Boxed<T>(pub T);
 
 impl<T> core::ops::Deref for Boxed<T> {
