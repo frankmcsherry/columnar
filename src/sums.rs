@@ -109,32 +109,48 @@ pub mod rank_select {
             count += (intra_word & ((1 << bit) - 1)).count_ones() as usize;
             count
         }
-        /// The index of the `rank`th set bit, should one exist.
+        /// The position of the `rank`-th set bit (0-indexed), if it exists.
+        ///
+        /// `select(0)` returns the position of the first set bit. In general,
+        /// `select(rank(p)) == p` when `p` is the position of a set bit, mirroring
+        /// the convention of [`Self::rank`] (which counts bits strictly before
+        /// its argument).
         pub fn select(&self, rank: u64) -> Option<usize> {
-            let mut chunk = 0;
-            // Step one is to find the position in `counts` where we go from `rank` to `rank + 1`.
-            // The position we are looking for is within that chunk of bits.
+            // Step one: find the 1024-bit chunk containing the rank-th set bit.
+            // We want the smallest `chunk` for which `counts[chunk] > rank` — the
+            // chunk whose cumulative count first exceeds `rank`.
             // TODO: Binary search is likely better at many scales. Rust's binary search is .. not helpful with ties.
+            let mut chunk = 0;
             while chunk < self.counts.len() && self.counts.index_as(chunk) <= rank {
                 chunk += 1;
             }
-            let mut count = if chunk < self.counts.len() { self.counts.index_as(chunk) } else { 0 };
-            // Step two is to find the position within that chunk where the `rank`th bit is.
+            // Number of set bits strictly before `chunk`'s 1024 bits.
+            let mut count = if chunk > 0 { self.counts.index_as(chunk - 1) } else { 0 };
+
+            // Step two: find the 64-bit word within `chunk` containing the rank-th set bit.
             let mut block = 16 * chunk;
-            while block < self.values.values.len() && count + (self.values.values.index_as(block).count_ones() as u64) <= rank {
-                count += self.values.values.index_as(block).count_ones() as u64;
+            while block < self.values.values.len() {
+                let pop = self.values.values.index_as(block).count_ones() as u64;
+                if count + pop > rank { break; }
+                count += pop;
                 block += 1;
             }
-            // Step three is to search the last word for the location, or return `None` if we run out of bits.
-            let last_bits = if block == self.values.values.len() { self.values.tail.index_as(1) as usize } else { 64 };
-            let last_word = if block == self.values.values.len() { self.values.tail.index_as(0) } else { self.values.values.index_as(block) };
-            for shift in 0 .. last_bits {
-                if ((last_word >> shift) & 0x01 == 0x01) && count + 1 == rank {
-                    return Some(64 * block + shift);
-                }
-                count += (last_word >> shift) & 0x01;
-            }
 
+            // Step three: locate the bit within the chosen word, or return `None`
+            // if `rank` is past the total set-bit count.
+            let (last_word, last_bits) = if block == self.values.values.len() {
+                (self.values.tail.index_as(0), self.values.tail.index_as(1) as usize)
+            } else {
+                (self.values.values.index_as(block), 64)
+            };
+            for shift in 0 .. last_bits {
+                if ((last_word >> shift) & 1) == 1 {
+                    if count == rank {
+                        return Some(64 * block + shift);
+                    }
+                    count += 1;
+                }
+            }
             None
         }
     }
@@ -166,6 +182,94 @@ pub mod rank_select {
         fn clear(&mut self) {
             self.counts.clear();
             self.values.clear();
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use alloc::{vec, vec::Vec};
+        use super::RankSelect;
+
+        fn build(bits: &[bool]) -> RankSelect {
+            let mut rs: RankSelect = RankSelect::default();
+            for &b in bits { rs.push(b); }
+            rs
+        }
+
+        /// All true bits are recovered by `select(rank(p))` for every set position `p`,
+        /// and `rank` agrees with a naive count.
+        fn check_round_trip(bits: &[bool]) {
+            let rs = build(bits);
+            let mut expected = 0u64;
+            for (i, &b) in bits.iter().enumerate() {
+                assert_eq!(rs.rank(i), expected as usize, "rank({}) on pattern of len {}", i, bits.len());
+                if b {
+                    let pos = rs.select(expected).unwrap_or_else(|| panic!("select({}) returned None for set bit at {}", expected, i));
+                    assert_eq!(pos, i, "select({}) on pattern of len {}", expected, bits.len());
+                    expected += 1;
+                }
+            }
+            // Out-of-range select returns None.
+            assert!(rs.select(expected).is_none());
+        }
+
+        #[test]
+        fn select_first_bit() {
+            // Bit 0 set, nothing else.
+            let mut bits = vec![false; 2048];
+            bits[0] = true;
+            check_round_trip(&bits);
+        }
+
+        #[test]
+        fn select_small_dense() {
+            // First five bits set in a 2048-bit vector (spans two chunks).
+            let mut bits = vec![false; 2048];
+            for i in 0..5 { bits[i] = true; }
+            check_round_trip(&bits);
+        }
+
+        #[test]
+        fn select_chunk_boundary() {
+            // Set bits exactly at the chunk boundary positions 1023 and 1024.
+            let mut bits = vec![false; 4096];
+            bits[1023] = true;
+            bits[1024] = true;
+            check_round_trip(&bits);
+        }
+
+        #[test]
+        fn select_in_tail() {
+            // Bits 0..3 set, then nothing through bit 1100. Pattern length 1100 puts
+            // the final bits in the tail (not a complete 1024-bit chunk).
+            let mut bits = vec![false; 1100];
+            bits[0] = true;
+            bits[1099] = true;
+            check_round_trip(&bits);
+        }
+
+        #[test]
+        fn select_every_other() {
+            // Dense, multiple chunks.
+            let bits: Vec<bool> = (0..3000).map(|i| i % 2 == 0).collect();
+            check_round_trip(&bits);
+        }
+
+        #[test]
+        fn select_sparse_multi_chunk() {
+            // One set bit per 1024-bit chunk, six chunks.
+            let mut bits = vec![false; 6 * 1024];
+            for c in 0..6 { bits[1024 * c + 17] = true; }
+            check_round_trip(&bits);
+        }
+
+        #[test]
+        fn select_out_of_range() {
+            let rs = build(&[true, false, true]);
+            assert_eq!(rs.select(0), Some(0));
+            assert_eq!(rs.select(1), Some(2));
+            assert_eq!(rs.select(2), None);
+            assert_eq!(rs.select(1000), None);
         }
     }
 }
