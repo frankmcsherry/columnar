@@ -33,7 +33,7 @@ pub use bytemuck;
 
 pub use vector::Vecs;
 pub use string::Strings;
-pub use sums::{rank_select::RankSelect, result::Results, option::Options, discriminant::Discriminant};
+pub use sums::{rank_select::{RankSelect, Cursor as RankSelectCursor}, result::Results, option::Options, discriminant::Discriminant};
 pub use lookback::{Repeats, Lookbacks};
 
 /// A type that can be represented in columnar form.

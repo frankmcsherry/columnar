@@ -17,6 +17,14 @@ pub mod rank_select {
 
     use crate::{Borrow, Len, Index, IndexAs, Push, Clear};
 
+    /// Number of 64-bit words per cumulative-popcount chunk. Smaller values
+    /// reduce the worst-case word scan in `select` (and the catch-up scan
+    /// in `rank`) at the cost of more `counts` entries (~6% overhead per
+    /// halving). 16 → 1024 bits/chunk is the historical default; 8 → 512
+    /// bits gives faster random `select` for ~12% counts memory.
+    const WORDS_PER_CHUNK: usize = 16;
+    const BITS_PER_CHUNK: usize = 64 * WORDS_PER_CHUNK;
+
     /// A store for maintaining `Vec<bool>` with fast `rank` and `select` access.
     ///
     /// The design is to have `u64` running counts for each block of 1024 bits,
@@ -99,9 +107,9 @@ pub mod rank_select {
         pub fn rank(&self, index: usize) -> usize {
             let bit = index % 64;
             let block = index / 64;
-            let chunk = block / 16;
+            let chunk = block / WORDS_PER_CHUNK;
             let mut count = if chunk > 0 { self.counts.index_as(chunk - 1) as usize } else { 0 };
-            for pos in (16 * chunk) .. block {
+            for pos in (WORDS_PER_CHUNK * chunk) .. block {
                 count += self.values.values.index_as(pos).count_ones() as usize;
             }
             // TODO: Panic if out of bounds?
@@ -115,8 +123,9 @@ pub mod rank_select {
         /// `select(rank(p)) == p` when `p` is the position of a set bit, mirroring
         /// the convention of [`Self::rank`] (which counts bits strictly before
         /// its argument).
+        #[inline]
         pub fn select(&self, rank: u64) -> Option<usize> {
-            // Step one: find the 1024-bit chunk containing the rank-th set bit.
+            // Step one: find the BITS_PER_CHUNK-bit chunk containing the rank-th set bit.
             // We want the smallest `chunk` for which `counts[chunk] > rank` — the
             // chunk whose cumulative count first exceeds `rank`. Equivalent to a
             // partition point over `counts` on the predicate `counts[i] <= rank`.
@@ -129,11 +138,11 @@ pub mod rank_select {
                 }
                 lo
             };
-            // Number of set bits strictly before `chunk`'s 1024 bits.
+            // Number of set bits strictly before `chunk`'s BITS_PER_CHUNK bits.
             let mut count = if chunk > 0 { self.counts.index_as(chunk - 1) } else { 0 };
 
             // Step two: find the 64-bit word within `chunk` containing the rank-th set bit.
-            let mut block = 16 * chunk;
+            let mut block = WORDS_PER_CHUNK * chunk;
             while block < self.values.values.len() {
                 let pop = self.values.values.index_as(block).count_ones() as u64;
                 if count + pop > rank { break; }
@@ -183,16 +192,32 @@ pub mod rank_select {
 
     /// Forward cursor over a [`RankSelect`].
     ///
-    /// Holds state — current word, position, rank-so-far — so that consecutive
-    /// operations don't re-probe `counts` or rescan words. Primary use cases:
+    /// Use this instead of repeated `rank`/`select` calls when you want to traverse
+    /// the bitvector in order. The cursor caches a current word and running rank,
+    /// so a single word load serves many subsequent operations — no re-probing
+    /// `counts` or rescanning words.
     ///
-    /// * Adjacent `select(k)` and `select(k+1)` calls (e.g., fetching consecutive
-    ///   bounds out of a `Vecs`-style monotone bitvector): two `next_one` calls
-    ///   share the same word load.
-    /// * Forward bit-by-bit traversal (e.g., the lookup-walk loop in `wip/rhh.rs`).
-    /// * Jumping forward by rank (`seek_to_rank`) when callers know the target.
+    /// At a high level the cursor maintains an *invariant pair* (`pos`, `rank`):
+    /// `pos` is the next bit to consider, and `rank` is the number of 1-bits in
+    /// `[0, pos)`. Every operation maintains this pair so that callers can read
+    /// either coordinate freely.
     ///
-    /// The cursor is forward-only; positions and ranks may only advance.
+    /// Pick the method that matches the question you want to answer:
+    ///
+    /// | Operation         | Use when you want…                                        |
+    /// |-------------------|-----------------------------------------------------------|
+    /// | [`next_one`][n1]  | "Where is the next 1-bit?" — emits 1-bit positions in order. |
+    /// | [`step`][s]       | "What is the bit at the current position?" — read-by-bit traversal. |
+    /// | [`seek_to_pos`][stp] | "Jump to bit position p; what is its rank?" — random forward seek. |
+    /// | [`seek_to_rank`][str] | "Jump to the k-th 1-bit; where is it?" — equivalent to `select`. |
+    ///
+    /// The cursor is **forward-only**: every operation advances `pos` and `rank`
+    /// monotonically. Trying to seek backward triggers a debug-assertion failure.
+    ///
+    /// [n1]: Cursor::next_one
+    /// [s]: Cursor::step
+    /// [stp]: Cursor::seek_to_pos
+    /// [str]: Cursor::seek_to_rank
     pub struct Cursor<'a, CC, VC, WC> {
         rs: &'a RankSelect<CC, VC, WC>,
         /// Index of the current 64-bit word within `values` (or `== values.len()` for tail).
@@ -251,9 +276,15 @@ pub mod rank_select {
             }
         }
 
-        /// Advance past the next set bit; return its position (or `None` if exhausted).
+        /// Emit the next 1-bit position in order; advance past it.
         ///
-        /// Successive calls amortize: a single word load serves up to 64 results.
+        /// Equivalent to `select(self.rank())` followed by stepping one past that
+        /// position, but amortized: a single word load serves up to 64 results.
+        ///
+        /// **Use this for streaming through every set bit.** The canonical example
+        /// is recovering monotone Vecs bounds from an RS-encoded unary bitvector:
+        /// each call returns the next bound's bit position, no per-call re-probing
+        /// of `counts`. Returns `None` once all set bits have been emitted.
         pub fn next_one(&mut self) -> Option<usize> {
             loop {
                 if self.word_remaining != 0 {
@@ -271,8 +302,13 @@ pub mod rank_select {
             }
         }
 
-        /// Advance one bit; return `Some(true)` if it was a 1-bit, `Some(false)` if a 0-bit,
+        /// Advance one bit. Return its value: `Some(true)` for 1, `Some(false)` for 0,
         /// or `None` if past the end.
+        ///
+        /// **Use this when you need to visit every bit in order, regardless of value.**
+        /// Common pattern: the lookup-walk loop in a hash table that probes consecutive
+        /// slots, deciding what to do based on whether each slot is occupied. Each
+        /// call is a single bit-test + an occasional word-boundary crossing.
         pub fn step(&mut self) -> Option<bool> {
             if self.bit_pos >= self.total_bits { return None; }
             let bit_in_word = self.bit_pos & 63;
@@ -289,14 +325,74 @@ pub mod rank_select {
             Some(is_one)
         }
 
-        /// Advance to the `target`-th set bit (0-indexed) and return its position.
+        /// Jump forward to bit position `target` and report its `rank` (via the
+        /// cursor's state) without consuming the bit there.
         ///
-        /// `target` must be `>= self.rank()` (forward-only). Returns `None` if there
-        /// are fewer than `target + 1` set bits in total.
+        /// After return, `pos() == target` and `rank() == rank(target)` (the count
+        /// of 1-bits strictly before `target`). A subsequent [`step`][Self::step]
+        /// reads the bit *at* `target`.
         ///
-        /// If `target` is close to the current rank, this picks up from the current
-        /// word; otherwise it re-probes `counts` via binary search the same way
-        /// [`RankSelect::select`] does.
+        /// **Use this when you have a known target position and want to read or
+        /// continue from there.** Typical use is hash-table lookup: a query's slot
+        /// position is computed from its hash; you want to jump there and then
+        /// walk forward through the probe chain.
+        ///
+        /// Fast path: if `target` lies within the cursor's current word, this is a
+        /// popcount + mask. Otherwise it pays one `RankSelect::rank` call to
+        /// re-anchor.
+        ///
+        /// `target` must be `>= self.pos()` (forward-only; debug-asserts otherwise).
+        /// Returns `false` if `target` is past the end of the bitvector.
+        pub fn seek_to_pos(&mut self, target: usize) -> bool {
+            debug_assert!(target >= self.bit_pos, "seek_to_pos is forward-only");
+            if target >= self.total_bits {
+                self.bit_pos = self.total_bits;
+                self.word_remaining = 0;
+                return false;
+            }
+            let target_word = target / 64;
+            if target_word == self.word_idx {
+                // Same word: count 1-bits we skip past, then mask the word.
+                let cur_bit = (self.bit_pos & 63) as u32;
+                let tgt_bit = (target & 63) as u32;
+                let skipped_mask = if tgt_bit == 64 { !0u64 } else { (1u64 << tgt_bit) - 1 };
+                let skipped = self.word_remaining & skipped_mask;
+                self.rank += skipped.count_ones() as u64;
+                // Clear consumed low bits (positions < target).
+                self.word_remaining &= !skipped_mask;
+                let _ = cur_bit;
+                self.bit_pos = target;
+                return true;
+            }
+            // Different word: re-anchor rank via the standard rank() formula, then
+            // load the target word and mask off bits below `target`.
+            self.rank = self.rs.rank(target) as u64;
+            self.word_idx = target_word;
+            self.load_word();
+            let tgt_bit = target & 63;
+            let mask = if tgt_bit == 0 { !0u64 } else { !((1u64 << tgt_bit) - 1) };
+            self.word_remaining &= mask;
+            self.bit_pos = target;
+            true
+        }
+
+        /// Jump forward to the `target`-th set bit (0-indexed) and return its
+        /// position. Equivalent to [`RankSelect::select`] for the cursor's
+        /// current state.
+        ///
+        /// After return, `rank() == target + 1` (the target bit has been consumed).
+        ///
+        /// **Use this when you have a target rank and want the position.** Typical
+        /// use is "give me bound[k]" against an RS-encoded Vecs-bounds bitvector,
+        /// possibly skipping forward over a stretch of consecutive bounds you
+        /// don't care about.
+        ///
+        /// Fast path: if the target's bit lies within the cursor's current word,
+        /// this is a `select_in_word` + bit-clear. Otherwise it pays a binary
+        /// search over `counts`, mirroring `RankSelect::select`.
+        ///
+        /// `target` must be `>= self.rank()` (forward-only; debug-asserts otherwise).
+        /// Returns `None` if there are fewer than `target + 1` set bits in total.
         pub fn seek_to_rank(&mut self, target: u64) -> Option<usize> {
             debug_assert!(target >= self.rank, "seek_to_rank is forward-only");
             // Cheap path: target is within the current word's remaining 1-bits.
@@ -326,7 +422,7 @@ pub mod rank_select {
             };
             let mut count = if chunk > 0 { counts.index_as(chunk - 1) } else { 0 };
             let vlen = self.rs.values.values.len();
-            let mut block = 16 * chunk;
+            let mut block = WORDS_PER_CHUNK * chunk;
             while block < vlen {
                 let pop = self.rs.values.values.index_as(block).count_ones() as u64;
                 if count + pop > target { break; }
@@ -367,10 +463,10 @@ pub mod rank_select {
         #[inline]
         pub fn push(&mut self, bit: bool) {
             self.values.push(&bit);
-            while self.counts.len() < self.values.len() / 1024 {
+            while self.counts.len() < self.values.len() / BITS_PER_CHUNK {
                 let mut count = self.counts.last().unwrap_or(0);
-                let lower = 16 * self.counts.len();
-                let upper = lower + 16;
+                let lower = WORDS_PER_CHUNK * self.counts.len();
+                let upper = lower + WORDS_PER_CHUNK;
                 for i in lower .. upper {
                     count += self.values.values.index_as(i).count_ones() as u64;
                 }
@@ -530,6 +626,34 @@ pub mod rank_select {
             assert_eq!(cur.seek_to_rank(2), Some(13));
             assert_eq!(cur.seek_to_rank(4), Some(50));
             assert_eq!(cur.next_one(), None);
+        }
+
+        #[test]
+        fn cursor_seek_to_pos_same_word_and_cross_word() {
+            let bits: Vec<bool> = (0..256).map(|i| matches!(i % 5, 0 | 2)).collect();
+            let rs = build(&bits);
+            // Same-word seek.
+            let mut cur = rs.cursor();
+            assert!(cur.seek_to_pos(10));
+            assert_eq!(cur.pos(), 10);
+            assert_eq!(cur.rank(), rs.rank(10) as u64);
+            assert!(cur.seek_to_pos(40));
+            assert_eq!(cur.rank(), rs.rank(40) as u64);
+            // Cross-word seek.
+            assert!(cur.seek_to_pos(200));
+            assert_eq!(cur.pos(), 200);
+            assert_eq!(cur.rank(), rs.rank(200) as u64);
+            // Step reads the bit at the target.
+            assert_eq!(cur.step(), Some(bits[200]));
+        }
+
+        #[test]
+        fn cursor_seek_to_pos_out_of_range() {
+            let bits: Vec<bool> = (0..100).map(|_| true).collect();
+            let rs = build(&bits);
+            let mut cur = rs.cursor();
+            assert!(!cur.seek_to_pos(1000));
+            assert_eq!(cur.step(), None);
         }
 
         #[test]
