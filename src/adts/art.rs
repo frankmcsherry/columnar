@@ -1,4 +1,4 @@
-//! Adaptive Radix Trees (https://db.in.tum.de/~leis/papers/ART.pdf).
+//! Adaptive Radix Trees (<https://db.in.tum.de/~leis/papers/ART.pdf>).
 //!
 //! This ADT represents an unordered collection of byte sequences as a tree.
 //! Like a trie, the paths down the tree correspond to byte sequences, and 

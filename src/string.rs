@@ -1,5 +1,6 @@
 use alloc::{vec::Vec, string::String, string::ToString, boxed::Box};
 use super::{Clear, Columnar, Container, Len, Index, IndexAs, Push, Borrow};
+use crate::common::impl_default_cursor;
 
 /// A stand-in for `Vec<String>`.
 ///
@@ -149,6 +150,7 @@ impl<'a, BC: Len+IndexAs<u64>> Strings<BC, &'a [u8]> {
 
 impl<'a, BC: Len+IndexAs<u64>> Index for Strings<BC, &'a [u8]> {
     type Ref = &'a [u8];
+    impl_default_cursor!();
     #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
         let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
         let upper = self.bounds.index_as(index);
@@ -159,6 +161,7 @@ impl<'a, BC: Len+IndexAs<u64>> Index for Strings<BC, &'a [u8]> {
 }
 impl<'a, BC: Len+IndexAs<u64>> Index for &'a Strings<BC, Vec<u8>> {
     type Ref = &'a [u8];
+    impl_default_cursor!();
     #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
         let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
         let upper = self.bounds.index_as(index);

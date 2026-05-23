@@ -1,5 +1,6 @@
 use alloc::{vec::Vec, string::String};
 use super::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, Slice, Borrow};
+use crate::common::impl_default_cursor;
 
 /// A stand-in for `Vec<Vec<T>>` for complex `T`.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -168,6 +169,7 @@ impl<TC, BC: Len> Len for Vecs<TC, BC> {
 
 impl<TC: Copy, BC: Len+IndexAs<u64>> Index for Vecs<TC, BC> {
     type Ref = Slice<TC>;
+    impl_default_cursor!();
     #[inline(always)]
     fn get(&self, index: usize) -> Self::Ref {
         let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
@@ -177,6 +179,7 @@ impl<TC: Copy, BC: Len+IndexAs<u64>> Index for Vecs<TC, BC> {
 }
 impl<'a, TC, BC: Len+IndexAs<u64>> Index for &'a Vecs<TC, BC> {
     type Ref = Slice<&'a TC>;
+    impl_default_cursor!();
     #[inline(always)]
     fn get(&self, index: usize) -> Self::Ref {
         let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };

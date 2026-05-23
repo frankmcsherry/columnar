@@ -8,6 +8,7 @@
 use alloc::boxed::Box;
 
 use crate::{AsBytes, Borrow, Clear, Columnar, Container, FromBytes, Index, IndexMut, Len, Push, Ref};
+use crate::common::impl_default_cursor;
 
 impl<T: Columnar> Columnar for Box<T> {
     type Container = Boxed<T::Container>;
@@ -67,6 +68,7 @@ impl<'a, C: FromBytes<'a>> FromBytes<'a> for Boxed<C> {
 }
 impl<C: Index> Index for Boxed<C> {
     type Ref = Boxed<C::Ref>;
+    impl_default_cursor!();
     #[inline(always)] fn get(&self, index: usize) -> Self::Ref { Boxed(self.0.get(index)) }
 }
 impl<C: IndexMut> IndexMut for Boxed<C> {

@@ -103,6 +103,15 @@ pub type BorrowedOf<'a, T> = <ContainerOf<T> as Borrow>::Borrowed<'a>;
 /// Equivalent to `<ContainerOf<T> as Borrow>::Ref<'a>`.
 pub type Ref<'a, T> = <ContainerOf<T> as Borrow>::Ref<'a>;
 
+/// For a lifetime, the cursor type over an [`Index`](common::Index)-implementing container.
+///
+/// Equivalent to `<C as Index>::Cursor<'a>`.
+///
+/// Useful for naming iterator types in trait associated-type slots.
+/// For a columnar user type `T`, compose with [`BorrowedOf`]:
+/// `CursorOf<'a, BorrowedOf<'a, T>>`.
+pub type CursorOf<'a, C> = <C as common::Index>::Cursor<'a>;
+
 /// A type that can be borrowed into a preferred reference type.
 pub trait Borrow: Len + Clone + 'static {
     /// For each lifetime, a reference with that lifetime.
@@ -251,11 +260,42 @@ pub mod common {
     /// There are several traits, with a core distinction being whether the returned reference depends on the lifetime of `&self`.
     /// For one trait `Index` the result does not depend on this lifetime.
     /// There is a third trait `IndexMut` that allows mutable access, that may be less commonly implemented.
+    ///
+    /// # Design notes
+    ///
+    /// ## `Ref` is not a GAT, deliberately
+    ///
+    /// Borrowed containers (e.g. `&'a [T]`, `Bools<&'a [u64], &'a [u64]>`) carry their own
+    /// lifetime, and we want `get()` to return references tied to *that* lifetime — not to
+    /// the `&self` borrow of the call. A GAT `Ref<'a>` would unify those lifetimes and
+    /// force every returned reference to live only as long as the `&self` borrow, losing
+    /// the property that borrowed containers can hand out refs at their own lifetime.
+    ///
+    /// ## `Cursor<'a>` *is* a GAT
+    ///
+    /// Cursors own nothing; they borrow from the container to hold live iteration state.
+    /// That state is tied to the `&self` call, so a GAT is the correct shape. The tension
+    /// with `Ref` disappears because cursors carry data-flow state, not data references.
+    /// Specialized cursors (e.g. [`crate::Repeats`]) avoid per-element `rank()` by
+    /// maintaining counters incrementally; trivial containers use [`crate::common::DefaultCursor`].
+    ///
+    /// ## Composition is the point
+    ///
+    /// Tuple and derived-struct `Index` impls compose field cursors into a compound cursor
+    /// (`TupleCursorN`, `FooContainerCursor`). A `Repeats` field deep inside a derived
+    /// struct still gets rank-free iteration when accessed via `index_iter()`, because
+    /// the outer cursor type zips the inner specialized cursors.
+    ///
+    /// ## Ref-form impls (`&'a Container`) use `DefaultCursor`
+    ///
+    /// Composed cursors for the `&'a` form would need lifetime gymnastics around
+    /// intermediate borrows that don't work generically. The hot path is always
+    /// `container.borrow().index_iter()`, which hits the owned-form specialized cursor.
     pub mod index {
 
         use alloc::vec::Vec;
         use crate::Len;
-        use crate::common::IterOwn;
+        use super::IterOwn;
 
         /// A type that can be mutably accessed by `usize`.
         pub trait IndexMut {
@@ -284,11 +324,18 @@ pub mod common {
             #[inline(always)] fn get_mut(&mut self, index: usize) -> Self::IndexMut<'_> { &mut self[index] }
         }
 
-        /// A type that can be accessed by `usize` but without borrowing `self`.
+        /// A type that can be accessed by `usize` but without borrowing `self`
+        /// for the returned reference.
         ///
-        /// This can be useful for types which include their own lifetimes, and
-        /// which wish to express that their reference has the same lifetime.
-        /// In the GAT `Index`, the `Ref<'_>` lifetime would be tied to `&self`.
+        /// [`Self::Ref`] is not a GAT: its lifetime is fixed by the container
+        /// rather than tied to `&self`. This lets borrowed containers return
+        /// references at their own lifetime, outliving the `&self` borrow.
+        ///
+        /// [`Self::Cursor`] *is* a GAT, holding live iteration state for the
+        /// duration of a `&self` borrow. Specialized cursors (e.g. for
+        /// [`crate::Repeats`]) avoid per-element work like `rank()`; trivial
+        /// containers fall back to [`crate::common::DefaultCursor`], which wraps `get()`.
+        /// See the module docs for the full rationale.
         ///
         /// This trait may be challenging to implement for owning containers,
         /// for example `Vec<_>`, which would need their `Ref` type to depend
@@ -301,12 +348,21 @@ pub mod common {
         /// do not then go on to examine the values. If you plan to access a field
         /// (for tuples or structs) or variant match (for enums) you should perform
         /// this before calling `get(index)` when able.
+        ///
+        /// For sequential iteration, prefer [`Self::cursor`] / [`Self::index_iter`]:
+        /// they may be significantly faster than repeated `get()` by avoiding per-element
+        /// setup (such as `rank()` in [`crate::Repeats`] / [`crate::Lookbacks`]).
         pub trait Index {
             /// The type returned by the `get` method.
             ///
             /// This trait is most often implemented for lifetimed containers, and the `Ref` type
             /// will have a lifetime that depends on that of the containers, rather than `&self`.
             type Ref;
+            /// Iterator type for sequential access over a range.
+            ///
+            /// Types with efficient sequential strategies (e.g. [`Repeats`](crate::Repeats))
+            /// override this with a specialized iterator. Others use [`crate::common::DefaultCursor`].
+            type Cursor<'a>: Iterator<Item = Self::Ref> where Self: 'a;
             /// Returns the reference type for location `index`.
             ///
             /// Implementations should most likely be marked `#[inline(always)]`.
@@ -314,52 +370,83 @@ pub mod common {
             /// as this prevents Rust/LLVM from eliding the test even if the return
             /// value is not actually consumed.
             fn get(&self, index: usize) -> Self::Ref;
+            /// Returns an iterator over `range` that may be more efficient than
+            /// repeated `get()` calls.
+            ///
+            /// A cursor pre-validates the range once at creation time. Callers must
+            /// ensure `range` is within bounds.
+            fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_>;
             #[inline(always)] fn last(&self) -> Option<Self::Ref> where Self: Len {
                 if self.is_empty() { None }
                 else { Some(self.get(self.len()-1)) }
             }
-            /// Converts `&self` into an iterator.
+            /// Returns a cursor over all elements.
+            ///
+            /// Delegates to [`Self::cursor`] over `0..self.len()`. Specialized
+            /// container types (e.g. [`Repeats`](crate::Repeats)) return a
+            /// fast cursor that avoids per-element `rank()` calls; others
+            /// fall back to [`crate::common::DefaultCursor`] which wraps `get()`.
             ///
             /// This has an awkward name to avoid collision with `iter()`, which may also be implemented.
             #[inline(always)]
-            fn index_iter(&self) -> IterOwn<&Self> {
-                IterOwn {
-                    index: 0,
-                    slice: self,
-                }
+            fn index_iter(&self) -> Self::Cursor<'_> where Self: Len {
+                self.cursor(0..self.len())
             }
-            /// Converts `self` into an iterator.
+            /// Converts `self` into an iterator, owning the container.
+            ///
+            /// Always uses the slow `get()`-based path ([`IterOwn`]); specialized cursors
+            /// borrow from the container, so the fast path is only available via
+            /// [`Self::index_iter`] or [`Self::cursor`]. Useful when you need to consume
+            /// a `Copy` borrowed container (e.g. to return an iterator whose lifetime is
+            /// tied to the borrowed value's inner references rather than a `&self` borrow).
             ///
             /// This has an awkward name to avoid collision with `into_iter()`, which may also be implemented.
             #[inline(always)]
             fn into_index_iter(self) -> IterOwn<Self> where Self: Sized {
-                IterOwn {
-                    index: 0,
-                    slice: self,
-                }
+                IterOwn::new(0, self)
             }
         }
 
         // These implementations aim to reveal a longer lifetime, or to copy results to avoid a lifetime.
         impl<'a, T> Index for &'a [T] {
             type Ref = &'a T;
+            type Cursor<'b> = core::slice::Iter<'a, T> where Self: 'b;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { &self[index] }
+            #[inline(always)] fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_> {
+                self[range].iter()
+            }
         }
         impl<T: Copy> Index for [T] {
             type Ref = T;
+            type Cursor<'a> = core::iter::Copied<core::slice::Iter<'a, T>> where Self: 'a;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self[index] }
+            #[inline(always)] fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_> {
+                self[range].iter().copied()
+            }
         }
         impl<T: Copy, const N: usize> Index for [T; N] {
             type Ref = T;
+            type Cursor<'a> = core::iter::Copied<core::slice::Iter<'a, T>> where Self: 'a;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self[index] }
+            #[inline(always)] fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_> {
+                self[range].iter().copied()
+            }
         }
         impl<'a, T> Index for &'a Vec<T> {
             type Ref = &'a T;
+            type Cursor<'b> = core::slice::Iter<'a, T> where Self: 'b;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { &self[index] }
+            #[inline(always)] fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_> {
+                self[range].iter()
+            }
         }
         impl<T: Copy> Index for Vec<T> {
             type Ref = T;
+            type Cursor<'a> = core::iter::Copied<core::slice::Iter<'a, T>> where Self: 'a;
             #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self[index] }
+            #[inline(always)] fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_> {
+                self[range].iter().copied()
+            }
         }
 
 
@@ -539,9 +626,13 @@ pub mod common {
 
     impl<S: Index> Index for Slice<S> {
         type Ref = S::Ref;
+        type Cursor<'a> = S::Cursor<'a> where Self: 'a;
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
             assert!(index < self.upper - self.lower);
             self.slice.get(self.lower + index)
+        }
+        #[inline(always)] fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_> {
+            self.slice.cursor(self.lower + range.start .. self.lower + range.end)
         }
     }
     impl<'a, S> Index for &'a Slice<S>
@@ -549,6 +640,7 @@ pub mod common {
         &'a S : Index,
     {
         type Ref = <&'a S as Index>::Ref;
+        impl_default_cursor!();
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
             assert!(index < self.upper - self.lower);
             (&self.slice).get(self.lower + index)
@@ -568,8 +660,9 @@ pub mod common {
         ///
         /// This method exists rather than an `IntoIterator` implementation to avoid
         /// a conflicting implementation for pushing an `I: IntoIterator` into `Vecs`.
+        /// Uses the slow `get()`-based path because the iterator owns the `Slice`.
         pub fn into_iter(self) -> IterOwn<Slice<S>> {
-            self.into_index_iter()
+            IterOwn::new(0, self)
         }
     }
 
@@ -579,6 +672,7 @@ pub mod common {
         }
     }
 
+    /// Owned iterator adapter used by [`Slice::into_iter`] — calls `get()` per element.
     pub struct IterOwn<S> {
         index: usize,
         slice: S,
@@ -608,6 +702,60 @@ pub mod common {
     }
 
     impl<S: Index + Len> ExactSizeIterator for IterOwn<S> { }
+
+    /// Cursor that delegates to [`Index::get`] for types without specialized iteration.
+    ///
+    /// Used as the default `Cursor` type for containers that do not benefit from
+    /// a specialized sequential access strategy.
+    pub struct DefaultCursor<'a, S: ?Sized> {
+        slice: &'a S,
+        cursor: usize,
+        end: usize,
+    }
+
+    impl<'a, S: ?Sized> DefaultCursor<'a, S> {
+        #[inline(always)]
+        pub fn new(slice: &'a S, range: core::ops::Range<usize>) -> Self {
+            DefaultCursor { slice, cursor: range.start, end: range.end }
+        }
+    }
+
+    impl<'a, S: Index + ?Sized> Iterator for DefaultCursor<'a, S> {
+        type Item = S::Ref;
+        #[inline(always)]
+        fn next(&mut self) -> Option<Self::Item> {
+            if self.cursor < self.end {
+                let result = self.slice.get(self.cursor);
+                self.cursor += 1;
+                Some(result)
+            } else {
+                None
+            }
+        }
+        #[inline(always)]
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            let remaining = self.end - self.cursor;
+            (remaining, Some(remaining))
+        }
+    }
+
+    impl<S: Index + ?Sized> ExactSizeIterator for DefaultCursor<'_, S> {}
+
+    /// Generates the default `Cursor` and `cursor()` implementation for `Index`.
+    ///
+    /// Expands to a `type Cursor<'a> = DefaultCursor<'a, Self>` and a `cursor()`
+    /// method that wraps `get()`. Use this in `Index` impls for types that do not
+    /// benefit from specialized sequential access.
+    macro_rules! impl_default_cursor {
+        () => {
+            type Cursor<'__cursor> = $crate::common::DefaultCursor<'__cursor, Self> where Self: '__cursor;
+            #[inline]
+            fn cursor(&self, range: core::ops::Range<usize>) -> Self::Cursor<'_> {
+                $crate::common::DefaultCursor::new(self, range)
+            }
+        }
+    }
+    pub(crate) use impl_default_cursor;
 
     /// A type that can be viewed as byte slices with lifetime `'a`.
     ///

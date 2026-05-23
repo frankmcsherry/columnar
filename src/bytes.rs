@@ -508,7 +508,7 @@ pub mod stash {
                 },
             }
         }
-        /// The number of bytes needed to write the contents using the [`indexed`] encoder.
+        /// The number of bytes needed to write the contents using the [`indexed`](crate::bytes::indexed) encoder.
         ///
         /// This may be less than the length of the contained bytes or words, if they overshoot.
         pub fn length_in_bytes(&self) -> usize { crate::bytes::indexed::length_in_bytes(&self.borrow()) }

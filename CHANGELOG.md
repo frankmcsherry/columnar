@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Index::Cursor` GAT and `Index::cursor(range)` method for specialized sequential iteration; `Repeats` and `Lookbacks` skip per-element `rank()` via bit-caching cursors, yielding ~10x faster iteration through columnar composites containing these types ([#105](https://github.com/frankmcsherry/columnar/pull/105))
+- Composed cursors for tuples and derived struct containers zip field cursors, propagating specialized iteration through `#[derive(Columnar)]` types
+- `DefaultCursor` fallback for types without specialized iteration
+
+### Changed
+
+- `Index::index_iter` returns `Self::Cursor<'_>` instead of `IterOwn<&Self>`, so existing callers pick up specialized cursors automatically; `container.borrow().index_iter()` now compiles, which previously required `into_index_iter` to sidestep a missing `&&[T]: Index` impl. `into_index_iter` remains as a slow-path escape hatch for consuming iteration.
+
 ## [0.12.1](https://github.com/frankmcsherry/columnar/compare/columnar-v0.12.0...columnar-v0.12.1) - 2026-03-29
 
 ### Other

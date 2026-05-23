@@ -86,6 +86,7 @@ mod sizes {
 
     use crate::*;
     use crate::common::{BorrowIndexAs, PushIndexAs};
+    use crate::common::impl_default_cursor;
 
     #[derive(Copy, Clone, Default)]
     pub struct Usizes<CV = Vec<u64>> { pub values: CV }
@@ -127,10 +128,12 @@ mod sizes {
     }
     impl<CV: IndexAs<u64>> Index for Usizes<CV> {
         type Ref = usize;
+        impl_default_cursor!();
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().expect("Usizes values should fit in `usize`") }
     }
     impl<CV: IndexAs<u64>> Index for &Usizes<CV> {
         type Ref = usize;
+        impl_default_cursor!();
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().expect("Usizes values should fit in `usize`") }
     }
     impl<CV: for<'a> Push<&'a u64>> Push<usize> for Usizes<CV> {
@@ -204,10 +207,12 @@ mod sizes {
     }
     impl<CV: IndexAs<i64>> Index for Isizes<CV> {
         type Ref = isize;
+        impl_default_cursor!();
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().expect("Isizes values should fit in `isize`") }
     }
     impl<CV: IndexAs<i64>> Index for &Isizes<CV> {
         type Ref = isize;
+        impl_default_cursor!();
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref { self.values.index_as(index).try_into().expect("Isizes values should fit in `isize`") }
     }
     impl<CV: for<'a> Push<&'a i64>> Push<isize> for Isizes<CV> {
@@ -247,6 +252,7 @@ mod chars {
 
     use crate::*;
     use crate::common::{BorrowIndexAs, PushIndexAs};
+    use crate::common::impl_default_cursor;
 
     type Encoded = u32;
 
@@ -286,10 +292,12 @@ mod chars {
     impl<CV: Len> Len for Chars<CV> { fn len(&self) -> usize { self.values.len() }}
     impl<CV: IndexAs<Encoded>> Index for Chars<CV> {
         type Ref = char;
+        impl_default_cursor!();
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref { char::from_u32(self.values.index_as(index)).unwrap() }
     }
     impl<CV: IndexAs<Encoded>> Index for &Chars<CV> {
         type Ref = char;
+        impl_default_cursor!();
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref { char::from_u32(self.values.index_as(index)).unwrap() }
     }
     impl<CV: for<'a> Push<&'a Encoded>> Push<char> for Chars<CV> {
@@ -329,6 +337,7 @@ mod larges {
 
     use crate::*;
     use crate::common::{BorrowIndexAs, PushIndexAs};
+    use crate::common::impl_default_cursor;
 
     type Encoded = [u8; 16];
 
@@ -368,10 +377,12 @@ mod larges {
     impl<CV: Len> Len for U128s<CV> { fn len(&self) -> usize { self.values.len() }}
     impl<CV: IndexAs<Encoded>> Index for U128s<CV> {
         type Ref = u128;
+        impl_default_cursor!();
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref { u128::from_le_bytes(self.values.index_as(index)) }
     }
     impl<CV: IndexAs<Encoded>> Index for &U128s<CV> {
         type Ref = u128;
+        impl_default_cursor!();
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref { u128::from_le_bytes(self.values.index_as(index)) }
     }
     impl<CV: for<'a> Push<&'a Encoded>> Push<u128> for U128s<CV> {
@@ -440,10 +451,12 @@ mod larges {
     impl<CV: Len> Len for I128s<CV> { fn len(&self) -> usize { self.values.len() }}
     impl<CV: IndexAs<Encoded>> Index for I128s<CV> {
         type Ref = i128;
+        impl_default_cursor!();
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref { i128::from_le_bytes(self.values.index_as(index)) }
     }
     impl<CV: IndexAs<Encoded>> Index for &I128s<CV> {
         type Ref = i128;
+        impl_default_cursor!();
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref { i128::from_le_bytes(self.values.index_as(index)) }
     }
     impl<CV: for<'a> Push<&'a Encoded>> Push<i128> for I128s<CV> {
@@ -499,6 +512,7 @@ pub mod offsets {
         use alloc::{vec::Vec, string::String};
         use crate::{Container, Borrow, Index, Len, Push};
         use crate::common::index::CopyAs;
+        use crate::common::impl_default_cursor;
 
         /// An offset container that encodes a constant `K` spacing.
         #[derive(Copy, Clone, Debug, Default)]
@@ -532,11 +546,13 @@ pub mod offsets {
 
         impl<const K: u64, CC> Index for Fixeds<K, CC> {
             type Ref = u64;
+            impl_default_cursor!();
             #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref { (index as u64 + 1) * K }
         }
         impl<'a, const K: u64, CC> Index for &'a Fixeds<K, CC> {
             type Ref = u64;
+            impl_default_cursor!();
             #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref { (index as u64 + 1) * K }
         }
@@ -615,6 +631,7 @@ pub mod offsets {
         use alloc::{vec::Vec, string::String};
         use core::ops::Deref;
         use crate::{Container, Borrow, Index, IndexAs, Len, Push, Clear, AsBytes, FromBytes};
+        use crate::common::impl_default_cursor;
 
         /// Columnar store for non-decreasing `u64` offsets with stride optimization.
         ///
@@ -655,6 +672,7 @@ pub mod offsets {
         }
         impl<BC: IndexAs<u64>, HC: IndexAs<u64>> Index for Strides<BC, HC> {
             type Ref = u64;
+            impl_default_cursor!();
             #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref {
                 let index = index as u64;
@@ -805,6 +823,7 @@ mod empty {
 
     use alloc::{vec::Vec, string::String};
     use crate::common::index::CopyAs;
+    use crate::common::impl_default_cursor;
     use crate::{Clear, Columnar, Container, Len, IndexMut, Index, Push, Borrow};
 
     #[derive(Copy, Clone, Debug, Default)]
@@ -848,11 +867,13 @@ mod empty {
     }
     impl<CC> Index for Empties<CC> {
         type Ref = ();
+        impl_default_cursor!();
         #[inline(always)]
         fn get(&self, _index: usize) -> Self::Ref { }
     }
     impl<'a, CC> Index for &'a Empties<CC> {
         type Ref = &'a ();
+        impl_default_cursor!();
         #[inline(always)]
         fn get(&self, _index: usize) -> Self::Ref { &() }
     }
@@ -919,6 +940,7 @@ mod boolean {
 
     use alloc::{vec::Vec, string::String};
     use crate::{Container, Clear, Len, Index, IndexAs, Push, Borrow};
+    use crate::common::impl_default_cursor;
 
     /// A store for maintaining `Vec<bool>`.
     ///
@@ -1022,6 +1044,7 @@ mod boolean {
 
     impl<VC: Len + IndexAs<u64>, TC: IndexAs<u64>> Index for Bools<VC, TC> {
         type Ref = bool;
+        impl_default_cursor!();
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
             let block = index / 64;
             let word = if block == self.values.len() {
@@ -1036,6 +1059,7 @@ mod boolean {
 
     impl<VC: Len + IndexAs<u64>, TC: IndexAs<u64>> Index for &Bools<VC, TC> {
         type Ref = bool;
+        impl_default_cursor!();
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
             (*self).get(index)
         }
@@ -1078,6 +1102,7 @@ mod duration {
     use alloc::vec::Vec;
     use core::time::Duration;
     use crate::{Container, Len, Index, IndexAs, Push, Clear, Borrow};
+    use crate::common::impl_default_cursor;
 
     // `core::time::Duration` is equivalent to `(u64, u32)`, corresponding to seconds and nanoseconds.
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -1163,12 +1188,14 @@ mod duration {
 
     impl<SC: IndexAs<u64>, NC: IndexAs<u32>> Index for Durations<SC, NC> {
         type Ref = Duration;
+        impl_default_cursor!();
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
             Duration::new(self.seconds.index_as(index), self.nanoseconds.index_as(index))
         }
     }
     impl<SC: IndexAs<u64>, NC: IndexAs<u32>> Index for &Durations<SC, NC> {
         type Ref = Duration;
+        impl_default_cursor!();
         #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
             Duration::new(self.seconds.index_as(index), self.nanoseconds.index_as(index))
         }
