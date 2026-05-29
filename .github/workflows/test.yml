@@ -24,12 +24,12 @@ jobs:
         with:
           toolchain: ${{ matrix.toolchain }}
       - name: Cargo check
-        run: cargo check
+        run: cargo check --workspace --all-targets
       - name: Cargo check (all features)
         run: cargo check --workspace --all-targets --all-features
       - name: Cargo test
-        run: cargo test --workspace --all-targets
+        run: cargo test --workspace
       - name: Cargo test (all features)
-        run: cargo test --workspace --all-targets --all-features
+        run: cargo test --workspace --all-features
       - name: Verify no_std support
         run: cargo check -p test-no-std
