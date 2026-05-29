@@ -9,10 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.13.0](https://github.com/frankmcsherry/columnar/compare/columnar-v0.12.1...columnar-v0.13.0) - 2026-05-23
 
-### Other
+### Added
 
-- Improvements for `RankSelect` ([#109](https://github.com/frankmcsherry/columnar/pull/109))
-- Use indexed access to byte slices in `AsBytes` ([#104](https://github.com/frankmcsherry/columnar/pull/104))
+- `RankSelect` forward cursor (`RankSelectCursor`, obtained via `RankSelect::cursor()`): in-order traversal that caches the current word and running rank, so a single word load serves many operations instead of re-probing `counts`. Methods are `next_one` (next set-bit position), `step` (bit-by-bit), `seek_to_pos`, and `seek_to_rank` ([#109](https://github.com/frankmcsherry/columnar/pull/109))
+
+### Changed
+
+- `AsBytes` is now random-access: implementors provide `const SLICE_COUNT` and `get_byte_slice(index)`, and `as_bytes()` becomes a provided method iterating `0..SLICE_COUNT`. Encoders index slices by position rather than consuming an iterator, letting the dispatch constant-fold. Breaking for external implementors of `AsBytes` ([#104](https://github.com/frankmcsherry/columnar/pull/104))
+
+### Removed
+
+- Public `chain` and `chain_one` helpers and the `chain_mod` module, no longer needed now that `AsBytes` does not build chained iterators ([#104](https://github.com/frankmcsherry/columnar/pull/104))
+
+### Fixed
+
+- `RankSelect::select` returned incorrect positions, from an off-by-one in the per-word scan and a chunk-count miscalculation; `select(0)` now yields the first set bit and `select(rank(p)) == p` holds for set-bit positions. Reimplemented with a binary search over `counts` and a branch-free in-word select ([#109](https://github.com/frankmcsherry/columnar/pull/109))
 
 ## [0.12.1](https://github.com/frankmcsherry/columnar/compare/columnar-v0.12.0...columnar-v0.12.1) - 2026-03-29
 
