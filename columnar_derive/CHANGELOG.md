@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0](https://github.com/frankmcsherry/columnar/compare/columnar_derive-v0.12.1...columnar_derive-v0.13.0) - 2026-05-23
+
+### Changed
+
+- Generated `AsBytes` implementations now emit `SLICE_COUNT` and `get_byte_slice`, tracking the trait's move to random-access byte slices ([#104](https://github.com/frankmcsherry/columnar/pull/104))
+
 ## [0.12.0](https://github.com/frankmcsherry/columnar/compare/columnar_derive-v0.11.1...columnar_derive-v0.12.0) - 2026-03-25
 
 ### Added
