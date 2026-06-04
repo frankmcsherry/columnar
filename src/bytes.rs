@@ -383,8 +383,8 @@ pub mod stash {
 
     impl<C: Default, B> Default for Stash<C, B> { fn default() -> Self { Self::Typed(Default::default()) } }
 
-    impl<C: std::fmt::Debug, B: std::ops::Deref<Target=[u8]>> std::fmt::Debug for Stash<C, B> {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    impl<C: core::fmt::Debug, B: core::ops::Deref<Target=[u8]>> core::fmt::Debug for Stash<C, B> {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
             match self {
                 Stash::Typed(c) => f.debug_tuple("Typed").field(c).finish(),
                 Stash::Bytes(b) => f.debug_tuple("Bytes").field(&&b[..]).finish(),
