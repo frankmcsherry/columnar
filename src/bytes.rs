@@ -368,7 +368,7 @@ pub mod stash {
     /// incorrect results at runtime (clamped index accesses, for example). The validation does not
     /// confirm that the internal structure of types are valid, for example that all vector bounds
     /// are in-bounds for their values, and these may result in panics at runtime for invalid data.
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub enum Stash<C, B> {
         /// The typed variant of the container.
         Typed(C),
