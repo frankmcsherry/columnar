@@ -352,8 +352,8 @@ pub mod stash {
     /// A container of either typed columns, or serialized bytes that can be borrowed as the former.
     ///
     /// When `B` dereferences to a byte slice, the container can be borrowed as if the container type `C`.
-    /// This container inherents the readable properties of `C` through borrowing, but does not implement
-    /// the traits itself.
+    /// This container inherits the readable properties of `C` through borrowing, and the implements
+    /// writeable properties by first converting to the `Typed` variant, which is not inexpensive.
     ///
     /// The container can be cleared and pushed into. When cleared it reverts to a typed variant, and when
     /// pushed into if the typed variant it will accept the item, and if not it will panic.
@@ -542,6 +542,26 @@ pub mod stash {
                     *self = Stash::Typed(Default::default());
                 }
             }
+        }
+    }
+
+    // Both methods materialize to the `Typed` variant before writing, which can be expensive when
+    // starting from `Bytes` or `Align`. This matches the behavior of the `Push` implementation.
+    impl<C, B> crate::Container for Stash<C, B>
+    where
+        C: crate::Container + crate::ContainerBytes,
+        B: core::ops::Deref<Target=[u8]> + Clone + Send + 'static,
+    {
+        fn reserve_for<'a, I>(&mut self, selves: I)
+        where
+            Self: 'a,
+            I: Iterator<Item = Self::Borrowed<'a>> + Clone,
+        {
+            self.make_typed().reserve_for(selves);
+        }
+        #[inline(always)]
+        fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
+            self.make_typed().extend_from_self(other, range);
         }
     }
 }
