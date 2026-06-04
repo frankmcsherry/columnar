@@ -368,7 +368,7 @@ pub mod stash {
     /// incorrect results at runtime (clamped index accesses, for example). The validation does not
     /// confirm that the internal structure of types are valid, for example that all vector bounds
     /// are in-bounds for their values, and these may result in panics at runtime for invalid data.
-    #[derive(Clone, Debug)]
+    #[derive(Clone)]
     pub enum Stash<C, B> {
         /// The typed variant of the container.
         Typed(C),
@@ -382,6 +382,16 @@ pub mod stash {
     }
 
     impl<C: Default, B> Default for Stash<C, B> { fn default() -> Self { Self::Typed(Default::default()) } }
+
+    impl<C: std::fmt::Debug, B: std::ops::Deref<Target=[u8]>> std::fmt::Debug for Stash<C, B> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Stash::Typed(c) => f.debug_tuple("Typed").field(c).finish(),
+                Stash::Bytes(b) => f.debug_tuple("Bytes").field(&&b[..]).finish(),
+                Stash::Align(a) => f.debug_tuple("Align").field(a).finish(),
+            }
+        }
+    }
 
     impl<C: crate::ContainerBytes, B: core::ops::Deref<Target = [u8]>> Stash<C, B> {
         /// An analogue of `TryFrom` for any `B: Deref<Target=[u8]>`, avoiding coherence issues.
