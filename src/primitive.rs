@@ -610,15 +610,17 @@ pub mod offsets {
         }
 
         use super::Strides;
-        impl<const K: u64> core::convert::TryFrom<Strides> for Fixeds<K> {
-            type Error = Strides;
-            fn try_from(item: Strides) -> Result<Self, Self::Error> {
+        // Success requires `strided()`, which requires an empty spill, so the
+        // conversion is available from any spill type.
+        impl<const K: u64, BC: Len> core::convert::TryFrom<Strides<BC>> for Fixeds<K> {
+            type Error = Strides<BC>;
+            fn try_from(item: Strides<BC>) -> Result<Self, Self::Error> {
                 if item.strided() == Some(K) { Ok( Self { count: item.head[1] } ) } else { Err(item) }
             }
         }
-        impl<'a, const K: u64> core::convert::TryFrom<Strides<crate::bounds::Uppers<&'a [u64]>, &'a [u64]>> for Fixeds<K, &'a u64> {
-            type Error = Strides<crate::bounds::Uppers<&'a [u64]>, &'a [u64]>;
-            fn try_from(item: Strides<crate::bounds::Uppers<&'a [u64]>, &'a [u64]>) -> Result<Self, Self::Error> {
+        impl<'a, const K: u64, BC: Len> core::convert::TryFrom<Strides<BC, &'a [u64]>> for Fixeds<K, &'a u64> {
+            type Error = Strides<BC, &'a [u64]>;
+            fn try_from(item: Strides<BC, &'a [u64]>) -> Result<Self, Self::Error> {
                 if item.strided() == Some(K) { Ok( Self { count: &item.head[1] } ) } else { Err(item) }
             }
         }
@@ -868,7 +870,7 @@ pub mod offsets {
             }
 
             let mut cols = Vecs {
-                bounds: Strides::new(3, cols.bounds.count),
+                bounds: Strides::<crate::bounds::Uppers>::new(3, cols.bounds.count),
                 values: cols.values
             };
 
