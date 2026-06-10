@@ -908,6 +908,43 @@ pub mod offsets {
         }
 
         #[test]
+        fn strides_generic_spill() {
+            use crate::bounds::{Bounds, MaybeEmpty};
+            use crate::common::Len;
+            use crate::{Borrow, Container};
+            use crate::primitive::offsets::Strides;
+
+            let lengths = [5u64, 5, 5, 5, 0, 3, 0, 7, 5];
+            let mut strides = Strides::<MaybeEmpty>::default();
+            for &length in lengths.iter() {
+                strides.push(length);
+            }
+            assert_eq!(strides.head, [5, 4]);
+            assert_eq!(strides.len(), lengths.len());
+            let mut lower = 0;
+            for (index, &length) in lengths.iter().enumerate() {
+                assert_eq!(Bounds::bounds(&strides, index), (lower, lower + length));
+                for offset in lower .. lower + length {
+                    assert_eq!(strides.rank(offset), index);
+                }
+                lower += length;
+            }
+            assert_eq!(strides.total(), lower);
+
+            // Extending exercises head bulk-extension, head absorption of
+            // conforming spilled lengths, and spill-to-spill delegation.
+            let mut target = Strides::<MaybeEmpty>::default();
+            target.extend_from_self(strides.borrow(), 1 .. lengths.len());
+            assert_eq!(target.len(), lengths.len() - 1);
+            let mut lower = 0;
+            for (index, &length) in lengths[1..].iter().enumerate() {
+                assert_eq!(Bounds::bounds(&target, index), (lower, lower + length));
+                lower += length;
+            }
+            assert_eq!(target.total(), lower);
+        }
+
+        #[test]
         fn vecs_extend_rebases_strides() {
             use alloc::vec::Vec;
             use crate::common::{Index, Push, Len};
@@ -1192,6 +1229,63 @@ mod boolean {
             self.push(*bit)
         }
     }
+
+    impl<VC: Len + IndexAs<u64>, TC: IndexAs<u64>> Bools<VC, TC> {
+        /// Reads up to 64 bits starting at bit position `pos`; bits past the end read as zero.
+        #[inline]
+        pub fn read_bits(&self, pos: usize) -> u64 {
+            let word = |block: usize| -> u64 {
+                if block < self.values.len() {
+                    self.values.index_as(block)
+                }
+                else if block == self.values.len() {
+                    let bits = self.tail.index_as(1);
+                    let mask = if bits >= 64 { !0u64 } else { (1u64 << bits) - 1 };
+                    self.tail.index_as(0) & mask
+                }
+                else { 0 }
+            };
+            let block = pos / 64;
+            let bit = pos % 64;
+            if bit == 0 { word(block) } else { (word(block) >> bit) | (word(block + 1) << (64 - bit)) }
+        }
+    }
+
+    impl<VC: for<'a> Push<&'a u64>> Bools<VC> {
+        /// Appends the low `count` bits of `word`.
+        ///
+        /// `count` must be at most 64, and bits of `word` at positions `count`
+        /// and above must be zero.
+        #[inline]
+        pub fn push_bits(&mut self, word: u64, count: usize) {
+            debug_assert!(count <= 64);
+            debug_assert!(count == 64 || word >> count == 0);
+            let pending = self.tail[1] as usize;
+            self.tail[0] |= word << pending;
+            if pending + count >= 64 {
+                self.values.push(&self.tail[0]);
+                // Bits of `word` that did not fit below carry into the new tail.
+                self.tail[0] = if pending == 0 { 0 } else { word >> (64 - pending) };
+                self.tail[1] = (pending + count - 64) as u64;
+            }
+            else {
+                self.tail[1] += count as u64;
+            }
+        }
+        /// Appends bit positions `range` of `other`, splicing whole words
+        /// (shifted to align) rather than re-pushing individual bits.
+        pub fn extend_from_bits<VC2: Len + IndexAs<u64>, TC2: IndexAs<u64>>(&mut self, other: &Bools<VC2, TC2>, range: core::ops::Range<usize>) {
+            debug_assert!(range.end <= other.len());
+            let mut pos = range.start;
+            while pos < range.end {
+                let count = (range.end - pos).min(64);
+                let mask = if count == 64 { !0u64 } else { (1u64 << count) - 1 };
+                self.push_bits(other.read_bits(pos) & mask, count);
+                pos += count;
+            }
+        }
+    }
+
 
     impl<VC: Clear> Clear for Bools<VC> {
         #[inline(always)]

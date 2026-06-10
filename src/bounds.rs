@@ -18,7 +18,8 @@
 //! lists inexpressible, by design.
 
 use alloc::{vec::Vec, string::String};
-use crate::{Borrow, Container, Clear, Len, Index, IndexAs, Push};
+use crate::{Borrow, Container, Clear, Len, Index, IndexAs, Push, RankSelect};
+use crate::common::index::CopyAs;
 
 /// Extents of a sequence of contiguously stored lists.
 ///
@@ -210,6 +211,240 @@ impl<'a> crate::FromBytes<'a> for Uppers<&'a [u64]> {
     }
 }
 
+/// Implementations common to the two `RankSelect`-backed bounds containers.
+///
+/// Both store a list count (`NC`: `u64` owned, `&u64` borrowed) and a bit
+/// vector (`RankSelect`); they differ in how lists are encoded as bits, which
+/// is confined to their `Bounds`, `Push`, and `Container` implementations.
+macro_rules! bitvec_bounds_common {
+    ($name:ident) => {
+        impl<CC, VC, NC: CopyAs<u64>, WC> Len for $name<CC, VC, NC, WC> {
+            #[inline(always)] fn len(&self) -> usize { self.count.copy_as() as usize }
+        }
+
+        impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexAs<u64>> Index for $name<CC, VC, NC, WC> {
+            type Ref = u64;
+            /// The length of list `index`.
+            #[inline(always)]
+            fn get(&self, index: usize) -> Self::Ref {
+                let (lower, upper) = self.bounds(index);
+                upper - lower
+            }
+        }
+
+        impl<'a> Push<&'a u64> for $name {
+            #[inline(always)] fn push(&mut self, item: &'a u64) { self.push(*item) }
+        }
+
+        impl Clear for $name {
+            #[inline(always)]
+            fn clear(&mut self) {
+                self.count = 0;
+                self.bits.clear();
+            }
+        }
+
+        impl Borrow for $name {
+            type Ref<'a> = u64;
+            type Borrowed<'a> = $name<&'a [u64], &'a [u64], &'a u64, &'a [u64]>;
+            #[inline(always)]
+            fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
+                $name { count: &self.count, bits: self.bits.borrow() }
+            }
+            #[inline(always)]
+            fn reborrow<'b, 'a: 'b>(item: Self::Borrowed<'a>) -> Self::Borrowed<'b> where Self: 'a {
+                $name { count: item.count, bits: RankSelect::<Vec<u64>, Vec<u64>>::reborrow(item.bits) }
+            }
+            #[inline(always)]
+            fn reborrow_ref<'b, 'a: 'b>(item: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { item }
+        }
+
+        impl BoundsContainer for $name {}
+
+        impl<'a> crate::AsBytes<'a> for $name<&'a [u64], &'a [u64], &'a u64, &'a [u64]> {
+            const SLICE_COUNT: usize = 1 + <RankSelect<&'a [u64], &'a [u64], &'a [u64]> as crate::AsBytes<'a>>::SLICE_COUNT;
+            #[inline]
+            fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+                debug_assert!(index < Self::SLICE_COUNT);
+                if index == 0 {
+                    (8, bytemuck::cast_slice(core::slice::from_ref(self.count)))
+                } else {
+                    self.bits.get_byte_slice(index - 1)
+                }
+            }
+        }
+        impl<'a> crate::FromBytes<'a> for $name<&'a [u64], &'a [u64], &'a u64, &'a [u64]> {
+            const SLICE_COUNT: usize = 1 + <RankSelect<&'a [u64], &'a [u64], &'a [u64]> as crate::FromBytes<'a>>::SLICE_COUNT;
+            #[inline(always)]
+            fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+                let count = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
+                Self { count, bits: crate::FromBytes::from_bytes(bytes) }
+            }
+            #[inline(always)]
+            fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
+                let (w, _) = store.get(*offset); *offset += 1;
+                let count = w.first().unwrap_or(&0);
+                Self { count, bits: crate::FromBytes::from_store(store, offset) }
+            }
+            fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+                sizes.push(8); // count
+                <RankSelect<&'a [u64], &'a [u64], &'a [u64]>>::element_sizes(sizes)
+            }
+            fn validate(slices: &[(&[u64], u8)]) -> Result<(), String> {
+                if slices.is_empty() || slices[0].0.is_empty() {
+                    return Err(concat!(stringify!($name), ": count slice must be non-empty").into());
+                }
+                <RankSelect<&'a [u64], &'a [u64], &'a [u64]>>::validate(&slices[1..])
+            }
+        }
+    }
+}
+
+/// Bounds for non-empty lists: one bit per value, set at each list's last value.
+///
+/// The `i`-th set bit marks the last value of list `i`, so `upper(i)` is
+/// `select(i) + 1`, and the list containing value position `offset` is
+/// exactly `rank(offset)`. Costs one bit per value. Pushing an empty list
+/// is a contract violation (debug-asserted): use [`MaybeEmpty`] when lists
+/// may be empty.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
+pub struct NeverEmpty<CC = Vec<u64>, VC = Vec<u64>, NC = u64, WC = [u64; 2]> {
+    /// The number of lists (set bits).
+    pub count: NC,
+    /// One bit per value, set at each list's last value.
+    pub bits: RankSelect<CC, VC, WC>,
+}
+
+bitvec_bounds_common!(NeverEmpty);
+
+impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexAs<u64>> Bounds for NeverEmpty<CC, VC, NC, WC> {
+    #[inline]
+    fn bounds(&self, index: usize) -> (u64, u64) {
+        // One select for the preceding end; the list's own end is the next
+        // set bit, usually a word read away.
+        if index == 0 {
+            let upper = self.bits.select(0).expect("NeverEmpty: list index out of bounds") as u64 + 1;
+            (0, upper)
+        } else {
+            let prev = self.bits.select(index as u64 - 1).expect("NeverEmpty: list index out of bounds");
+            let next = self.bits.select_from(prev + 1, index as u64).expect("NeverEmpty: list index out of bounds");
+            (prev as u64 + 1, next as u64 + 1)
+        }
+    }
+    #[inline]
+    fn rank(&self, offset: u64) -> usize {
+        self.bits.rank(offset as usize)
+    }
+    #[inline]
+    fn total(&self) -> u64 { self.bits.len() as u64 }
+}
+
+impl Push<u64> for NeverEmpty {
+    /// Pushes a list of length `item`, which must be non-zero.
+    #[inline]
+    fn push(&mut self, item: u64) {
+        debug_assert!(item > 0, "NeverEmpty requires non-empty lists; use MaybeEmpty for possibly-empty lists");
+        let mut zeros = item.saturating_sub(1) as usize;
+        while zeros >= 64 {
+            self.bits.push_bits(0, 64);
+            zeros -= 64;
+        }
+        self.bits.push_bits(1 << zeros, zeros + 1);
+        self.count += 1;
+    }
+}
+
+impl Container for NeverEmpty {
+    #[inline]
+    fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
+        if !range.is_empty() {
+            // The lists' bits are exactly their values' positions.
+            let lower = other.bounds(range.start).0 as usize;
+            let upper = other.bounds(range.end - 1).1 as usize;
+            self.bits.extend_from_bits(&other.bits, lower .. upper);
+            self.count += range.len() as u64;
+        }
+    }
+    fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
+        self.bits.values.values.reserve(selves.map(|x| x.bits.values.values.len()).sum::<usize>());
+    }
+}
+
+/// Bounds for possibly-empty lists, in unary: each list contributes one zero
+/// bit per value, then a one. Costs one bit per value plus one bit per list.
+///
+/// The `i`-th set bit sits at position `upper(i) + i`, so `upper(i)` is
+/// `select(i) - i`, and the list containing value position `offset` is
+/// `select_zero(offset) - offset` (the value's bit position, less the zeros
+/// preceding it).
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
+pub struct MaybeEmpty<CC = Vec<u64>, VC = Vec<u64>, NC = u64, WC = [u64; 2]> {
+    /// The number of lists (set bits).
+    pub count: NC,
+    /// For each list in order, a zero per value and then a one.
+    pub bits: RankSelect<CC, VC, WC>,
+}
+
+bitvec_bounds_common!(MaybeEmpty);
+
+impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexAs<u64>> Bounds for MaybeEmpty<CC, VC, NC, WC> {
+    #[inline]
+    fn bounds(&self, index: usize) -> (u64, u64) {
+        // One select for the preceding end; the list's own end is the next
+        // set bit, usually a word read away.
+        let index = index as u64;
+        if index == 0 {
+            let upper = self.bits.select(0).expect("MaybeEmpty: list index out of bounds") as u64;
+            (0, upper)
+        } else {
+            let prev = self.bits.select(index - 1).expect("MaybeEmpty: list index out of bounds");
+            let next = self.bits.select_from(prev + 1, index).expect("MaybeEmpty: list index out of bounds");
+            (prev as u64 + 1 - index, next as u64 - index)
+        }
+    }
+    #[inline]
+    fn rank(&self, offset: u64) -> usize {
+        match self.bits.select_zero(offset) {
+            Some(pos) => pos - offset as usize,
+            None => self.len(),
+        }
+    }
+    #[inline]
+    fn total(&self) -> u64 { self.bits.len() as u64 - self.count.copy_as() }
+}
+
+impl Push<u64> for MaybeEmpty {
+    /// Pushes a list of length `item`.
+    #[inline]
+    fn push(&mut self, item: u64) {
+        let mut zeros = item as usize;
+        while zeros >= 64 {
+            self.bits.push_bits(0, 64);
+            zeros -= 64;
+        }
+        self.bits.push_bits(1 << zeros, zeros + 1);
+        self.count += 1;
+    }
+}
+
+impl Container for MaybeEmpty {
+    #[inline]
+    fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
+        if !range.is_empty() {
+            // List `j` occupies bits `upper(j-1) + j .. upper(j) + j + 1`.
+            let lower = other.bounds(range.start).0 as usize + range.start;
+            let upper = other.bounds(range.end - 1).1 as usize + range.end;
+            self.bits.extend_from_bits(&other.bits, lower .. upper);
+            self.count += range.len() as u64;
+        }
+    }
+    fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
+        self.bits.values.values.reserve(selves.map(|x| x.bits.values.values.len()).sum::<usize>());
+    }
+}
+
 #[cfg(test)]
 mod test {
 
@@ -283,6 +518,110 @@ mod test {
         assert_eq!((&cols).get(1).len(), 0);
         let got: Vec<u8> = (&cols).get(2).into_iter().copied().collect();
         assert_eq!(got, vec![4, 5]);
+    }
+
+    #[test]
+    fn never_empty_round_trip() {
+        use crate::Vecs;
+        use super::NeverEmpty;
+        // Lengths 1..=37, totalling several BITS_PER_CHUNK chunks.
+        let lists: Vec<Vec<u32>> = (0..400).map(|i| (0 .. (i % 37) + 1).collect()).collect();
+        let mut cols = Vecs::<Vec<u32>, NeverEmpty>::default();
+        for list in lists.iter() {
+            cols.push(list);
+        }
+        assert_eq!(cols.len(), lists.len());
+        let mut position = 0;
+        for (index, list) in lists.iter().enumerate() {
+            let got: Vec<u32> = cols.borrow().get(index).into_iter().copied().collect();
+            assert_eq!(&got, list);
+            assert_eq!(cols.bounds.get(index), list.len() as u64);
+            for _ in list.iter() {
+                assert_eq!(cols.bounds.rank(position), index);
+                position += 1;
+            }
+        }
+        assert_eq!(cols.bounds.total(), position);
+        assert_eq!(cols.bounds.rank(position), lists.len());
+    }
+
+    #[test]
+    fn maybe_empty_round_trip() {
+        use crate::Vecs;
+        use super::MaybeEmpty;
+        // Lengths 0..=36, including many empty lists.
+        let lists: Vec<Vec<u32>> = (0..400).map(|i| (0 .. (i * i) % 37).collect()).collect();
+        let mut cols = Vecs::<Vec<u32>, MaybeEmpty>::default();
+        for list in lists.iter() {
+            cols.push(list);
+        }
+        assert_eq!(cols.len(), lists.len());
+        let mut position = 0;
+        for (index, list) in lists.iter().enumerate() {
+            let got: Vec<u32> = cols.borrow().get(index).into_iter().copied().collect();
+            assert_eq!(&got, list);
+            assert_eq!(cols.bounds.get(index), list.len() as u64);
+            for _ in list.iter() {
+                assert_eq!(cols.bounds.rank(position), index);
+                position += 1;
+            }
+        }
+        assert_eq!(cols.bounds.total(), position);
+        assert_eq!(cols.bounds.rank(position), lists.len());
+    }
+
+    #[test]
+    fn bitvec_bounds_extend_matches_pushes() {
+        use super::{NeverEmpty, MaybeEmpty};
+        // Extending by a range must equal pushing each length, bit for bit,
+        // across misaligned prefixes and range endpoints (exercising the
+        // word splice and the count summaries).
+        let lengths: Vec<u64> = (0..500u64).map(|i| (i * i) % 9).collect();
+        let cases = [(0usize, 0usize, 500usize), (3, 2, 400), (1, 17, 18), (5, 499, 500), (2, 100, 100), (4, 0, 500)];
+
+        let mut source = MaybeEmpty::default();
+        for &length in lengths.iter() { source.push(length); }
+        for (prefix, start, end) in cases {
+            let mut extended = MaybeEmpty::default();
+            let mut pushed = MaybeEmpty::default();
+            for i in 0..prefix {
+                extended.push((i % 4) as u64);
+                pushed.push((i % 4) as u64);
+            }
+            extended.extend_from_self(source.borrow(), start..end);
+            for i in start..end { pushed.push(lengths[i]); }
+            assert_eq!(extended, pushed, "MaybeEmpty prefix {prefix} range {start}..{end}");
+        }
+
+        let mut source = NeverEmpty::default();
+        for &length in lengths.iter() { source.push(length + 1); }
+        for (prefix, start, end) in cases {
+            let mut extended = NeverEmpty::default();
+            let mut pushed = NeverEmpty::default();
+            for i in 0..prefix {
+                extended.push((i % 4) as u64 + 1);
+                pushed.push((i % 4) as u64 + 1);
+            }
+            extended.extend_from_self(source.borrow(), start..end);
+            for i in start..end { pushed.push(lengths[i] + 1); }
+            assert_eq!(extended, pushed, "NeverEmpty prefix {prefix} range {start}..{end}");
+        }
+    }
+
+    #[test]
+    fn bitvec_bounds_bytes_round_trip() {
+        use crate::{AsBytes, FromBytes};
+        use super::MaybeEmpty;
+        let mut maybe_empty = MaybeEmpty::default();
+        for length in [3u64, 0, 2, 64, 0, 130] { maybe_empty.push(length); }
+        let borrowed = maybe_empty.borrow();
+        let slices: Vec<(u64, &[u8])> = borrowed.as_bytes().collect();
+        let mut iter = slices.iter().map(|(_, bytes)| *bytes);
+        let decoded = <MaybeEmpty<&[u64], &[u64], &u64, &[u64]> as FromBytes>::from_bytes(&mut iter);
+        assert_eq!(decoded.len(), maybe_empty.len());
+        for index in 0..maybe_empty.len() {
+            assert_eq!(Bounds::bounds(&decoded, index), Bounds::bounds(&maybe_empty, index));
+        }
     }
 
     #[test]
