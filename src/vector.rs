@@ -146,9 +146,9 @@ impl<'a, TC: crate::FromBytes<'a>, BC: crate::FromBytes<'a>> crate::FromBytes<'a
 impl<TC: Len> Vecs<TC> {
     #[inline]
     pub fn push_iter<I>(&mut self, iter: I) where I: IntoIterator, TC: Push<I::Item> {
-        let prior = self.values.len();
         self.values.extend(iter);
-        self.bounds.push((self.values.len() - prior) as u64);
+        // With the default `Uppers` bounds, the new upper is just `values.len()`.
+        self.bounds.push_upper(self.values.len() as u64);
     }
 }
 

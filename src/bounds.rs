@@ -149,6 +149,17 @@ impl Clear for Uppers {
 }
 
 impl Uppers {
+    /// Pushes a list ending at absolute position `upper`, which must be at
+    /// least the current total.
+    ///
+    /// Equivalent to pushing the length `upper - self.total()`, for callers
+    /// that already know the new upper bound and would rather not have it
+    /// recomputed from the last element.
+    #[inline(always)]
+    pub fn push_upper(&mut self, upper: u64) {
+        debug_assert!(upper >= self.total());
+        self.uppers.push(upper);
+    }
     /// Removes the last list, if one exists.
     #[inline(always)]
     pub fn pop(&mut self) { self.uppers.pop(); }
