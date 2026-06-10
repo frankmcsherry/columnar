@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Strides` and `Fixeds` `Index`/`Push` now traffic in list lengths rather than absolute upper bounds, per the `Bounds` contract; `Strides::rank` divides while strided, and the `Deref`-based `Strides::bounds` helper is replaced by the `Bounds` implementation
 - `Strides<BC>` is now generic over its spill: any `BoundsContainer` works (default `Uppers`, but e.g. `Strides<MaybeEmpty>` composes the stride fast path with bit-packed overflow). The spill stores the post-stride lists' bounds *relative to the end of the strided prefix* rather than absolute offsets — a serialized-format change for spilled `Strides` data — and `Strides::extend_from_self` bulk-extends conforming strided heads and delegates spill-to-spill, so the spill's own bulk extension (memcpy, bit splice) is used
 
+### Removed
+
+- `Vecs::push_iter`, redundant with the `Push<I: IntoIterator>` implementation: `vecs.push(iter)` does the same
+
 ## [0.13.0](https://github.com/frankmcsherry/columnar/compare/columnar-v0.12.1...columnar-v0.13.0) - 2026-05-23
 
 ### Added

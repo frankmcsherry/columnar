@@ -143,15 +143,6 @@ impl<'a, TC: crate::FromBytes<'a>, BC: crate::FromBytes<'a>> crate::FromBytes<'a
     }
 }
 
-impl<TC: Len> Vecs<TC> {
-    #[inline]
-    pub fn push_iter<I>(&mut self, iter: I) where I: IntoIterator, TC: Push<I::Item> {
-        self.values.extend(iter);
-        // With the default `Uppers` bounds, the new upper is just `values.len()`.
-        self.bounds.push_upper(self.values.len() as u64);
-    }
-}
-
 impl<TC, BC: Len> Len for Vecs<TC, BC> {
     #[inline(always)] fn len(&self) -> usize { self.bounds.len() }
 }
