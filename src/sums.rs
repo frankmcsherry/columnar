@@ -597,14 +597,14 @@ pub mod rank_select {
         /// Appends the low `count` bits of `word` (at most 64; higher bits of
         /// `word` must be zero), maintaining the count summaries.
         #[inline]
-        pub fn push_bits(&mut self, word: u64, count: usize) {
+        pub(crate) fn push_bits(&mut self, word: u64, count: usize) {
             self.values.push_bits(word, count);
             self.flush_counts();
         }
         /// Appends bit positions `range` of `other`, splicing whole words
         /// rather than re-pushing individual bits, then catching up the count
         /// summaries by popcounting any newly completed chunks.
-        pub fn extend_from_bits<CC2, VC2: Len + IndexAs<u64>, WC2: IndexAs<u64>>(&mut self, other: &RankSelect<CC2, VC2, WC2>, range: core::ops::Range<usize>) {
+        pub(crate) fn extend_from_bits<CC2, VC2: Len + IndexAs<u64>, WC2: IndexAs<u64>>(&mut self, other: &RankSelect<CC2, VC2, WC2>, range: core::ops::Range<usize>) {
             self.values.extend_from_bits(&other.values, range);
             self.flush_counts();
         }

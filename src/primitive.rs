@@ -1235,7 +1235,7 @@ mod boolean {
     impl<VC: Len + IndexAs<u64>, TC: IndexAs<u64>> Bools<VC, TC> {
         /// Reads up to 64 bits starting at bit position `pos`; bits past the end read as zero.
         #[inline]
-        pub fn read_bits(&self, pos: usize) -> u64 {
+        pub(crate) fn read_bits(&self, pos: usize) -> u64 {
             let word = |block: usize| -> u64 {
                 if block < self.values.len() {
                     self.values.index_as(block)
@@ -1259,7 +1259,7 @@ mod boolean {
         /// `count` must be at most 64, and bits of `word` at positions `count`
         /// and above must be zero.
         #[inline]
-        pub fn push_bits(&mut self, word: u64, count: usize) {
+        pub(crate) fn push_bits(&mut self, word: u64, count: usize) {
             debug_assert!(count <= 64);
             debug_assert!(count == 64 || word >> count == 0);
             let pending = self.tail[1] as usize;
@@ -1276,7 +1276,7 @@ mod boolean {
         }
         /// Appends bit positions `range` of `other`, splicing whole words
         /// (shifted to align) rather than re-pushing individual bits.
-        pub fn extend_from_bits<VC2: Len + IndexAs<u64>, TC2: IndexAs<u64>>(&mut self, other: &Bools<VC2, TC2>, range: core::ops::Range<usize>) {
+        pub(crate) fn extend_from_bits<VC2: Len + IndexAs<u64>, TC2: IndexAs<u64>>(&mut self, other: &Bools<VC2, TC2>, range: core::ops::Range<usize>) {
             debug_assert!(range.end <= other.len());
             let mut pos = range.start;
             while pos < range.end {
