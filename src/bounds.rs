@@ -477,9 +477,11 @@ impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexA
 /// stepped: the next list is typically a word read, and jumps fall back to
 /// a `select` only when they leave the cursor's current word.
 ///
-/// `UNARY` selects the encoding: `false` for [`NeverEmpty`] (set bit at each
-/// list's last value), `true` for [`MaybeEmpty`] (unary lengths).
-pub struct BoundsCursor<'a, CC, VC, WC, const UNARY: bool> {
+/// `MAYBE_EMPTY` selects the encoding it reads: [`MaybeEmpty`] when `true`,
+/// [`NeverEmpty`] when `false`. Both encode lengths in unary; they differ in
+/// the terminator bit `MaybeEmpty` spends per list, which shifts the `i`-th
+/// set bit by `i` positions and is the only difference the cursor sees.
+pub struct BoundsCursor<'a, CC, VC, WC, const MAYBE_EMPTY: bool> {
     cursor: crate::RankSelectCursor<'a, CC, VC, WC>,
     /// One past the most recently queried list index.
     next_index: u64,
@@ -487,7 +489,7 @@ pub struct BoundsCursor<'a, CC, VC, WC, const UNARY: bool> {
     prev_upper: u64,
 }
 
-impl<'a, CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, WC: IndexAs<u64>, const UNARY: bool> BoundsCursor<'a, CC, VC, WC, UNARY> {
+impl<'a, CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, WC: IndexAs<u64>, const MAYBE_EMPTY: bool> BoundsCursor<'a, CC, VC, WC, MAYBE_EMPTY> {
     /// The half-open extent `[lower, upper)` of list `index`.
     ///
     /// Queries must be for strictly increasing `index` (debug-asserted), and
@@ -497,17 +499,17 @@ impl<'a, CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, WC: IndexAs<u64>, const
         let index = index as u64;
         debug_assert!(index >= self.next_index, "BoundsCursor is forward-only");
         // Positions translate to bounds by discounting the `i` terminator bits
-        // preceding list `i`'s values in the unary encoding.
+        // preceding list `i`'s values in the `MaybeEmpty` encoding.
         let lower = if index == 0 {
             0
         } else if index == self.next_index {
             self.prev_upper
         } else {
             let pos = self.cursor.seek_to_rank(index - 1).expect("BoundsCursor: list index out of bounds") as u64;
-            pos + 1 - if UNARY { index } else { 0 }
+            pos + 1 - if MAYBE_EMPTY { index } else { 0 }
         };
         let pos = self.cursor.next_one().expect("BoundsCursor: list index out of bounds") as u64;
-        let upper = pos + 1 - if UNARY { index + 1 } else { 0 };
+        let upper = pos + 1 - if MAYBE_EMPTY { index + 1 } else { 0 };
         self.next_index = index + 1;
         self.prev_upper = upper;
         (lower, upper)
