@@ -211,94 +211,6 @@ impl<'a> crate::FromBytes<'a> for Uppers<&'a [u64]> {
     }
 }
 
-/// Implementations common to the two `RankSelect`-backed bounds containers.
-///
-/// Both store a list count (`NC`: `u64` owned, `&u64` borrowed) and a bit
-/// vector (`RankSelect`); they differ in how lists are encoded as bits, which
-/// is confined to their `Bounds`, `Push`, and `Container` implementations.
-macro_rules! bitvec_bounds_common {
-    ($name:ident) => {
-        impl<CC, VC, NC: CopyAs<u64>, WC> Len for $name<CC, VC, NC, WC> {
-            #[inline(always)] fn len(&self) -> usize { self.count.copy_as() as usize }
-        }
-
-        impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexAs<u64>> Index for $name<CC, VC, NC, WC> {
-            type Ref = u64;
-            /// The length of list `index`.
-            #[inline(always)]
-            fn get(&self, index: usize) -> Self::Ref {
-                let (lower, upper) = self.bounds(index);
-                upper - lower
-            }
-        }
-
-        impl<'a> Push<&'a u64> for $name {
-            #[inline(always)] fn push(&mut self, item: &'a u64) { self.push(*item) }
-        }
-
-        impl Clear for $name {
-            #[inline(always)]
-            fn clear(&mut self) {
-                self.count = 0;
-                self.bits.clear();
-            }
-        }
-
-        impl Borrow for $name {
-            type Ref<'a> = u64;
-            type Borrowed<'a> = $name<&'a [u64], &'a [u64], &'a u64, &'a [u64]>;
-            #[inline(always)]
-            fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
-                $name { count: &self.count, bits: self.bits.borrow() }
-            }
-            #[inline(always)]
-            fn reborrow<'b, 'a: 'b>(item: Self::Borrowed<'a>) -> Self::Borrowed<'b> where Self: 'a {
-                $name { count: item.count, bits: RankSelect::<Vec<u64>, Vec<u64>>::reborrow(item.bits) }
-            }
-            #[inline(always)]
-            fn reborrow_ref<'b, 'a: 'b>(item: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { item }
-        }
-
-        impl BoundsContainer for $name {}
-
-        impl<'a> crate::AsBytes<'a> for $name<&'a [u64], &'a [u64], &'a u64, &'a [u64]> {
-            const SLICE_COUNT: usize = 1 + <RankSelect<&'a [u64], &'a [u64], &'a [u64]> as crate::AsBytes<'a>>::SLICE_COUNT;
-            #[inline]
-            fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
-                debug_assert!(index < Self::SLICE_COUNT);
-                if index == 0 {
-                    (8, bytemuck::cast_slice(core::slice::from_ref(self.count)))
-                } else {
-                    self.bits.get_byte_slice(index - 1)
-                }
-            }
-        }
-        impl<'a> crate::FromBytes<'a> for $name<&'a [u64], &'a [u64], &'a u64, &'a [u64]> {
-            const SLICE_COUNT: usize = 1 + <RankSelect<&'a [u64], &'a [u64], &'a [u64]> as crate::FromBytes<'a>>::SLICE_COUNT;
-            #[inline(always)]
-            fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
-                let count = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
-                Self { count, bits: crate::FromBytes::from_bytes(bytes) }
-            }
-            #[inline(always)]
-            fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
-                let (w, _) = store.get(*offset); *offset += 1;
-                let count = w.first().unwrap_or(&0);
-                Self { count, bits: crate::FromBytes::from_store(store, offset) }
-            }
-            fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
-                sizes.push(8); // count
-                <RankSelect<&'a [u64], &'a [u64], &'a [u64]>>::element_sizes(sizes)
-            }
-            fn validate(slices: &[(&[u64], u8)]) -> Result<(), String> {
-                if slices.is_empty() || slices[0].0.is_empty() {
-                    return Err(concat!(stringify!($name), ": count slice must be non-empty").into());
-                }
-                <RankSelect<&'a [u64], &'a [u64], &'a [u64]>>::validate(&slices[1..])
-            }
-        }
-    }
-}
 
 /// Bounds for non-empty lists: one bit per value, set at each list's last value.
 ///
@@ -316,7 +228,85 @@ pub struct NeverEmpty<CC = Vec<u64>, VC = Vec<u64>, NC = u64, WC = [u64; 2]> {
     pub bits: RankSelect<CC, VC, WC>,
 }
 
-bitvec_bounds_common!(NeverEmpty);
+impl<CC, VC, NC: CopyAs<u64>, WC> Len for NeverEmpty<CC, VC, NC, WC> {
+    #[inline(always)] fn len(&self) -> usize { self.count.copy_as() as usize }
+}
+
+impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexAs<u64>> Index for NeverEmpty<CC, VC, NC, WC> {
+    type Ref = u64;
+    /// The length of list `index`.
+    #[inline(always)]
+    fn get(&self, index: usize) -> Self::Ref {
+        let (lower, upper) = self.bounds(index);
+        upper - lower
+    }
+}
+
+impl<'a> Push<&'a u64> for NeverEmpty {
+    #[inline(always)] fn push(&mut self, item: &'a u64) { self.push(*item) }
+}
+
+impl Clear for NeverEmpty {
+    #[inline(always)]
+    fn clear(&mut self) {
+        self.count = 0;
+        self.bits.clear();
+    }
+}
+
+impl Borrow for NeverEmpty {
+    type Ref<'a> = u64;
+    type Borrowed<'a> = NeverEmpty<&'a [u64], &'a [u64], &'a u64, &'a [u64]>;
+    #[inline(always)]
+    fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
+        NeverEmpty { count: &self.count, bits: self.bits.borrow() }
+    }
+    #[inline(always)]
+    fn reborrow<'b, 'a: 'b>(item: Self::Borrowed<'a>) -> Self::Borrowed<'b> where Self: 'a {
+        NeverEmpty { count: item.count, bits: RankSelect::<Vec<u64>, Vec<u64>>::reborrow(item.bits) }
+    }
+    #[inline(always)]
+    fn reborrow_ref<'b, 'a: 'b>(item: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { item }
+}
+
+impl BoundsContainer for NeverEmpty {}
+
+impl<'a> crate::AsBytes<'a> for NeverEmpty<&'a [u64], &'a [u64], &'a u64, &'a [u64]> {
+    const SLICE_COUNT: usize = 1 + <RankSelect<&'a [u64], &'a [u64], &'a [u64]> as crate::AsBytes<'a>>::SLICE_COUNT;
+    #[inline]
+    fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+        debug_assert!(index < Self::SLICE_COUNT);
+        if index == 0 {
+            (8, bytemuck::cast_slice(core::slice::from_ref(self.count)))
+        } else {
+            self.bits.get_byte_slice(index - 1)
+        }
+    }
+}
+impl<'a> crate::FromBytes<'a> for NeverEmpty<&'a [u64], &'a [u64], &'a u64, &'a [u64]> {
+    const SLICE_COUNT: usize = 1 + <RankSelect<&'a [u64], &'a [u64], &'a [u64]> as crate::FromBytes<'a>>::SLICE_COUNT;
+    #[inline(always)]
+    fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+        let count = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
+        Self { count, bits: crate::FromBytes::from_bytes(bytes) }
+    }
+    #[inline(always)]
+    fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
+        let (w, _) = store.get(*offset); *offset += 1;
+        let count = w.first().unwrap_or(&0);
+        Self { count, bits: crate::FromBytes::from_store(store, offset) }
+    }
+    fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+        sizes.push(8); // count
+        <RankSelect<&'a [u64], &'a [u64], &'a [u64]>>::element_sizes(sizes)
+    }
+    fn validate(slices: &[(&[u64], u8)]) -> Result<(), String> {
+        if slices.is_empty() || slices[0].0.is_empty() {
+            return Err("NeverEmpty: count slice must be non-empty".into());
+        }
+        <RankSelect<&'a [u64], &'a [u64], &'a [u64]>>::validate(&slices[1..])
+    }
+}
 
 impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexAs<u64>> Bounds for NeverEmpty<CC, VC, NC, WC> {
     #[inline]
@@ -387,7 +377,85 @@ pub struct MaybeEmpty<CC = Vec<u64>, VC = Vec<u64>, NC = u64, WC = [u64; 2]> {
     pub bits: RankSelect<CC, VC, WC>,
 }
 
-bitvec_bounds_common!(MaybeEmpty);
+impl<CC, VC, NC: CopyAs<u64>, WC> Len for MaybeEmpty<CC, VC, NC, WC> {
+    #[inline(always)] fn len(&self) -> usize { self.count.copy_as() as usize }
+}
+
+impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexAs<u64>> Index for MaybeEmpty<CC, VC, NC, WC> {
+    type Ref = u64;
+    /// The length of list `index`.
+    #[inline(always)]
+    fn get(&self, index: usize) -> Self::Ref {
+        let (lower, upper) = self.bounds(index);
+        upper - lower
+    }
+}
+
+impl<'a> Push<&'a u64> for MaybeEmpty {
+    #[inline(always)] fn push(&mut self, item: &'a u64) { self.push(*item) }
+}
+
+impl Clear for MaybeEmpty {
+    #[inline(always)]
+    fn clear(&mut self) {
+        self.count = 0;
+        self.bits.clear();
+    }
+}
+
+impl Borrow for MaybeEmpty {
+    type Ref<'a> = u64;
+    type Borrowed<'a> = MaybeEmpty<&'a [u64], &'a [u64], &'a u64, &'a [u64]>;
+    #[inline(always)]
+    fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
+        MaybeEmpty { count: &self.count, bits: self.bits.borrow() }
+    }
+    #[inline(always)]
+    fn reborrow<'b, 'a: 'b>(item: Self::Borrowed<'a>) -> Self::Borrowed<'b> where Self: 'a {
+        MaybeEmpty { count: item.count, bits: RankSelect::<Vec<u64>, Vec<u64>>::reborrow(item.bits) }
+    }
+    #[inline(always)]
+    fn reborrow_ref<'b, 'a: 'b>(item: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { item }
+}
+
+impl BoundsContainer for MaybeEmpty {}
+
+impl<'a> crate::AsBytes<'a> for MaybeEmpty<&'a [u64], &'a [u64], &'a u64, &'a [u64]> {
+    const SLICE_COUNT: usize = 1 + <RankSelect<&'a [u64], &'a [u64], &'a [u64]> as crate::AsBytes<'a>>::SLICE_COUNT;
+    #[inline]
+    fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+        debug_assert!(index < Self::SLICE_COUNT);
+        if index == 0 {
+            (8, bytemuck::cast_slice(core::slice::from_ref(self.count)))
+        } else {
+            self.bits.get_byte_slice(index - 1)
+        }
+    }
+}
+impl<'a> crate::FromBytes<'a> for MaybeEmpty<&'a [u64], &'a [u64], &'a u64, &'a [u64]> {
+    const SLICE_COUNT: usize = 1 + <RankSelect<&'a [u64], &'a [u64], &'a [u64]> as crate::FromBytes<'a>>::SLICE_COUNT;
+    #[inline(always)]
+    fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+        let count = &bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap()[0];
+        Self { count, bits: crate::FromBytes::from_bytes(bytes) }
+    }
+    #[inline(always)]
+    fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
+        let (w, _) = store.get(*offset); *offset += 1;
+        let count = w.first().unwrap_or(&0);
+        Self { count, bits: crate::FromBytes::from_store(store, offset) }
+    }
+    fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+        sizes.push(8); // count
+        <RankSelect<&'a [u64], &'a [u64], &'a [u64]>>::element_sizes(sizes)
+    }
+    fn validate(slices: &[(&[u64], u8)]) -> Result<(), String> {
+        if slices.is_empty() || slices[0].0.is_empty() {
+            return Err("MaybeEmpty: count slice must be non-empty".into());
+        }
+        <RankSelect<&'a [u64], &'a [u64], &'a [u64]>>::validate(&slices[1..])
+    }
+}
 
 impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexAs<u64>> Bounds for MaybeEmpty<CC, VC, NC, WC> {
     #[inline]
