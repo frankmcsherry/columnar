@@ -477,11 +477,13 @@ mod larges {
     }
 }
 
-/// Columnar stores for non-decreasing `u64`, stored in various ways.
+/// Columnar stores for list bounds, stored in various ways.
 ///
-/// The venerable `Vec<u64>` works as a general container for arbitrary offests,
-/// but it can be non-optimal for various patterns of offset, including constant
-/// inter-offset spacing, and relatively short runs (compared to a `RankSelect`).
+/// These types implement [`Bounds`](crate::bounds::Bounds) and its container
+/// contract: as containers they present list *lengths*, while answering extent
+/// ("select") and containment ("rank") queries about the cumulative offsets.
+/// The general-purpose store is [`Uppers`](crate::bounds::Uppers); the types
+/// here exploit patterns in the offsets, such as constant inter-offset spacing.
 pub mod offsets {
 
 
@@ -498,6 +500,7 @@ pub mod offsets {
 
         use alloc::{vec::Vec, string::String};
         use crate::{Container, Borrow, Index, Len, Push};
+        use crate::bounds::{Bounds, BoundsContainer};
         use crate::common::index::CopyAs;
 
         /// An offset container that encodes a constant `K` spacing.
@@ -532,14 +535,32 @@ pub mod offsets {
 
         impl<const K: u64, CC> Index for Fixeds<K, CC> {
             type Ref = u64;
+            /// The length of list `index`: always `K`.
             #[inline(always)]
-            fn get(&self, index: usize) -> Self::Ref { (index as u64 + 1) * K }
+            fn get(&self, _index: usize) -> Self::Ref { K }
         }
         impl<'a, const K: u64, CC> Index for &'a Fixeds<K, CC> {
             type Ref = u64;
             #[inline(always)]
-            fn get(&self, index: usize) -> Self::Ref { (index as u64 + 1) * K }
+            fn get(&self, _index: usize) -> Self::Ref { K }
         }
+
+        impl<const K: u64, CC: CopyAs<u64>> Bounds for Fixeds<K, CC> {
+            #[inline(always)]
+            fn bounds(&self, index: usize) -> (u64, u64) {
+                let index = index as u64;
+                (index * K, (index + 1) * K)
+            }
+            #[inline(always)]
+            fn rank(&self, offset: u64) -> usize {
+                debug_assert!(K > 0, "Fixeds::rank requires a non-zero stride");
+                (offset / K) as usize
+            }
+            #[inline(always)]
+            fn total(&self) -> u64 { self.count.copy_as() * K }
+        }
+
+        impl<const K: u64> BoundsContainer for Fixeds<K> {}
 
         impl<'a, const K: u64, T> Push<T> for Fixeds<K> {
             // TODO: check for overflow?
@@ -595,9 +616,9 @@ pub mod offsets {
                 if item.strided() == Some(K) { Ok( Self { count: item.head[1] } ) } else { Err(item) }
             }
         }
-        impl<'a, const K: u64> core::convert::TryFrom<Strides<&'a [u64], &'a [u64]>> for Fixeds<K, &'a u64> {
-            type Error = Strides<&'a [u64], &'a [u64]>;
-            fn try_from(item: Strides<&'a [u64], &'a [u64]>) -> Result<Self, Self::Error> {
+        impl<'a, const K: u64> core::convert::TryFrom<Strides<crate::bounds::Uppers<&'a [u64]>, &'a [u64]>> for Fixeds<K, &'a u64> {
+            type Error = Strides<crate::bounds::Uppers<&'a [u64]>, &'a [u64]>;
+            fn try_from(item: Strides<crate::bounds::Uppers<&'a [u64]>, &'a [u64]>) -> Result<Self, Self::Error> {
                 if item.strided() == Some(K) { Ok( Self { count: &item.head[1] } ) } else { Err(item) }
             }
         }
@@ -613,56 +634,125 @@ pub mod offsets {
     mod stride {
 
         use alloc::{vec::Vec, string::String};
-        use core::ops::Deref;
         use crate::{Container, Borrow, Index, IndexAs, Len, Push, Clear, AsBytes, FromBytes};
+        use crate::bounds::{Bounds, BorrowBounds, BoundsContainer, Uppers};
 
-        /// Columnar store for non-decreasing `u64` offsets with stride optimization.
+        /// Columnar store for list bounds with stride optimization.
         ///
-        /// `head` holds `[stride, length]`: when the first `length` offsets follow a
-        /// regular stride pattern (`(i+1) * stride`), they are stored implicitly.
-        /// Remaining offsets go into `bounds`. In the owned form `head` is `[u64; 2]`;
-        /// in the borrowed form it is `&[u64]` of length 2.
+        /// `head` holds `[stride, length]`: while the first `length` lists all
+        /// have length `stride`, their bounds are stored implicitly. Subsequent
+        /// lists spill into `bounds`, any other bounds container, whose extents
+        /// are relative to the end of the strided prefix. In the owned form
+        /// `head` is `[u64; 2]`; in the borrowed form it is `&[u64]` of length 2.
         #[derive(Copy, Clone, Debug, Default)]
-        pub struct Strides<BC = Vec<u64>, HC = [u64; 2]> {
+        pub struct Strides<BC = Uppers, HC = [u64; 2]> {
             pub head: HC,
             pub bounds: BC,
         }
 
-        impl Borrow for Strides {
+        impl<BC: BorrowBounds> Borrow for Strides<BC> {
             type Ref<'a> = u64;
-            type Borrowed<'a> = Strides<&'a [u64], &'a [u64]>;
+            type Borrowed<'a> = Strides<BC::Borrowed<'a>, &'a [u64]> where BC: 'a;
 
-            #[inline(always)] fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { Strides { head: &self.head, bounds: &self.bounds[..] } }
+            #[inline(always)] fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { Strides { head: &self.head, bounds: self.bounds.borrow() } }
             #[inline(always)] fn reborrow<'b, 'a: 'b>(item: Self::Borrowed<'a>) -> Self::Borrowed<'b> where Self: 'a {
-                Strides { head: item.head, bounds: item.bounds }
+                Strides { head: item.head, bounds: BC::reborrow(item.bounds) }
             }
             #[inline(always)] fn reborrow_ref<'b, 'a: 'b>(item: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { item }
         }
 
-        impl Container for Strides {
+        impl<BC: BoundsContainer> Container for Strides<BC> {
+            #[inline]
+            fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
+                let other_stride: u64 = other.head.index_as(0);
+                let other_length: u64 = other.head.index_as(1);
+                let other_length = other_length as usize;
+                // Lists from `other`'s strided head: bulk-extend our head when
+                // they conform, and push their lengths otherwise.
+                let head_count = range.end.min(other_length).saturating_sub(range.start);
+                if head_count > 0 {
+                    if self.bounds.is_empty() && (self.head[1] == 0 || self.head[0] == other_stride) {
+                        self.head[0] = other_stride;
+                        self.head[1] += head_count as u64;
+                    } else {
+                        for _ in 0 .. head_count { self.push(other_stride); }
+                    }
+                }
+                // Lists from `other`'s spill: push lengths while our head may
+                // still absorb them, then delegate spill-to-spill, which lets
+                // the spill container use its own bulk extension.
+                let spill_start = range.start.saturating_sub(other_length);
+                let spill_end = range.end.saturating_sub(other_length);
+                let mut index = spill_start;
+                while index < spill_end && self.bounds.is_empty() {
+                    let (lower, upper) = other.bounds.bounds(index);
+                    self.push(upper - lower);
+                    index += 1;
+                }
+                if index < spill_end {
+                    self.bounds.extend_from_self(other.bounds, index .. spill_end);
+                }
+            }
             fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
                 self.bounds.reserve_for(selves.map(|x| x.bounds))
             }
         }
 
-        impl<'a> Push<&'a u64> for Strides { #[inline(always)] fn push(&mut self, item: &'a u64) { self.push(*item) } }
-        impl Push<u64> for Strides { #[inline(always)] fn push(&mut self, item: u64) { self.push(item) } }
-        impl Clear for Strides { #[inline(always)] fn clear(&mut self) { self.clear() } }
+        impl<'a, BC: BoundsContainer> Push<&'a u64> for Strides<BC> { #[inline(always)] fn push(&mut self, item: &'a u64) { self.push(*item) } }
+        impl<BC: BoundsContainer> Push<u64> for Strides<BC> { #[inline(always)] fn push(&mut self, item: u64) { self.push(item) } }
+        impl<BC: BoundsContainer> Clear for Strides<BC> { #[inline(always)] fn clear(&mut self) { self.clear() } }
 
         impl<BC: Len, HC: IndexAs<u64>> Len for Strides<BC, HC> {
             #[inline(always)]
             fn len(&self) -> usize { self.head.index_as(1) as usize + self.bounds.len() }
         }
-        impl<BC: IndexAs<u64>, HC: IndexAs<u64>> Index for Strides<BC, HC> {
+
+        impl<BC: Bounds, HC: IndexAs<u64>> Index for Strides<BC, HC> {
             type Ref = u64;
+            /// The length of list `index`.
             #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref {
-                let index = index as u64;
                 let length = self.head.index_as(1);
-                let stride = self.head.index_as(0);
-                if index < length { (index+1) * stride } else { self.bounds.index_as((index - length) as usize) }
+                if (index as u64) < length {
+                    self.head.index_as(0)
+                } else {
+                    let (lower, upper) = self.bounds.bounds(index - length as usize);
+                    upper - lower
+                }
             }
         }
+
+        impl<BC: Bounds, HC: IndexAs<u64>> Bounds for Strides<BC, HC> {
+            #[inline(always)]
+            fn bounds(&self, index: usize) -> (u64, u64) {
+                let length = self.head.index_as(1);
+                let stride = self.head.index_as(0);
+                let index64 = index as u64;
+                if index64 < length {
+                    (index64 * stride, (index64 + 1) * stride)
+                } else {
+                    let prefix = stride * length;
+                    let (lower, upper) = self.bounds.bounds(index - length as usize);
+                    (prefix + lower, prefix + upper)
+                }
+            }
+            #[inline(always)]
+            fn rank(&self, offset: u64) -> usize {
+                let length = self.head.index_as(1);
+                let stride = self.head.index_as(0);
+                if stride > 0 && offset < stride * length {
+                    (offset / stride) as usize
+                } else {
+                    length as usize + self.bounds.rank(offset - stride * length)
+                }
+            }
+            #[inline(always)]
+            fn total(&self) -> u64 {
+                self.head.index_as(0) * self.head.index_as(1) + self.bounds.total()
+            }
+        }
+
+        impl<BC: BoundsContainer> BoundsContainer for Strides<BC> {}
 
         impl<'a, BC: AsBytes<'a>> AsBytes<'a> for Strides<BC, &'a [u64]> {
             const SLICE_COUNT: usize = 1 + BC::SLICE_COUNT;
@@ -703,26 +793,34 @@ pub mod offsets {
             }
         }
 
-        impl Strides {
+        impl<BC: BoundsContainer> Strides<BC> {
             pub fn new(stride: u64, length: u64) -> Self {
-                Self { head: [stride, length], bounds: Vec::default() }
+                Self { head: [stride, length], bounds: BC::default() }
             }
+            /// Pushes the length of the next list.
             #[inline(always)]
             pub fn push(&mut self, item: u64) {
-                if self.head[1] == 0 {
-                    self.head[0] = item;
-                    self.head[1] = 1;
+                if !self.bounds.is_empty() {
+                    self.bounds.push(&item);
                 }
-                else if !self.bounds.is_empty() {
-                    self.bounds.push(item);
+                else if self.head[1] == 0 {
+                    self.head = [item, 1];
                 }
-                else if item == self.head[0] * (self.head[1] + 1) {
+                else if item == self.head[0] {
                     self.head[1] += 1;
                 }
                 else {
-                    self.bounds.push(item);
+                    self.bounds.push(&item);
                 }
             }
+            #[inline(always)]
+            pub fn clear(&mut self) {
+                self.head = [0, 0];
+                self.bounds.clear();
+            }
+        }
+
+        impl Strides {
             /// Removes the last element, if non-empty.
             ///
             /// If empty, will trip a debug assert, but wrap in release.
@@ -732,27 +830,8 @@ pub mod offsets {
                 if self.bounds.is_empty() { self.head[1] -= 1; }
                 else { self.bounds.pop(); }
             }
-            #[inline(always)]
-            pub fn clear(&mut self) {
-                self.head = [0, 0];
-                self.bounds.clear();
-            }
         }
 
-        impl<BC: Deref<Target=[u64]>, HC: IndexAs<u64>> Strides<BC, HC> {
-            #[inline(always)]
-            pub fn bounds(&self, index: usize) -> (usize, usize) {
-                let stride = self.head.index_as(0);
-                let length = self.head.index_as(1);
-                let index = index as u64;
-                let lower = if index == 0 { 0 } else {
-                    let index = index - 1;
-                    if index < length { (index+1) * stride } else { self.bounds[(index - length) as usize] }
-                } as usize;
-                let upper = if index < length { (index+1) * stride } else { self.bounds[(index - length) as usize] } as usize;
-                (lower, upper)
-            }
-        }
         impl<BC: Len, HC: IndexAs<u64>> Strides<BC, HC> {
             #[inline(always)] pub fn strided(&self) -> Option<u64> {
                 if self.bounds.is_empty() {
@@ -795,6 +874,60 @@ pub mod offsets {
 
             cols.push(&[0, 0]);
             assert!(TryInto::<Fixeds<3>>::try_into(cols.bounds).is_err());
+        }
+
+        #[test]
+        fn stride_bounds_and_rank() {
+            use alloc::vec;
+            use crate::bounds::Bounds;
+            use crate::common::Len;
+            use crate::primitive::offsets::Strides;
+
+            let mut strides: Strides = Strides::default();
+            for length in [3u64, 3, 3, 2, 0, 4] {
+                strides.push(length);
+            }
+            assert_eq!(strides.len(), 6);
+            assert_eq!(strides.head, [3, 3]);
+            // The spill holds the post-stride lists, relative to the prefix.
+            assert_eq!(strides.bounds.uppers, vec![2, 2, 6]);
+            assert_eq!(strides.total(), 15);
+            assert_eq!(Bounds::bounds(&strides, 0), (0, 3));
+            assert_eq!(Bounds::bounds(&strides, 3), (9, 11));
+            assert_eq!(Bounds::bounds(&strides, 4), (11, 11));
+            assert_eq!(Bounds::bounds(&strides, 5), (11, 15));
+            // Strided ranks divide; spilled ranks search; empty lists are skipped.
+            for offset in 0..9 {
+                assert_eq!(strides.rank(offset), (offset / 3) as usize);
+            }
+            assert_eq!(strides.rank(9), 3);
+            assert_eq!(strides.rank(10), 3);
+            assert_eq!(strides.rank(11), 5);
+            assert_eq!(strides.rank(14), 5);
+            assert_eq!(strides.rank(15), 6);
+        }
+
+        #[test]
+        fn vecs_extend_rebases_strides() {
+            use alloc::vec::Vec;
+            use crate::common::{Index, Push, Len};
+            use crate::{Borrow, Container, Vecs};
+            use crate::primitive::offsets::Strides;
+
+            let mut source = Vecs::<Vec<i32>, Strides>::default();
+            for i in 0..10 {
+                source.push([i, i+1, i+2]);
+            }
+            let mut target = Vecs::<Vec<i32>, Strides>::default();
+            target.push([42]);
+            target.extend_from_self(source.borrow(), 2..5);
+            assert_eq!(target.len(), 4);
+            let got: Vec<i32> = target.borrow().get(0).into_iter().copied().collect();
+            assert_eq!(got, [42]);
+            for (j, i) in (2..5).enumerate() {
+                let got: Vec<i32> = target.borrow().get(j + 1).into_iter().copied().collect();
+                assert_eq!(got, [i, i+1, i+2]);
+            }
         }
     }
 }
@@ -1059,7 +1192,6 @@ mod boolean {
             self.push(*bit)
         }
     }
-
 
     impl<VC: Clear> Clear for Bools<VC> {
         #[inline(always)]

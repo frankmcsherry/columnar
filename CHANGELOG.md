@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A `Bounds` trait for the bounds of `Vecs` and `Strings`, unifying the read side of list extents: `bounds(index)` reports each list's extent ("select"), `rank(offset)` reports the list containing a value position, and `total()` the summed lengths. Implemented by `Uppers` (the new default bounds container), `Strides`, `Fixeds`, and (read-only) `Vec<u64>`/`[u64]` for raw cumulative-offset arrays
+- A `BoundsContainer` trait (explicit opt-in) marking bounds containers writable by `Vecs` and `Strings`, and a `BorrowBounds` composite for types whose borrowed form answers `Bounds` queries
+### Changed
+
+- Bounds containers now present list *lengths* as their container contract (`Index`, `Push`, `extend_from_self`); cumulative storage is an implementation detail. Consequently `extend_from_self` on a bounds container rebases by construction, and `Vecs`/`Strings` no longer perform offset arithmetic when extending — each bounds implementor can specialize (e.g. `Uppers` memcpys offsets when aligned)
+- The default bounds parameter of `Vecs` and `Strings` is `Uppers` rather than `Vec<u64>`. `Uppers` wraps a `Vec<u64>` of cumulative upper bounds and shares its serialized layout, so persisted data is unaffected. Breaking for code that named `Vecs<TC, Vec<u64>>` explicitly or pushed absolute offsets into `.bounds`: reads of raw `Vec<u64>` bounds still compile, writes must migrate to `Uppers`
+- `Strides` and `Fixeds` `Index`/`Push` now traffic in list lengths rather than absolute upper bounds, per the `Bounds` contract; `Strides::rank` divides while strided, and the `Deref`-based `Strides::bounds` helper is replaced by the `Bounds` implementation
+- `Strides<BC>` is now generic over its spill: any `BoundsContainer` works (default `Uppers`). The spill stores the post-stride lists' bounds *relative to the end of the strided prefix* rather than absolute offsets — a serialized-format change for spilled `Strides` data — and `Strides::extend_from_self` bulk-extends conforming strided heads and delegates spill-to-spill, so the spill's own bulk extension (memcpy, bit splice) is used
+
 ## [0.13.0](https://github.com/frankmcsherry/columnar/compare/columnar-v0.12.1...columnar-v0.13.0) - 2026-05-23
 
 ### Added

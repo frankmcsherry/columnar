@@ -1,5 +1,6 @@
 use alloc::{vec::Vec, string::String, string::ToString, boxed::Box};
-use super::{Clear, Columnar, Container, Len, Index, IndexAs, Push, Borrow};
+use super::{Clear, Columnar, Container, Len, Index, Push, Borrow};
+use crate::bounds::{Bounds, BorrowBounds, BoundsContainer, Uppers};
 
 /// A stand-in for `Vec<String>`.
 ///
@@ -8,8 +9,8 @@ use super::{Clear, Columnar, Container, Len, Index, IndexAs, Push, Borrow};
 /// to manage this validation. The `copy_from` and `into_owned` methods panic on invalid data.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
-pub struct Strings<BC = Vec<u64>, VC = Vec<u8>> {
-    /// Bounds container; provides indexed access to offsets.
+pub struct Strings<BC = Uppers, VC = Vec<u8>> {
+    /// Bounds container; provides the extent of each string.
     pub bounds: BC,
     /// Values container; provides slice access to bytes.
     pub values: VC,
@@ -43,7 +44,7 @@ impl Columnar for Box<str> {
     type Container = Strings;
 }
 
-impl<BC: crate::common::BorrowIndexAs<u64>> Borrow for Strings<BC, Vec<u8>> {
+impl<BC: BorrowBounds> Borrow for Strings<BC, Vec<u8>> {
     type Ref<'a> = &'a [u8];
     type Borrowed<'a> = Strings<BC::Borrowed<'a>, &'a [u8]> where BC: 'a;
     #[inline(always)]
@@ -64,28 +65,16 @@ impl<BC: crate::common::BorrowIndexAs<u64>> Borrow for Strings<BC, Vec<u8>> {
     fn reborrow_ref<'b, 'a: 'b>(thing: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { thing }
 }
 
-impl<BC: crate::common::PushIndexAs<u64>> Container for Strings<BC, Vec<u8>> {
+impl<BC: BoundsContainer> Container for Strings<BC, Vec<u8>> {
     #[inline(always)]
     fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
         if !range.is_empty() {
-            // Imported bounds will be relative to this starting offset.
-            let values_len = self.values.len() as u64;
-
-            // Push all bytes that we can, all at once.
-            let other_lower = if range.start == 0 { 0 } else { other.bounds.index_as(range.start-1) };
-            let other_upper = other.bounds.index_as(range.end-1);
-            self.values.extend_from_self(other.values, other_lower as usize .. other_upper as usize);
-
-            // Each bound needs to be shifted by `values_len - other_lower`.
-            if values_len == other_lower {
-                self.bounds.extend_from_self(other.bounds, range);
-            }
-            else {
-                for index in range {
-                    let shifted = other.bounds.index_as(index) - other_lower + values_len;
-                    self.bounds.push(&shifted)
-                }
-            }
+            // Copy the byte extent of the strings; the bounds rebase themselves,
+            // as they extend by string lengths rather than absolute offsets.
+            let lower = other.bounds.bounds(range.start).0;
+            let upper = other.bounds.bounds(range.end - 1).1;
+            self.values.extend_from_self(other.values, lower as usize .. upper as usize);
+            self.bounds.extend_from_self(other.bounds, range);
         }
     }
 
@@ -135,7 +124,7 @@ impl<BC: Len, VC> Len for Strings<BC, VC> {
     #[inline(always)] fn len(&self) -> usize { self.bounds.len() }
 }
 
-impl<'a, BC: Len+IndexAs<u64>> Strings<BC, &'a [u8]> {
+impl<'a, BC: Bounds> Strings<BC, &'a [u8]> {
     /// Returns the `index`-th string as `&str`, validating UTF-8.
     ///
     /// This is a convenience wrapper around [`Index::get`] (which returns `&[u8]`)
@@ -147,21 +136,19 @@ impl<'a, BC: Len+IndexAs<u64>> Strings<BC, &'a [u8]> {
     }
 }
 
-impl<'a, BC: Len+IndexAs<u64>> Index for Strings<BC, &'a [u8]> {
+impl<'a, BC: Bounds> Index for Strings<BC, &'a [u8]> {
     type Ref = &'a [u8];
     #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
-        let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
-        let upper = self.bounds.index_as(index);
+        let (lower, upper) = self.bounds.bounds(index);
         let lower: usize = lower.try_into().expect("bounds must fit in `usize`");
         let upper: usize = upper.try_into().expect("bounds must fit in `usize`");
         &self.values[lower .. upper]
     }
 }
-impl<'a, BC: Len+IndexAs<u64>> Index for &'a Strings<BC, Vec<u8>> {
+impl<'a, BC: Bounds> Index for &'a Strings<BC, Vec<u8>> {
     type Ref = &'a [u8];
     #[inline(always)] fn get(&self, index: usize) -> Self::Ref {
-        let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
-        let upper = self.bounds.index_as(index);
+        let (lower, upper) = self.bounds.bounds(index);
         let lower: usize = lower.try_into().expect("bounds must fit in `usize`");
         let upper: usize = upper.try_into().expect("bounds must fit in `usize`");
         &self.values[lower .. upper]
@@ -180,33 +167,33 @@ impl<'a, BC: Len+IndexAs<u64>> Index for &'a Strings<BC, Vec<u8>> {
 //     }
 // }
 
-impl<BC: for<'a> Push<&'a u64>> Push<&[u8]> for Strings<BC> {
+impl<BC: BoundsContainer> Push<&[u8]> for Strings<BC> {
     #[inline(always)] fn push(&mut self, item: &[u8]) {
         self.values.extend_from_slice(item);
-        self.bounds.push(&(self.values.len() as u64));
+        self.bounds.push(&(item.len() as u64));
     }
 }
-impl<BC: for<'a> Push<&'a u64>> Push<&String> for Strings<BC> {
+impl<BC: BoundsContainer> Push<&String> for Strings<BC> {
     #[inline(always)] fn push(&mut self, item: &String) {
         self.values.extend_from_slice(item.as_bytes());
-        self.bounds.push(&(self.values.len() as u64));
+        self.bounds.push(&(item.len() as u64));
     }
 }
-impl<BC: for<'a> Push<&'a u64>> Push<&str> for Strings<BC> {
+impl<BC: BoundsContainer> Push<&str> for Strings<BC> {
     #[inline]
     fn push(&mut self, item: &str) {
         self.values.extend_from_slice(item.as_bytes());
-        self.bounds.push(&(self.values.len() as u64));
+        self.bounds.push(&(item.len() as u64));
     }
 }
-impl<BC: for<'a> Push<&'a u64>> Push<&Box<str>> for Strings<BC> {
+impl<BC: BoundsContainer> Push<&Box<str>> for Strings<BC> {
     #[inline]
     fn push(&mut self, item: &Box<str>) {
         self.values.extend_from_slice(item.as_bytes());
-        self.bounds.push(&(self.values.len() as u64));
+        self.bounds.push(&(item.len() as u64));
     }
 }
-impl<'a, BC: for<'b> Push<&'b u64>> Push<core::fmt::Arguments<'a>> for Strings<BC> {
+impl<'a, BC: BoundsContainer> Push<core::fmt::Arguments<'a>> for Strings<BC> {
     #[inline]
     fn push(&mut self, item: core::fmt::Arguments<'a>) {
         // Use core::fmt::Write via a wrapper to avoid requiring std::io::Write.
@@ -217,11 +204,12 @@ impl<'a, BC: for<'b> Push<&'b u64>> Push<core::fmt::Arguments<'a>> for Strings<B
                 Ok(())
             }
         }
+        let prior = self.values.len();
         core::fmt::Write::write_fmt(&mut VecWriter(&mut self.values), item).expect("write_fmt failed");
-        self.bounds.push(&(self.values.len() as u64));
+        self.bounds.push(&((self.values.len() - prior) as u64));
     }
 }
-impl<'a, 'b, BC: for<'c> Push<&'c u64>> Push<&'b core::fmt::Arguments<'a>> for Strings<BC> {
+impl<'a, 'b, BC: BoundsContainer> Push<&'b core::fmt::Arguments<'a>> for Strings<BC> {
     #[inline]
     fn push(&mut self, item: &'b core::fmt::Arguments<'a>) {
         self.push(*item);
