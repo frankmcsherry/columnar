@@ -246,12 +246,30 @@ pub mod rank_select {
         }
     }
 
+    /// Position of the `k`-th set bit of `w` (0-indexed; it must exist), and `w` with
+    /// all bits at or below that position cleared.
+    #[inline(always)]
+    fn consume_through(w: u64, k: u32) -> (u32, u64) {
+        debug_assert!(k < w.count_ones());
+        let bit = select_in_word(w, k);
+        let w = w & (!0u64 << bit);
+        (bit, w & w.wrapping_sub(1))
+    }
+
     /// Position of the `k`-th set bit (0-indexed) within a 64-bit word. Returns 64 if
-    /// the word has fewer than `k + 1` set bits. Portable, ~6 conditional shifts based
-    /// on byte/half popcounts — independent of bit density, unlike a linear scan.
+    /// the word has fewer than `k + 1` set bits.
+    ///
+    /// Small `k` skips set bits one at a time — a clear-lowest-set-bit per skipped
+    /// bit, then a `trailing_zeros` — which beats the fixed chain below until around
+    /// eight skipped bits. Beyond that, ~6 conditional shifts based on byte/half
+    /// popcounts — independent of bit density, unlike a linear scan.
     #[inline]
     fn select_in_word(mut w: u64, mut k: u32) -> u32 {
         if k >= w.count_ones() { return 64; }
+        if k < 8 {
+            for _ in 0..k { w &= w.wrapping_sub(1); }
+            return w.trailing_zeros();
+        }
         let mut pos = 0u32;
         // Halve the search range repeatedly. At each step, popcount of the low half
         // tells us whether the k-th bit is in the low half (recurse) or the high half
@@ -366,6 +384,7 @@ pub mod rank_select {
         /// is recovering monotone Vecs bounds from an RS-encoded unary bitvector:
         /// each call returns the next bound's bit position, no per-call re-probing
         /// of `counts`. Returns `None` once all set bits have been emitted.
+        #[inline(always)]
         pub fn next_one(&mut self) -> Option<usize> {
             loop {
                 if self.word_remaining != 0 {
@@ -476,41 +495,70 @@ pub mod rank_select {
         ///
         /// `target` must be `>= self.rank()` (forward-only; debug-asserts otherwise).
         /// Returns `None` if there are fewer than `target + 1` set bits in total.
+        #[inline(always)]
         pub fn seek_to_rank(&mut self, target: u64) -> Option<usize> {
             debug_assert!(target >= self.rank, "seek_to_rank is forward-only");
             // Cheap path: target is within the current word's remaining 1-bits.
             let here_pop = self.word_remaining.count_ones() as u64;
             if target < self.rank + here_pop {
                 let k = (target - self.rank) as u32;
-                let bit_in_word = select_in_word(self.word_remaining, k) as usize;
-                let pos = self.word_idx * 64 + bit_in_word;
-                // Consume up to and including the target bit: clear the lowest k+1 set bits.
-                let mut w = self.word_remaining;
-                for _ in 0..=k { w &= w.wrapping_sub(1); }
-                self.word_remaining = w;
+                let (bit_in_word, rest) = consume_through(self.word_remaining, k);
+                let pos = self.word_idx * 64 + bit_in_word as usize;
+                self.word_remaining = rest;
                 self.rank = target + 1;
                 self.bit_pos = pos + 1;
                 return Some(pos);
             }
-            // Otherwise: jump via chunk binary search, mirroring `select`.
-            let counts = &self.rs.counts;
-            let chunk = {
-                let mut lo = 0;
-                let mut hi = counts.len();
-                while lo < hi {
-                    let mid = lo + (hi - lo) / 2;
-                    if counts.index_as(mid) <= target { lo = mid + 1; } else { hi = mid; }
-                }
-                lo
-            };
-            let mut count = if chunk > 0 { counts.index_as(chunk - 1) } else { 0 };
+            // Middle path: scan words forward to the end of the current chunk,
+            // so that nearby targets cost word reads rather than the binary
+            // search below (which can only pay off past the chunk boundary).
             let vlen = self.rs.values.values.len();
-            let mut block = WORDS_PER_CHUNK * chunk;
-            while block < vlen {
-                let pop = self.rs.values.values.index_as(block).count_ones() as u64;
-                if count + pop > target { break; }
+            let word_at = |block: usize| -> u64 {
+                if block < vlen { self.rs.values.values.index_as(block) }
+                else {
+                    let bits = self.rs.values.tail.index_as(1);
+                    let mask = if bits >= 64 { !0u64 } else { (1u64 << bits) - 1 };
+                    self.rs.values.tail.index_as(0) & mask
+                }
+            };
+            let mut count = self.rank + here_pop;
+            let mut block = self.word_idx + 1;
+            let scan_limit = core::cmp::min(WORDS_PER_CHUNK * (self.word_idx / WORDS_PER_CHUNK + 1), vlen + 1);
+            let mut found = false;
+            while block < scan_limit {
+                let pop = word_at(block).count_ones() as u64;
+                if count + pop > target { found = true; break; }
                 count += pop;
                 block += 1;
+            }
+            if !found {
+                if scan_limit == vlen + 1 {
+                    // Exhausted: every remaining word has been scanned.
+                    self.bit_pos = self.total_bits;
+                    self.word_remaining = 0;
+                    return None;
+                }
+                // Slow path: chunk binary search, mirroring `select`. Chunks at
+                // or before the cursor's own hold at most `target` set bits, so
+                // the search can begin from the cursor's chunk.
+                let counts = &self.rs.counts;
+                let chunk = {
+                    let mut lo = self.word_idx / WORDS_PER_CHUNK;
+                    let mut hi = counts.len();
+                    while lo < hi {
+                        let mid = lo + (hi - lo) / 2;
+                        if counts.index_as(mid) <= target { lo = mid + 1; } else { hi = mid; }
+                    }
+                    lo
+                };
+                count = if chunk > 0 { counts.index_as(chunk - 1) } else { 0 };
+                block = WORDS_PER_CHUNK * chunk;
+                while block < vlen {
+                    let pop = self.rs.values.values.index_as(block).count_ones() as u64;
+                    if count + pop > target { break; }
+                    count += pop;
+                    block += 1;
+                }
             }
             self.word_idx = block;
             self.load_word();
@@ -523,11 +571,9 @@ pub mod rank_select {
                 return None;
             }
             let k = (target - count) as u32;
-            let bit_in_word = select_in_word(self.word_remaining, k) as usize;
-            let pos = self.word_idx * 64 + bit_in_word;
-            let mut w = self.word_remaining;
-            for _ in 0..=k { w &= w.wrapping_sub(1); }
-            self.word_remaining = w;
+            let (bit_in_word, rest) = consume_through(self.word_remaining, k);
+            let pos = self.word_idx * 64 + bit_in_word as usize;
+            self.word_remaining = rest;
             self.rank = target + 1;
             self.bit_pos = pos + 1;
             Some(pos)

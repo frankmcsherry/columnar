@@ -34,7 +34,7 @@ pub use bytemuck;
 
 pub use vector::Vecs;
 pub use string::Strings;
-pub use bounds::{Bounds, BorrowBounds, BoundsContainer, Uppers, NeverEmpty, MaybeEmpty};
+pub use bounds::{Bounds, BorrowBounds, BoundsContainer, BoundsCursor, Uppers, NeverEmpty, MaybeEmpty};
 pub use sums::{rank_select::{RankSelect, Cursor as RankSelectCursor}, result::Results, option::Options, discriminant::Discriminant};
 pub use lookback::{Repeats, Lookbacks};
 

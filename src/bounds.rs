@@ -445,6 +445,64 @@ impl Container for MaybeEmpty {
     }
 }
 
+impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexAs<u64>> NeverEmpty<CC, VC, NC, WC> {
+    /// A forward cursor over the list extents; see [`BoundsCursor`].
+    pub fn cursor(&self) -> BoundsCursor<'_, CC, VC, WC, false> {
+        BoundsCursor { cursor: self.bits.cursor(), next_index: 0, prev_upper: 0 }
+    }
+}
+impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexAs<u64>> MaybeEmpty<CC, VC, NC, WC> {
+    /// A forward cursor over the list extents; see [`BoundsCursor`].
+    pub fn cursor(&self) -> BoundsCursor<'_, CC, VC, WC, true> {
+        BoundsCursor { cursor: self.bits.cursor(), next_index: 0, prev_upper: 0 }
+    }
+}
+
+/// A forward cursor over the extents of a bitvector-backed bounds container.
+///
+/// Random-access `bounds(index)` pays a `select` per call to re-find its
+/// position. A cursor instead remembers where the last query ended, so a
+/// sequence of increasing queries does work proportional to the distance
+/// stepped: the next list is typically a word read, and jumps fall back to
+/// a `select` only when they leave the cursor's current word.
+///
+/// `UNARY` selects the encoding: `false` for [`NeverEmpty`] (set bit at each
+/// list's last value), `true` for [`MaybeEmpty`] (unary lengths).
+pub struct BoundsCursor<'a, CC, VC, WC, const UNARY: bool> {
+    cursor: crate::RankSelectCursor<'a, CC, VC, WC>,
+    /// One past the most recently queried list index.
+    next_index: u64,
+    /// The upper bound of the most recently queried list.
+    prev_upper: u64,
+}
+
+impl<'a, CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, WC: IndexAs<u64>, const UNARY: bool> BoundsCursor<'a, CC, VC, WC, UNARY> {
+    /// The half-open extent `[lower, upper)` of list `index`.
+    ///
+    /// Queries must be for strictly increasing `index` (debug-asserted), and
+    /// `index` must be in bounds.
+    #[inline(always)]
+    pub fn seek(&mut self, index: usize) -> (u64, u64) {
+        let index = index as u64;
+        debug_assert!(index >= self.next_index, "BoundsCursor is forward-only");
+        // Positions translate to bounds by discounting the `i` terminator bits
+        // preceding list `i`'s values in the unary encoding.
+        let lower = if index == 0 {
+            0
+        } else if index == self.next_index {
+            self.prev_upper
+        } else {
+            let pos = self.cursor.seek_to_rank(index - 1).expect("BoundsCursor: list index out of bounds") as u64;
+            pos + 1 - if UNARY { index } else { 0 }
+        };
+        let pos = self.cursor.next_one().expect("BoundsCursor: list index out of bounds") as u64;
+        let upper = pos + 1 - if UNARY { index + 1 } else { 0 };
+        self.next_index = index + 1;
+        self.prev_upper = upper;
+        (lower, upper)
+    }
+}
+
 #[cfg(test)]
 mod test {
 
@@ -605,6 +663,26 @@ mod test {
             extended.extend_from_self(source.borrow(), start..end);
             for i in start..end { pushed.push(lengths[i] + 1); }
             assert_eq!(extended, pushed, "NeverEmpty prefix {prefix} range {start}..{end}");
+        }
+    }
+
+    #[test]
+    fn bounds_cursor_matches_bounds() {
+        use super::{MaybeEmpty, NeverEmpty};
+        let lengths: Vec<u64> = (0..2000u64).map(|i| (i * i) % 9).collect();
+        let mut maybe = MaybeEmpty::default();
+        let mut never = NeverEmpty::default();
+        for &length in lengths.iter() {
+            maybe.push(length);
+            never.push(length + 1);
+        }
+        for gap in [1usize, 2, 3, 7, 64, 500] {
+            let mut maybe_cursor = maybe.cursor();
+            let mut never_cursor = never.cursor();
+            for index in (0..lengths.len()).step_by(gap) {
+                assert_eq!(maybe_cursor.seek(index), Bounds::bounds(&maybe, index), "MaybeEmpty gap {gap} index {index}");
+                assert_eq!(never_cursor.seek(index), Bounds::bounds(&never, index), "NeverEmpty gap {gap} index {index}");
+            }
         }
     }
 

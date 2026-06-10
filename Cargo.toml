@@ -55,6 +55,10 @@ harness = false
 required-features = ["serde"]
 
 [[bench]]
+name = "bounds"
+harness = false
+
+[[bench]]
 name = "ops"
 harness = false
 
