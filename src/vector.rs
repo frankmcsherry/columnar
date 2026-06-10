@@ -1,6 +1,6 @@
 use alloc::{vec::Vec, string::String};
 use super::{Clear, Columnar, Container, Len, IndexMut, Index, Push, Slice, Borrow};
-use crate::bounds::{Bounds, BorrowBounds, BoundsContainer, Uppers};
+use crate::bounds::{Bounds, BoundsBorrow, BoundsContainer, Uppers};
 
 /// A stand-in for `Vec<Vec<T>>` for complex `T`.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -66,7 +66,7 @@ impl<T: Columnar, const N: usize> Columnar for smallvec::SmallVec<[T; N]> {
     type Container = Vecs<T::Container>;
 }
 
-impl<BC: BorrowBounds, TC: Container> Borrow for Vecs<TC, BC> {
+impl<BC: BoundsBorrow, TC: Container> Borrow for Vecs<TC, BC> {
     type Ref<'a> = Slice<TC::Borrowed<'a>> where TC: 'a;
     type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>> where BC: 'a, TC: 'a;
     #[inline(always)]

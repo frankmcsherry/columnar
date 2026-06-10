@@ -1,6 +1,6 @@
 use alloc::{vec::Vec, string::String, string::ToString, boxed::Box};
 use super::{Clear, Columnar, Container, Len, Index, Push, Borrow};
-use crate::bounds::{Bounds, BorrowBounds, BoundsContainer, Uppers};
+use crate::bounds::{Bounds, BoundsBorrow, BoundsContainer, Uppers};
 
 /// A stand-in for `Vec<String>`.
 ///
@@ -44,7 +44,7 @@ impl Columnar for Box<str> {
     type Container = Strings;
 }
 
-impl<BC: BorrowBounds> Borrow for Strings<BC, Vec<u8>> {
+impl<BC: BoundsBorrow> Borrow for Strings<BC, Vec<u8>> {
     type Ref<'a> = &'a [u8];
     type Borrowed<'a> = Strings<BC::Borrowed<'a>, &'a [u8]> where BC: 'a;
     #[inline(always)]

@@ -82,8 +82,8 @@ impl Bounds for Vec<u64> {
 }
 
 /// A composite trait for types whose borrowed form answers [`Bounds`] queries.
-pub trait BorrowBounds: for<'a> Borrow<Borrowed<'a>: Bounds> {}
-impl<C: for<'a> Borrow<Borrowed<'a>: Bounds>> BorrowBounds for C {}
+pub trait BoundsBorrow: for<'a> Borrow<Borrowed<'a>: Bounds> {}
+impl<C: for<'a> Borrow<Borrowed<'a>: Bounds>> BoundsBorrow for C {}
 
 /// A container of list lengths that supports [`Bounds`] queries: what `Vecs`
 /// and `Strings` require of their bounds.
@@ -93,7 +93,7 @@ impl<C: for<'a> Borrow<Borrowed<'a>: Bounds>> BorrowBounds for C {}
 /// container's `Push`/`Index`/`extend_from_self` traffic in list *lengths*.
 /// `Vec<u64>` satisfies every supertrait, but its pushes mean literal
 /// elements, so it must not implement this trait.
-pub trait BoundsContainer: Bounds + BorrowBounds + Container + for<'a> Push<&'a u64> {}
+pub trait BoundsContainer: Bounds + BoundsBorrow + Container + for<'a> Push<&'a u64> {}
 
 /// Cumulative upper bounds in a `u64` array: the default bounds container.
 ///

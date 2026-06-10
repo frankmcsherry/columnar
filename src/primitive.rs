@@ -635,7 +635,7 @@ pub mod offsets {
 
         use alloc::{vec::Vec, string::String};
         use crate::{Container, Borrow, Index, IndexAs, Len, Push, Clear, AsBytes, FromBytes};
-        use crate::bounds::{Bounds, BorrowBounds, BoundsContainer, Uppers};
+        use crate::bounds::{Bounds, BoundsBorrow, BoundsContainer, Uppers};
 
         /// Columnar store for list bounds with stride optimization.
         ///
@@ -650,7 +650,7 @@ pub mod offsets {
             pub bounds: BC,
         }
 
-        impl<BC: BorrowBounds> Borrow for Strides<BC> {
+        impl<BC: BoundsBorrow> Borrow for Strides<BC> {
             type Ref<'a> = u64;
             type Borrowed<'a> = Strides<BC::Borrowed<'a>, &'a [u64]> where BC: 'a;
 
