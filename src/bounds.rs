@@ -86,8 +86,11 @@ impl Bounds for [u64] {
     #[inline(always)]
     fn extent(&self, range: core::ops::Range<usize>) -> (u64, u64) {
         debug_assert!(!range.is_empty());
+        // Read `upper` first: where a caller's non-emptiness test is visible,
+        // its bounds check subsumes the one for `lower`.
+        let upper = self[range.end - 1];
         let lower = if range.start == 0 { 0 } else { self[range.start - 1] };
-        (lower, self[range.end - 1])
+        (lower, upper)
     }
     #[inline(always)]
     fn total(&self) -> u64 { self.last().copied().unwrap_or(0) }
@@ -139,8 +142,11 @@ impl<BC: Len + IndexAs<u64>> Bounds for Uppers<BC> {
     #[inline(always)]
     fn extent(&self, range: core::ops::Range<usize>) -> (u64, u64) {
         debug_assert!(!range.is_empty());
+        // Read `upper` first: where a caller's non-emptiness test is visible,
+        // its bounds check subsumes the one for `lower`.
+        let upper = self.uppers.index_as(range.end - 1);
         let lower = if range.start == 0 { 0 } else { self.uppers.index_as(range.start - 1) };
-        (lower, self.uppers.index_as(range.end - 1))
+        (lower, upper)
     }
     #[inline(always)]
     fn total(&self) -> u64 {
