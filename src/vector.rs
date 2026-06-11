@@ -175,17 +175,18 @@ impl<TC, BC: Bounds> IndexMut for Vecs<TC, BC> {
 impl<'a, TC: Container, BC: BoundsContainer> Push<Slice<TC::Borrowed<'a>>> for Vecs<TC, BC> {
     #[inline]
     fn push(&mut self, item: Slice<TC::Borrowed<'a>>) {
+        debug_assert_eq!(self.bounds.total(), self.values.len() as u64);
         self.values.extend_from_self(item.slice, item.lower .. item.upper);
-        self.bounds.push(&((item.upper - item.lower) as u64));
+        self.bounds.seal(self.values.len() as u64);
     }
 }
 
 impl<I: IntoIterator, TC: Push<I::Item> + Len, BC: BoundsContainer> Push<I> for Vecs<TC, BC> {
     #[inline]
     fn push(&mut self, item: I) {
-        let prior = self.values.len();
+        debug_assert_eq!(self.bounds.total(), self.values.len() as u64);
         self.values.extend(item);
-        self.bounds.push(&((self.values.len() - prior) as u64));
+        self.bounds.seal(self.values.len() as u64);
     }
 }
 

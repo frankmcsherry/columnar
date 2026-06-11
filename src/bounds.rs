@@ -114,7 +114,20 @@ impl<C: for<'a> Borrow<Borrowed<'a>: Bounds>> BoundsBorrow for C {}
 /// container's `Push`/`Index`/`extend_from_self` traffic in list *lengths*.
 /// `Vec<u64>` satisfies every supertrait, but its pushes mean literal
 /// elements, so it must not implement this trait.
-pub trait BoundsContainer: Bounds + BoundsBorrow + Container + for<'a> Push<&'a u64> {}
+pub trait BoundsContainer: Bounds + BoundsBorrow + Container + for<'a> Push<&'a u64> {
+    /// Concludes the current list at absolute position `upper`, which must be
+    /// at least `self.total()`.
+    ///
+    /// Equivalent to pushing the length `upper - self.total()`, for callers
+    /// that track absolute positions (e.g. a values length) and would rather
+    /// not restate them as lengths. Implementors that store absolute offsets
+    /// can record `upper` directly.
+    #[inline(always)]
+    fn seal(&mut self, upper: u64) {
+        let length = upper - self.total();
+        self.push(&length);
+    }
+}
 
 /// Cumulative upper bounds in a `u64` array: the default bounds container.
 ///
@@ -217,7 +230,13 @@ impl Container for Uppers {
     }
 }
 
-impl BoundsContainer for Uppers {}
+impl BoundsContainer for Uppers {
+    #[inline(always)]
+    fn seal(&mut self, upper: u64) {
+        debug_assert!(upper >= self.total());
+        self.uppers.push(upper);
+    }
+}
 
 impl<'a> crate::AsBytes<'a> for Uppers<&'a [u64]> {
     const SLICE_COUNT: usize = <&'a [u64] as crate::AsBytes<'a>>::SLICE_COUNT;

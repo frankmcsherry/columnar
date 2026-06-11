@@ -169,27 +169,27 @@ impl<'a, BC: Bounds> Index for &'a Strings<BC, Vec<u8>> {
 impl<BC: BoundsContainer> Push<&[u8]> for Strings<BC> {
     #[inline(always)] fn push(&mut self, item: &[u8]) {
         self.values.extend_from_slice(item);
-        self.bounds.push(&(item.len() as u64));
+        self.bounds.seal(self.values.len() as u64);
     }
 }
 impl<BC: BoundsContainer> Push<&String> for Strings<BC> {
     #[inline(always)] fn push(&mut self, item: &String) {
         self.values.extend_from_slice(item.as_bytes());
-        self.bounds.push(&(item.len() as u64));
+        self.bounds.seal(self.values.len() as u64);
     }
 }
 impl<BC: BoundsContainer> Push<&str> for Strings<BC> {
     #[inline]
     fn push(&mut self, item: &str) {
         self.values.extend_from_slice(item.as_bytes());
-        self.bounds.push(&(item.len() as u64));
+        self.bounds.seal(self.values.len() as u64);
     }
 }
 impl<BC: BoundsContainer> Push<&Box<str>> for Strings<BC> {
     #[inline]
     fn push(&mut self, item: &Box<str>) {
         self.values.extend_from_slice(item.as_bytes());
-        self.bounds.push(&(item.len() as u64));
+        self.bounds.seal(self.values.len() as u64);
     }
 }
 impl<'a, BC: BoundsContainer> Push<core::fmt::Arguments<'a>> for Strings<BC> {
@@ -203,9 +203,8 @@ impl<'a, BC: BoundsContainer> Push<core::fmt::Arguments<'a>> for Strings<BC> {
                 Ok(())
             }
         }
-        let prior = self.values.len();
         core::fmt::Write::write_fmt(&mut VecWriter(&mut self.values), item).expect("write_fmt failed");
-        self.bounds.push(&((self.values.len() - prior) as u64));
+        self.bounds.seal(self.values.len() as u64);
     }
 }
 impl<'a, 'b, BC: BoundsContainer> Push<&'b core::fmt::Arguments<'a>> for Strings<BC> {
