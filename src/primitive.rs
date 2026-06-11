@@ -562,6 +562,10 @@ pub mod offsets {
                 (range.start as u64 * K, range.end as u64 * K)
             }
             #[inline(always)]
+            fn extents(&self, ranges: &mut [(u64, u64)]) {
+                for range in ranges.iter_mut() { *range = (range.0 * K, range.1 * K); }
+            }
+            #[inline(always)]
             fn total(&self) -> u64 { self.count.copy_as() * K }
         }
 
@@ -769,6 +773,29 @@ pub mod offsets {
                         (range.start as u64 * stride, prefix + self.bounds.extent(0 .. range.end - length).1)
                     }
                 }
+            }
+            fn extents(&self, ranges: &mut [(u64, u64)]) {
+                let length = self.head.index_as(1);
+                let stride = self.head.index_as(0);
+                let prefix = stride * length;
+                // Ranges are ascending and disjoint: those within the strided
+                // head, then any straddling the boundary, then those wholly in
+                // the spill, which the spill resolves in bulk (in its own
+                // coordinates: shift in, delegate, shift out).
+                let head_end = ranges.partition_point(|range| range.1 <= length);
+                for range in ranges[..head_end].iter_mut() {
+                    *range = (range.0 * stride, range.1 * stride);
+                }
+                let mut spill_start = head_end;
+                while spill_start < ranges.len() && ranges[spill_start].0 < length {
+                    let range = &mut ranges[spill_start];
+                    *range = (range.0 * stride, prefix + self.bounds.extent(0 .. (range.1 - length) as usize).1);
+                    spill_start += 1;
+                }
+                let spilled = &mut ranges[spill_start..];
+                for range in spilled.iter_mut() { *range = (range.0 - length, range.1 - length); }
+                self.bounds.extents(spilled);
+                for range in spilled.iter_mut() { *range = (range.0 + prefix, range.1 + prefix); }
             }
             #[inline(always)]
             fn total(&self) -> u64 {

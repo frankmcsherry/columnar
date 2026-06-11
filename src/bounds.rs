@@ -57,6 +57,17 @@ pub trait Bounds: Len {
         debug_assert!(!range.is_empty());
         (self.bounds(range.start).0, self.bounds(range.end - 1).1)
     }
+    /// Replaces each list-index range `[lo, hi)` in `ranges` with the extent it spans.
+    ///
+    /// The ranges must be non-empty and in order: ascending, with each range's
+    /// end at most the next range's start, except that a range may repeat its
+    /// predecessor exactly. Implementations may rely on this to answer every
+    /// query in one forward pass.
+    fn extents(&self, ranges: &mut [(u64, u64)]) {
+        for range in ranges.iter_mut() {
+            *range = self.extent(range.0 as usize .. range.1 as usize);
+        }
+    }
     /// One past the last value position; equivalently, the sum of all list lengths.
     fn total(&self) -> u64 {
         if self.is_empty() { 0 } else { self.bounds(self.len() - 1).1 }
@@ -67,6 +78,7 @@ impl<'b, B: Bounds + ?Sized> Bounds for &'b B {
     #[inline(always)] fn bounds(&self, index: usize) -> (u64, u64) { B::bounds(*self, index) }
     #[inline(always)] fn rank(&self, offset: u64) -> usize { B::rank(*self, offset) }
     #[inline(always)] fn extent(&self, range: core::ops::Range<usize>) -> (u64, u64) { B::extent(*self, range) }
+    #[inline(always)] fn extents(&self, ranges: &mut [(u64, u64)]) { B::extents(*self, ranges) }
     #[inline(always)] fn total(&self) -> u64 { B::total(*self) }
 }
 
@@ -386,6 +398,41 @@ impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexA
     }
     #[inline]
     fn total(&self) -> u64 { self.bits.len() as u64 }
+    fn extents(&self, ranges: &mut [(u64, u64)]) {
+        let mut cursor = self.bits.cursor();
+        // Adjacent ranges share their boundary select, and exactly repeated
+        // ranges must not re-seek the forward-only cursor: memoize both.
+        let mut last_index = u64::MAX;
+        let mut last_pos = 0u64;
+        let mut last_range = (u64::MAX, u64::MAX);
+        let mut last_answer = (0u64, 0u64);
+        for range in ranges.iter_mut() {
+            debug_assert!(range.0 < range.1, "extents: ranges must be non-empty");
+            if *range == last_range { *range = last_answer; continue; }
+            debug_assert!(last_range.0 == u64::MAX || last_range.1 <= range.0, "extents: ranges must be ascending and disjoint");
+            last_range = *range;
+            let lower = if range.0 == 0 { 0 } else {
+                let index = range.0 - 1;
+                let pos = if index == last_index { last_pos } else {
+                    let pos = cursor.seek_to_rank(index).expect("NeverEmpty: list index out of bounds") as u64;
+                    last_index = index;
+                    last_pos = pos;
+                    pos
+                };
+                pos + 1
+            };
+            let index = range.1 - 1;
+            let pos = if index == last_index { last_pos } else {
+                let pos = cursor.seek_to_rank(index).expect("NeverEmpty: list index out of bounds") as u64;
+                last_index = index;
+                last_pos = pos;
+                pos
+            };
+            let upper = pos + 1;
+            *range = (lower, upper);
+            last_answer = *range;
+        }
+    }
 }
 
 impl Push<u64> for NeverEmpty {
@@ -550,6 +597,41 @@ impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexA
     }
     #[inline]
     fn total(&self) -> u64 { self.bits.len() as u64 - self.count.copy_as() }
+    fn extents(&self, ranges: &mut [(u64, u64)]) {
+        let mut cursor = self.bits.cursor();
+        // Adjacent ranges share their boundary select, and exactly repeated
+        // ranges must not re-seek the forward-only cursor: memoize both.
+        let mut last_index = u64::MAX;
+        let mut last_pos = 0u64;
+        let mut last_range = (u64::MAX, u64::MAX);
+        let mut last_answer = (0u64, 0u64);
+        for range in ranges.iter_mut() {
+            debug_assert!(range.0 < range.1, "extents: ranges must be non-empty");
+            if *range == last_range { *range = last_answer; continue; }
+            debug_assert!(last_range.0 == u64::MAX || last_range.1 <= range.0, "extents: ranges must be ascending and disjoint");
+            last_range = *range;
+            let lower = if range.0 == 0 { 0 } else {
+                let index = range.0 - 1;
+                let pos = if index == last_index { last_pos } else {
+                    let pos = cursor.seek_to_rank(index).expect("MaybeEmpty: list index out of bounds") as u64;
+                    last_index = index;
+                    last_pos = pos;
+                    pos
+                };
+                pos + 1 - range.0
+            };
+            let index = range.1 - 1;
+            let pos = if index == last_index { last_pos } else {
+                let pos = cursor.seek_to_rank(index).expect("MaybeEmpty: list index out of bounds") as u64;
+                last_index = index;
+                last_pos = pos;
+                pos
+            };
+            let upper = pos + 1 - range.1;
+            *range = (lower, upper);
+            last_answer = *range;
+        }
+    }
 }
 
 impl Push<u64> for MaybeEmpty {
@@ -872,6 +954,46 @@ mod test {
         check(&strides);
         check(&strided);
         check(&crate::primitive::offsets::Fixeds::<7> { count: 50 });
+    }
+
+    #[test]
+    fn extents_matches_extent() {
+        use super::{MaybeEmpty, NeverEmpty};
+        use crate::primitive::offsets::Strides;
+        fn check<B: Bounds>(bounds: &B) {
+            // Ascending, disjoint ranges with adjacency, gaps, and exact repeats.
+            let mut ranges = Vec::new();
+            let mut index = 0;
+            let mut step = 1;
+            while index + step <= bounds.len() {
+                ranges.push((index as u64, (index + step) as u64));
+                if step % 3 == 0 { ranges.push((index as u64, (index + step) as u64)); }
+                index += step + (step % 2);
+                step = 1 + (step + 1) % 4;
+            }
+            let expect: Vec<(u64, u64)> = ranges.iter().map(|r| bounds.extent(r.0 as usize .. r.1 as usize)).collect();
+            bounds.extents(&mut ranges);
+            assert_eq!(ranges, expect);
+        }
+        let lengths: Vec<u64> = (0..100u64).map(|i| (i * i) % 9).collect();
+        let mut uppers = Uppers::default();
+        let mut maybe = MaybeEmpty::default();
+        let mut never = NeverEmpty::default();
+        let mut strides = Strides::<NeverEmpty>::default();
+        let mut strided: Strides = Strides::default();
+        for &length in lengths.iter() {
+            uppers.push(length);
+            maybe.push(length);
+            never.push(length + 1);
+            strides.push(length + 1);
+            strided.push(7);
+        }
+        check(&uppers);
+        check(&maybe);
+        check(&never);
+        check(&strides);
+        check(&strided);
+        check(&crate::primitive::offsets::Fixeds::<7> { count: 100 });
     }
 
     #[test]
