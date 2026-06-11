@@ -609,6 +609,7 @@ pub mod rank_select {
             self.flush_counts();
         }
         /// Extends `counts` with running set-bit totals for each complete chunk.
+        #[inline(always)]
         fn flush_counts(&mut self) {
             while self.counts.len() < self.values.len() / BITS_PER_CHUNK {
                 let mut count = self.counts.last().unwrap_or(0);

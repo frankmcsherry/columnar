@@ -95,8 +95,7 @@ impl<BC: BoundsContainer, TC: Container> Container for Vecs<TC, BC> {
         if !range.is_empty() {
             // Copy the value extent of the lists; the bounds rebase themselves,
             // as they extend by list lengths rather than absolute offsets.
-            let lower = other.bounds.bounds(range.start).0;
-            let upper = other.bounds.bounds(range.end - 1).1;
+            let (lower, upper) = other.bounds.extent(range.clone());
             self.values.extend_from_self(other.values, lower as usize .. upper as usize);
             self.bounds.extend_from_self(other.bounds, range);
         }

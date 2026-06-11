@@ -71,8 +71,7 @@ impl<BC: BoundsContainer> Container for Strings<BC, Vec<u8>> {
         if !range.is_empty() {
             // Copy the byte extent of the strings; the bounds rebase themselves,
             // as they extend by string lengths rather than absolute offsets.
-            let lower = other.bounds.bounds(range.start).0;
-            let upper = other.bounds.bounds(range.end - 1).1;
+            let (lower, upper) = other.bounds.extent(range.clone());
             self.values.extend_from_self(other.values, lower as usize .. upper as usize);
             self.bounds.extend_from_self(other.bounds, range);
         }

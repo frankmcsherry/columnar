@@ -557,6 +557,11 @@ pub mod offsets {
                 (offset / K) as usize
             }
             #[inline(always)]
+            fn extent(&self, range: core::ops::Range<usize>) -> (u64, u64) {
+                debug_assert!(!range.is_empty());
+                (range.start as u64 * K, range.end as u64 * K)
+            }
+            #[inline(always)]
             fn total(&self) -> u64 { self.count.copy_as() * K }
         }
 
@@ -746,6 +751,23 @@ pub mod offsets {
                     (offset / stride) as usize
                 } else {
                     length as usize + self.bounds.rank(offset - stride * length)
+                }
+            }
+            #[inline]
+            fn extent(&self, range: core::ops::Range<usize>) -> (u64, u64) {
+                debug_assert!(!range.is_empty());
+                let length = self.head.index_as(1) as usize;
+                let stride = self.head.index_as(0);
+                if range.end <= length {
+                    (range.start as u64 * stride, range.end as u64 * stride)
+                } else {
+                    let prefix = stride * length as u64;
+                    if range.start >= length {
+                        let (lower, upper) = self.bounds.extent(range.start - length .. range.end - length);
+                        (prefix + lower, prefix + upper)
+                    } else {
+                        (range.start as u64 * stride, prefix + self.bounds.extent(0 .. range.end - length).1)
+                    }
                 }
             }
             #[inline(always)]

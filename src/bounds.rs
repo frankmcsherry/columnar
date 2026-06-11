@@ -47,6 +47,16 @@ pub trait Bounds: Len {
         }
         lo
     }
+    /// The half-open extent `[lower, upper)` spanned by a non-empty `range` of lists.
+    ///
+    /// Equivalent to the default `(self.bounds(range.start).0, self.bounds(range.end - 1).1)`,
+    /// but implementors can usually avoid the unused halves of those two calls,
+    /// whose costs (bounds checks, scans for adjacent set bits) survive the
+    /// optimizer because they can panic.
+    fn extent(&self, range: core::ops::Range<usize>) -> (u64, u64) {
+        debug_assert!(!range.is_empty());
+        (self.bounds(range.start).0, self.bounds(range.end - 1).1)
+    }
     /// One past the last value position; equivalently, the sum of all list lengths.
     fn total(&self) -> u64 {
         if self.is_empty() { 0 } else { self.bounds(self.len() - 1).1 }
@@ -56,6 +66,7 @@ pub trait Bounds: Len {
 impl<'b, B: Bounds + ?Sized> Bounds for &'b B {
     #[inline(always)] fn bounds(&self, index: usize) -> (u64, u64) { B::bounds(*self, index) }
     #[inline(always)] fn rank(&self, offset: u64) -> usize { B::rank(*self, offset) }
+    #[inline(always)] fn extent(&self, range: core::ops::Range<usize>) -> (u64, u64) { B::extent(*self, range) }
     #[inline(always)] fn total(&self) -> u64 { B::total(*self) }
 }
 
@@ -73,11 +84,18 @@ impl Bounds for [u64] {
         (lower, self[index])
     }
     #[inline(always)]
+    fn extent(&self, range: core::ops::Range<usize>) -> (u64, u64) {
+        debug_assert!(!range.is_empty());
+        let lower = if range.start == 0 { 0 } else { self[range.start - 1] };
+        (lower, self[range.end - 1])
+    }
+    #[inline(always)]
     fn total(&self) -> u64 { self.last().copied().unwrap_or(0) }
 }
 impl Bounds for Vec<u64> {
     #[inline(always)] fn bounds(&self, index: usize) -> (u64, u64) { self[..].bounds(index) }
     #[inline(always)] fn rank(&self, offset: u64) -> usize { self[..].rank(offset) }
+    #[inline(always)] fn extent(&self, range: core::ops::Range<usize>) -> (u64, u64) { self[..].extent(range) }
     #[inline(always)] fn total(&self) -> u64 { self[..].total() }
 }
 
@@ -117,6 +135,12 @@ impl<BC: Len + IndexAs<u64>> Bounds for Uppers<BC> {
     fn bounds(&self, index: usize) -> (u64, u64) {
         let lower = if index == 0 { 0 } else { self.uppers.index_as(index - 1) };
         (lower, self.uppers.index_as(index))
+    }
+    #[inline(always)]
+    fn extent(&self, range: core::ops::Range<usize>) -> (u64, u64) {
+        debug_assert!(!range.is_empty());
+        let lower = if range.start == 0 { 0 } else { self.uppers.index_as(range.start - 1) };
+        (lower, self.uppers.index_as(range.end - 1))
     }
     #[inline(always)]
     fn total(&self) -> u64 {
@@ -327,6 +351,15 @@ impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexA
         self.bits.rank(offset as usize)
     }
     #[inline]
+    fn extent(&self, range: core::ops::Range<usize>) -> (u64, u64) {
+        debug_assert!(!range.is_empty());
+        let lower = if range.start == 0 { 0 } else {
+            self.bits.select(range.start as u64 - 1).expect("NeverEmpty: list index out of bounds") as u64 + 1
+        };
+        let upper = self.bits.select(range.end as u64 - 1).expect("NeverEmpty: list index out of bounds") as u64 + 1;
+        (lower, upper)
+    }
+    #[inline]
     fn total(&self) -> u64 { self.bits.len() as u64 }
 }
 
@@ -478,6 +511,17 @@ impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexA
             Some(pos) => pos - offset as usize,
             None => self.len(),
         }
+    }
+    #[inline]
+    fn extent(&self, range: core::ops::Range<usize>) -> (u64, u64) {
+        debug_assert!(!range.is_empty());
+        let lower = if range.start == 0 { 0 } else {
+            let index = range.start as u64 - 1;
+            self.bits.select(index).expect("MaybeEmpty: list index out of bounds") as u64 - index
+        };
+        let index = range.end as u64 - 1;
+        let upper = self.bits.select(index).expect("MaybeEmpty: list index out of bounds") as u64 - index;
+        (lower, upper)
     }
     #[inline]
     fn total(&self) -> u64 { self.bits.len() as u64 - self.count.copy_as() }
@@ -770,6 +814,39 @@ mod test {
         for index in 0..maybe_empty.len() {
             assert_eq!(Bounds::bounds(&decoded, index), Bounds::bounds(&maybe_empty, index));
         }
+    }
+
+    #[test]
+    fn extent_matches_bounds() {
+        use super::{MaybeEmpty, NeverEmpty};
+        use crate::primitive::offsets::Strides;
+        fn check<B: Bounds>(bounds: &B) {
+            for start in 0..bounds.len() {
+                for end in start + 1 ..= bounds.len() {
+                    assert_eq!(bounds.extent(start..end), (bounds.bounds(start).0, bounds.bounds(end - 1).1));
+                }
+            }
+        }
+        let lengths: Vec<u64> = (0..50u64).map(|i| (i * i) % 9).collect();
+        let mut uppers = Uppers::default();
+        let mut maybe = MaybeEmpty::default();
+        let mut never = NeverEmpty::default();
+        let mut strides = Strides::<Uppers>::default();
+        let mut strided: Strides = Strides::default();
+        for &length in lengths.iter() {
+            uppers.push(length);
+            maybe.push(length);
+            never.push(length + 1);
+            strides.push(length);
+            strided.push(7);
+        }
+        check(&uppers);
+        check(&uppers.uppers);
+        check(&maybe);
+        check(&never);
+        check(&strides);
+        check(&strided);
+        check(&crate::primitive::offsets::Fixeds::<7> { count: 50 });
     }
 
     #[test]
