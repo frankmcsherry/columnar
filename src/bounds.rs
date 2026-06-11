@@ -139,6 +139,18 @@ pub trait BoundsContainer: Bounds + BoundsBorrow + Container + for<'a> Push<&'a 
         let length = upper - self.total();
         self.push(&length);
     }
+    /// Extends `self` by lists `range` of `other`, whose extent the caller
+    /// has already computed: `extent` must equal `other.extent(range)`
+    /// (debug-asserted by implementations).
+    ///
+    /// Equivalent to [`Container::extend_from_self`], sparing implementors
+    /// that would re-derive the extent internally -- at a `select` or two
+    /// for the bit-packed containers -- from doing so.
+    #[inline(always)]
+    fn extend_with_extent(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>, extent: (u64, u64)) {
+        let _ = extent;
+        self.extend_from_self(other, range);
+    }
 }
 
 /// Cumulative upper bounds in a `u64` array: the default bounds container.
@@ -223,18 +235,8 @@ impl Container for Uppers {
     #[inline(always)]
     fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
         if !range.is_empty() {
-            // Rebase `other`'s uppers so the first appended list starts at our total.
-            let total = self.total();
-            let other_lower = other.bounds(range.start).0;
-            if total == other_lower {
-                self.uppers.extend_from_slice(&other.uppers[range]);
-            }
-            else {
-                self.uppers.reserve(range.len());
-                for index in range {
-                    self.uppers.push(other.uppers[index] - other_lower + total);
-                }
-            }
+            let extent = other.extent(range.clone());
+            self.extend_with_extent(other, range, extent);
         }
     }
     fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
@@ -247,6 +249,23 @@ impl BoundsContainer for Uppers {
     fn seal(&mut self, upper: u64) {
         debug_assert!(upper >= self.total());
         self.uppers.push(upper);
+    }
+    #[inline(always)]
+    fn extend_with_extent(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>, extent: (u64, u64)) {
+        if !range.is_empty() {
+            debug_assert_eq!(extent, other.extent(range.clone()));
+            // Rebase `other`'s uppers so the first appended list starts at our total.
+            let total = self.total();
+            if total == extent.0 {
+                self.uppers.extend_from_slice(&other.uppers[range]);
+            }
+            else {
+                self.uppers.reserve(range.len());
+                for index in range {
+                    self.uppers.push(other.uppers[index] - extent.0 + total);
+                }
+            }
+        }
     }
 }
 
@@ -330,7 +349,17 @@ impl Borrow for NeverEmpty {
     fn reborrow_ref<'b, 'a: 'b>(item: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { item }
 }
 
-impl BoundsContainer for NeverEmpty {}
+impl BoundsContainer for NeverEmpty {
+    #[inline]
+    fn extend_with_extent(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>, extent: (u64, u64)) {
+        if !range.is_empty() {
+            debug_assert_eq!(extent, other.extent(range.clone()));
+            // The lists' bits are exactly their values' positions.
+            self.bits.extend_from_bits(&other.bits, extent.0 as usize .. extent.1 as usize);
+            self.count += range.len() as u64;
+        }
+    }
+}
 
 impl<'a> crate::AsBytes<'a> for NeverEmpty<&'a [u64], &'a [u64], &'a u64, &'a [u64]> {
     const SLICE_COUNT: usize = 1 + <RankSelect<&'a [u64], &'a [u64], &'a [u64]> as crate::AsBytes<'a>>::SLICE_COUNT;
@@ -454,11 +483,8 @@ impl Container for NeverEmpty {
     #[inline]
     fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
         if !range.is_empty() {
-            // The lists' bits are exactly their values' positions.
-            let lower = other.bounds(range.start).0 as usize;
-            let upper = other.bounds(range.end - 1).1 as usize;
-            self.bits.extend_from_bits(&other.bits, lower .. upper);
-            self.count += range.len() as u64;
+            let extent = other.extent(range.clone());
+            self.extend_with_extent(other, range, extent);
         }
     }
     fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
@@ -523,7 +549,19 @@ impl Borrow for MaybeEmpty {
     fn reborrow_ref<'b, 'a: 'b>(item: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { item }
 }
 
-impl BoundsContainer for MaybeEmpty {}
+impl BoundsContainer for MaybeEmpty {
+    #[inline]
+    fn extend_with_extent(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>, extent: (u64, u64)) {
+        if !range.is_empty() {
+            debug_assert_eq!(extent, other.extent(range.clone()));
+            // List `j` occupies bits `upper(j-1) + j .. upper(j) + j + 1`.
+            let lower = extent.0 as usize + range.start;
+            let upper = extent.1 as usize + range.end;
+            self.bits.extend_from_bits(&other.bits, lower .. upper);
+            self.count += range.len() as u64;
+        }
+    }
+}
 
 impl<'a> crate::AsBytes<'a> for MaybeEmpty<&'a [u64], &'a [u64], &'a u64, &'a [u64]> {
     const SLICE_COUNT: usize = 1 + <RankSelect<&'a [u64], &'a [u64], &'a [u64]> as crate::AsBytes<'a>>::SLICE_COUNT;
@@ -652,11 +690,8 @@ impl Container for MaybeEmpty {
     #[inline]
     fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
         if !range.is_empty() {
-            // List `j` occupies bits `upper(j-1) + j .. upper(j) + j + 1`.
-            let lower = other.bounds(range.start).0 as usize + range.start;
-            let upper = other.bounds(range.end - 1).1 as usize + range.end;
-            self.bits.extend_from_bits(&other.bits, lower .. upper);
-            self.count += range.len() as u64;
+            let extent = other.extent(range.clone());
+            self.extend_with_extent(other, range, extent);
         }
     }
     fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {

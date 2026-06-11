@@ -675,33 +675,9 @@ pub mod offsets {
         impl<BC: BoundsContainer> Container for Strides<BC> {
             #[inline]
             fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
-                let other_stride: u64 = other.head.index_as(0);
-                let other_length: u64 = other.head.index_as(1);
-                let other_length = other_length as usize;
-                // Lists from `other`'s strided head: bulk-extend our head when
-                // they conform, and push their lengths otherwise.
-                let head_count = range.end.min(other_length).saturating_sub(range.start);
-                if head_count > 0 {
-                    if self.bounds.is_empty() && (self.head[1] == 0 || self.head[0] == other_stride) {
-                        self.head[0] = other_stride;
-                        self.head[1] += head_count as u64;
-                    } else {
-                        for _ in 0 .. head_count { self.push(other_stride); }
-                    }
-                }
-                // Lists from `other`'s spill: push lengths while our head may
-                // still absorb them, then delegate spill-to-spill, which lets
-                // the spill container use its own bulk extension.
-                let spill_start = range.start.saturating_sub(other_length);
-                let spill_end = range.end.saturating_sub(other_length);
-                let mut index = spill_start;
-                while index < spill_end && self.bounds.is_empty() {
-                    let (lower, upper) = other.bounds.bounds(index);
-                    self.push(upper - lower);
-                    index += 1;
-                }
-                if index < spill_end {
-                    self.bounds.extend_from_self(other.bounds, index .. spill_end);
+                if !range.is_empty() {
+                    let extent = other.extent(range.clone());
+                    self.extend_with_extent(other, range, extent);
                 }
             }
             fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
@@ -803,7 +779,46 @@ pub mod offsets {
             }
         }
 
-        impl<BC: BoundsContainer> BoundsContainer for Strides<BC> {}
+        impl<BC: BoundsContainer> BoundsContainer for Strides<BC> {
+            fn extend_with_extent(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>, extent: (u64, u64)) {
+                if range.is_empty() { return; }
+                debug_assert_eq!(extent, other.extent(range.clone()));
+                let other_stride: u64 = other.head.index_as(0);
+                let other_length: u64 = other.head.index_as(1);
+                let other_length = other_length as usize;
+                // Lists from `other`'s strided head: bulk-extend our head when
+                // they conform, and push their lengths otherwise.
+                let head_count = range.end.min(other_length).saturating_sub(range.start);
+                if head_count > 0 {
+                    if self.bounds.is_empty() && (self.head[1] == 0 || self.head[0] == other_stride) {
+                        self.head[0] = other_stride;
+                        self.head[1] += head_count as u64;
+                    } else {
+                        for _ in 0 .. head_count { self.push(other_stride); }
+                    }
+                }
+                // Lists from `other`'s spill: push lengths while our head may
+                // still absorb them, then delegate spill-to-spill with the
+                // remaining extent, in the spill's coordinates.
+                let spill_start = range.start.saturating_sub(other_length);
+                let spill_end = range.end.saturating_sub(other_length);
+                if spill_end > spill_start {
+                    let other_prefix = other_stride * other_length as u64;
+                    let mut spill_lower = extent.0.max(other_prefix) - other_prefix;
+                    let spill_upper = extent.1 - other_prefix;
+                    let mut index = spill_start;
+                    while index < spill_end && self.bounds.is_empty() {
+                        let (lower, upper) = other.bounds.bounds(index);
+                        self.push(upper - lower);
+                        spill_lower = upper;
+                        index += 1;
+                    }
+                    if index < spill_end {
+                        self.bounds.extend_with_extent(other.bounds, index .. spill_end, (spill_lower, spill_upper));
+                    }
+                }
+            }
+        }
 
         impl<'a, BC: AsBytes<'a>> AsBytes<'a> for Strides<BC, &'a [u64]> {
             const SLICE_COUNT: usize = 1 + BC::SLICE_COUNT;

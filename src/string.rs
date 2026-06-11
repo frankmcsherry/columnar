@@ -73,7 +73,7 @@ impl<BC: BoundsContainer> Container for Strings<BC, Vec<u8>> {
             // as they extend by string lengths rather than absolute offsets.
             let (lower, upper) = other.bounds.extent(range.clone());
             self.values.extend_from_self(other.values, lower as usize .. upper as usize);
-            self.bounds.extend_from_self(other.bounds, range);
+            self.bounds.extend_with_extent(other.bounds, range, (lower, upper));
         }
     }
 
