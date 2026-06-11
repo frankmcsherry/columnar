@@ -478,6 +478,64 @@ pub mod rank_select {
             true
         }
 
+        /// Reposition the cursor to bit 0, as freshly created.
+        #[inline]
+        pub fn rewind(&mut self) {
+            let rs = self.rs;
+            *self = rs.cursor();
+        }
+
+        /// The position of the `target`-th set bit (0-indexed), for a `target`
+        /// *behind* the cursor: `target < self.rank()` (debug-asserted).
+        ///
+        /// The bits the cursor has consumed are recoverable from the underlying
+        /// storage, so this re-derives the state: a backward word walk to the
+        /// chunk boundary for nearby targets, and a full [`RankSelect::select`]
+        /// beyond it. After return the cursor state is exactly as if it had
+        /// arrived at the target moving forward.
+        pub fn seek_to_rank_back(&mut self, target: u64) -> Option<usize> {
+            debug_assert!(target < self.rank, "seek_to_rank_back is backward-only");
+            let vlen = self.rs.values.values.len();
+            let word_at = |block: usize| -> u64 {
+                if block < vlen { self.rs.values.values.index_as(block) }
+                else if block == vlen {
+                    let bits = self.rs.values.tail.index_as(1);
+                    let mask = if bits >= 64 { !0u64 } else { (1u64 << bits) - 1 };
+                    self.rs.values.tail.index_as(0) & mask
+                }
+                else { 0 }
+            };
+            // Ones strictly before the cursor's current word. The cursor can sit
+            // just past its word (bit 64), so compute the offset relative to it.
+            let bit = self.bit_pos - self.word_idx * 64;
+            let mask = if bit >= 64 { !0u64 } else if bit == 0 { 0 } else { (1u64 << bit) - 1 };
+            let mut before = self.rank - (word_at(self.word_idx) & mask).count_ones() as u64;
+            // Walk backward to the chunk boundary; the binary search in `select`
+            // can only be worth it beyond that.
+            let mut block = self.word_idx;
+            let chunk_floor = (self.word_idx / WORDS_PER_CHUNK) * WORDS_PER_CHUNK;
+            while before > target && block > chunk_floor {
+                block -= 1;
+                before -= word_at(block).count_ones() as u64;
+            }
+            let pos = if before <= target {
+                debug_assert!(before + word_at(block).count_ones() as u64 > target);
+                let (bit, rest) = consume_through(word_at(block), (target - before) as u32);
+                self.word_remaining = rest;
+                block * 64 + bit as usize
+            } else {
+                let pos = self.rs.select(target)?;
+                block = pos / 64;
+                let bit = (pos % 64) as u32;
+                self.word_remaining = word_at(block) & (!0u64 << bit) & !(1u64 << bit);
+                pos
+            };
+            self.word_idx = block;
+            self.rank = target + 1;
+            self.bit_pos = pos + 1;
+            Some(pos)
+        }
+
         /// Jump forward to the `target`-th set bit (0-indexed) and return its
         /// position. Equivalent to [`RankSelect::select`] for the cursor's
         /// current state.

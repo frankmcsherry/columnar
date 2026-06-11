@@ -667,23 +667,24 @@ impl Container for MaybeEmpty {
 impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexAs<u64>> NeverEmpty<CC, VC, NC, WC> {
     /// A forward cursor over the list extents; see [`BoundsCursor`].
     pub fn cursor(&self) -> BoundsCursor<'_, CC, VC, WC, false> {
-        BoundsCursor { cursor: self.bits.cursor(), next_index: 0, prev_upper: 0 }
+        BoundsCursor { cursor: self.bits.cursor(), next_index: 0, prev: (0, 0) }
     }
 }
 impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexAs<u64>> MaybeEmpty<CC, VC, NC, WC> {
     /// A forward cursor over the list extents; see [`BoundsCursor`].
     pub fn cursor(&self) -> BoundsCursor<'_, CC, VC, WC, true> {
-        BoundsCursor { cursor: self.bits.cursor(), next_index: 0, prev_upper: 0 }
+        BoundsCursor { cursor: self.bits.cursor(), next_index: 0, prev: (0, 0) }
     }
 }
 
-/// A forward cursor over the extents of a bitvector-backed bounds container.
+/// A cursor over the extents of a bitvector-backed bounds container.
 ///
 /// Random-access `bounds(index)` pays a `select` per call to re-find its
-/// position. A cursor instead remembers where the last query ended, so a
-/// sequence of increasing queries does work proportional to the distance
-/// stepped: the next list is typically a word read, and jumps fall back to
-/// a `select` only when they leave the cursor's current word.
+/// position. A cursor instead remembers where the last query ended, so
+/// queries do work proportional to the distance stepped, in either
+/// direction: the next list is typically a word read, nearby jumps are a
+/// bounded word walk, and only distant jumps pay a `select`. Repeating the
+/// previous query is free.
 ///
 /// `MAYBE_EMPTY` selects the encoding it reads: [`MaybeEmpty`] when `true`,
 /// [`NeverEmpty`] when `false`. Both encode lengths in unary; they differ in
@@ -693,33 +694,36 @@ pub struct BoundsCursor<'a, CC, VC, WC, const MAYBE_EMPTY: bool> {
     cursor: crate::RankSelectCursor<'a, CC, VC, WC>,
     /// One past the most recently queried list index.
     next_index: u64,
-    /// The upper bound of the most recently queried list.
-    prev_upper: u64,
+    /// The extent of the most recently queried list.
+    prev: (u64, u64),
 }
 
 impl<'a, CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, WC: IndexAs<u64>, const MAYBE_EMPTY: bool> BoundsCursor<'a, CC, VC, WC, MAYBE_EMPTY> {
-    /// The half-open extent `[lower, upper)` of list `index`.
-    ///
-    /// Queries must be for strictly increasing `index` (debug-asserted), and
-    /// `index` must be in bounds.
+    /// The half-open extent `[lower, upper)` of list `index`, which must be
+    /// in bounds, but may be in any order relative to earlier queries.
     #[inline(always)]
     pub fn seek(&mut self, index: usize) -> (u64, u64) {
         let index = index as u64;
-        debug_assert!(index >= self.next_index, "BoundsCursor is forward-only");
+        // Repeating the previous query is free.
+        if index + 1 == self.next_index { return self.prev; }
         // Positions translate to bounds by discounting the `i` terminator bits
         // preceding list `i`'s values in the `MaybeEmpty` encoding.
         let lower = if index == 0 {
+            if self.next_index > 0 { self.cursor.rewind(); }
             0
         } else if index == self.next_index {
-            self.prev_upper
-        } else {
+            self.prev.1
+        } else if index > self.next_index {
             let pos = self.cursor.seek_to_rank(index - 1).expect("BoundsCursor: list index out of bounds") as u64;
+            pos + 1 - if MAYBE_EMPTY { index } else { 0 }
+        } else {
+            let pos = self.cursor.seek_to_rank_back(index - 1).expect("BoundsCursor: list index out of bounds") as u64;
             pos + 1 - if MAYBE_EMPTY { index } else { 0 }
         };
         let pos = self.cursor.next_one().expect("BoundsCursor: list index out of bounds") as u64;
         let upper = pos + 1 - if MAYBE_EMPTY { index + 1 } else { 0 };
         self.next_index = index + 1;
-        self.prev_upper = upper;
+        self.prev = (lower, upper);
         (lower, upper)
     }
 }
@@ -905,6 +909,24 @@ mod test {
                 assert_eq!(never_cursor.seek(index), Bounds::bounds(&never, index), "NeverEmpty gap {gap} index {index}");
             }
         }
+        // Arbitrary-order queries: a deterministic scramble with repeats,
+        // short backward hops, rescans of key-scoped intervals, and restarts.
+        let mut state = 0xdeadbeefu64;
+        let mut rng = move || { state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); (state >> 33) as usize };
+        let mut maybe_cursor = maybe.cursor();
+        let mut never_cursor = never.cursor();
+        let mut index = 0usize;
+        for _ in 0..10000 {
+            index = match rng() % 8 {
+                0 => index,                                     // repeat
+                1 => index.saturating_sub(1 + rng() % 4),       // short hop back
+                2 => rng() % lengths.len(),                     // anywhere
+                3 => 0,                                         // restart
+                _ => (index + 1 + rng() % 8) % lengths.len(),   // mostly forward
+            };
+            assert_eq!(maybe_cursor.seek(index), Bounds::bounds(&maybe, index), "MaybeEmpty scrambled index {index}");
+            assert_eq!(never_cursor.seek(index), Bounds::bounds(&never, index), "NeverEmpty scrambled index {index}");
+        }
     }
 
     #[test]
@@ -963,7 +985,7 @@ mod test {
         fn check<B: Bounds>(bounds: &B) {
             // Ascending, disjoint ranges with adjacency, gaps, and exact repeats.
             let mut ranges = Vec::new();
-            let mut index = 0;
+            let mut index = 0usize;
             let mut step = 1;
             while index + step <= bounds.len() {
                 ranges.push((index as u64, (index + step) as u64));
