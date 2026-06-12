@@ -2,7 +2,7 @@
 //! `bounds(i)`, cursor `seek(i)`, and cursor stepping via `next_one` alone.
 
 use std::time::Instant;
-use columnar::{Lengths, NeverEmpty, Push};
+use columnar::{Length, Lengths, NeverEmpty, Push};
 
 const LISTS: usize = 1 << 16;
 const REPS: usize = 50;
@@ -11,7 +11,7 @@ fn main() {
     let lengths: Vec<u64> = (0..LISTS).map(|i| ((i * i) % 16 + 1) as u64).collect();
     let mut bounds = NeverEmpty::default();
     for length in lengths.iter() {
-        bounds.push(length);
+        bounds.push(&Length(*length));
     }
 
     // Gaps from the command line (or defaults), so they are runtime values

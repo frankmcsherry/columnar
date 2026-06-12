@@ -500,7 +500,7 @@ pub mod offsets {
 
         use alloc::{vec::Vec, string::String};
         use crate::{Container, Borrow, Index, Len, Push};
-        use crate::lengths::{Lengths, LengthsContainer};
+        use crate::lengths::{Length, Lengths, LengthsContainer};
         use crate::common::index::CopyAs;
 
         /// An offset container that encodes a constant `K` spacing.
@@ -508,7 +508,7 @@ pub mod offsets {
         pub struct Fixeds<const K: u64, CC = u64> { pub count: CC }
 
         impl<const K: u64> Borrow for Fixeds<K> {
-            type Ref<'a> = u64;
+            type Ref<'a> = Length;
             type Borrowed<'a> = Fixeds<K, &'a u64>;
             #[inline(always)]
             fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { Fixeds { count: &self.count } }
@@ -534,15 +534,15 @@ pub mod offsets {
         }
 
         impl<const K: u64, CC> Index for Fixeds<K, CC> {
-            type Ref = u64;
+            type Ref = Length;
             /// The length of list `index`: always `K`.
             #[inline(always)]
-            fn get(&self, _index: usize) -> Self::Ref { K }
+            fn get(&self, _index: usize) -> Self::Ref { Length(K) }
         }
         impl<'a, const K: u64, CC> Index for &'a Fixeds<K, CC> {
-            type Ref = u64;
+            type Ref = Length;
             #[inline(always)]
-            fn get(&self, _index: usize) -> Self::Ref { K }
+            fn get(&self, _index: usize) -> Self::Ref { Length(K) }
         }
 
         impl<const K: u64, CC: CopyAs<u64>> Lengths for Fixeds<K, CC> {
@@ -646,7 +646,7 @@ pub mod offsets {
 
         use alloc::{vec::Vec, string::String};
         use crate::{Container, Borrow, Index, IndexAs, Len, Push, Clear, AsBytes, FromBytes};
-        use crate::lengths::{Lengths, LengthsBorrow, LengthsContainer, Uppers};
+        use crate::lengths::{Length, Lengths, LengthsBorrow, LengthsContainer, Uppers};
 
         /// Columnar store for list bounds with stride optimization.
         ///
@@ -662,7 +662,7 @@ pub mod offsets {
         }
 
         impl<BC: LengthsBorrow> Borrow for Strides<BC> {
-            type Ref<'a> = u64;
+            type Ref<'a> = Length;
             type Borrowed<'a> = Strides<BC::Borrowed<'a>, &'a [u64]> where BC: 'a;
 
             #[inline(always)] fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { Strides { head: &self.head, bounds: self.bounds.borrow() } }
@@ -685,8 +685,8 @@ pub mod offsets {
             }
         }
 
-        impl<'a, BC: LengthsContainer> Push<&'a u64> for Strides<BC> { #[inline(always)] fn push(&mut self, item: &'a u64) { self.push(*item) } }
-        impl<BC: LengthsContainer> Push<u64> for Strides<BC> { #[inline(always)] fn push(&mut self, item: u64) { self.push(item) } }
+        impl<'a, BC: LengthsContainer> Push<&'a Length> for Strides<BC> { #[inline(always)] fn push(&mut self, item: &'a Length) { self.push(*item) } }
+        impl<BC: LengthsContainer> Push<Length> for Strides<BC> { #[inline(always)] fn push(&mut self, item: Length) { self.push(item) } }
         impl<BC: LengthsContainer> Clear for Strides<BC> { #[inline(always)] fn clear(&mut self) { self.clear() } }
 
         impl<BC: Len, HC: IndexAs<u64>> Len for Strides<BC, HC> {
@@ -695,16 +695,16 @@ pub mod offsets {
         }
 
         impl<BC: Lengths, HC: IndexAs<u64>> Index for Strides<BC, HC> {
-            type Ref = u64;
+            type Ref = Length;
             /// The length of list `index`.
             #[inline(always)]
             fn get(&self, index: usize) -> Self::Ref {
                 let length = self.head.index_as(1);
                 if (index as u64) < length {
-                    self.head.index_as(0)
+                    Length(self.head.index_as(0))
                 } else {
                     let (lower, upper) = self.bounds.bounds(index - length as usize);
-                    upper - lower
+                    Length(upper - lower)
                 }
             }
         }
@@ -794,7 +794,7 @@ pub mod offsets {
                         self.head[0] = other_stride;
                         self.head[1] += head_count as u64;
                     } else {
-                        for _ in 0 .. head_count { self.push(other_stride); }
+                        for _ in 0 .. head_count { self.push(Length(other_stride)); }
                     }
                 }
                 // Lists from `other`'s spill: push lengths while our head may
@@ -809,7 +809,7 @@ pub mod offsets {
                     let mut index = spill_start;
                     while index < spill_end && self.bounds.is_empty() {
                         let (lower, upper) = other.bounds.bounds(index);
-                        self.push(upper - lower);
+                        self.push(Length(upper - lower));
                         spill_lower = upper;
                         index += 1;
                     }
@@ -865,14 +865,14 @@ pub mod offsets {
             }
             /// Pushes the length of the next list.
             #[inline(always)]
-            pub fn push(&mut self, item: u64) {
+            pub fn push(&mut self, item: Length) {
                 if !self.bounds.is_empty() {
                     self.bounds.push(&item);
                 }
                 else if self.head[1] == 0 {
-                    self.head = [item, 1];
+                    self.head = [item.0, 1];
                 }
-                else if item == self.head[0] {
+                else if item.0 == self.head[0] {
                     self.head[1] += 1;
                 }
                 else {
@@ -948,10 +948,11 @@ pub mod offsets {
             use crate::lengths::Lengths;
             use crate::common::Len;
             use crate::primitive::offsets::Strides;
+            use crate::lengths::Length;
 
             let mut strides: Strides = Strides::default();
             for length in [3u64, 3, 3, 2, 0, 4] {
-                strides.push(length);
+                strides.push(Length(length));
             }
             assert_eq!(strides.len(), 6);
             assert_eq!(strides.head, [3, 3]);
@@ -979,11 +980,12 @@ pub mod offsets {
             use crate::common::Len;
             use crate::{Borrow, Container};
             use crate::primitive::offsets::Strides;
+            use crate::lengths::Length;
 
             let lengths = [5u64, 5, 5, 5, 0, 3, 0, 7, 5];
             let mut strides = Strides::<MaybeEmpty>::default();
             for &length in lengths.iter() {
-                strides.push(length);
+                strides.push(Length(length));
             }
             assert_eq!(strides.head, [5, 4]);
             assert_eq!(strides.len(), lengths.len());

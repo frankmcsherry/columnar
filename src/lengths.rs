@@ -82,6 +82,16 @@ impl<'b, B: Lengths + ?Sized> Lengths for &'b B {
     #[inline(always)] fn total(&self) -> u64 { B::total(*self) }
 }
 
+/// The length of a list, the currency of [`LengthsContainer`]s.
+///
+/// A distinct type rather than a bare `u64` so that code written against the
+/// previous contract -- where pushes and reads meant absolute upper bounds --
+/// fails to compile at each affected site rather than silently changing
+/// meaning. Deliberately not `CopyAs<u64>`, which would let `index_as`
+/// reintroduce the confusion.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Length(pub u64);
+
 /// Sorted `u64` sequences read as cumulative upper bounds.
 ///
 /// These implementations support read paths over raw offset arrays, including
@@ -126,7 +136,7 @@ impl<C: for<'a> Borrow<Borrowed<'a>: Lengths>> LengthsBorrow for C {}
 /// container's `Push`/`Index`/`extend_from_self` traffic in list *lengths*.
 /// `Vec<u64>` satisfies every supertrait, but its pushes mean literal
 /// elements, so it must not implement this trait.
-pub trait LengthsContainer: Lengths + LengthsBorrow + Container + for<'a> Push<&'a u64> {
+pub trait LengthsContainer: Lengths + LengthsBorrow + Container + for<'a> Push<&'a Length> {
     /// Concludes the current list at absolute position `upper`, which must be
     /// at least `self.total()`.
     ///
@@ -137,7 +147,7 @@ pub trait LengthsContainer: Lengths + LengthsBorrow + Container + for<'a> Push<&
     #[inline(always)]
     fn seal(&mut self, upper: u64) {
         let length = upper - self.total();
-        self.push(&length);
+        self.push(&Length(length));
     }
     /// Extends `self` by lists `range` of `other`, whose extent the caller
     /// has already computed: `extent` must equal `other.extent(range)`
@@ -192,24 +202,24 @@ impl<BC: Len + IndexAs<u64>> Lengths for Uppers<BC> {
 }
 
 impl<BC: Len + IndexAs<u64>> Index for Uppers<BC> {
-    type Ref = u64;
+    type Ref = Length;
     /// The length of list `index`.
     #[inline(always)]
     fn get(&self, index: usize) -> Self::Ref {
         let (lower, upper) = self.bounds(index);
-        upper - lower
+        Length(upper - lower)
     }
 }
 
-impl Push<u64> for Uppers {
+impl Push<Length> for Uppers {
     #[inline(always)]
-    fn push(&mut self, item: u64) {
+    fn push(&mut self, item: Length) {
         let total = self.total();
-        self.uppers.push(total + item);
+        self.uppers.push(total + item.0);
     }
 }
-impl<'a> Push<&'a u64> for Uppers {
-    #[inline(always)] fn push(&mut self, item: &'a u64) { self.push(*item) }
+impl<'a> Push<&'a Length> for Uppers {
+    #[inline(always)] fn push(&mut self, item: &'a Length) { self.push(*item) }
 }
 impl Clear for Uppers {
     #[inline(always)] fn clear(&mut self) { self.uppers.clear() }
@@ -222,7 +232,7 @@ impl Uppers {
 }
 
 impl Borrow for Uppers {
-    type Ref<'a> = u64;
+    type Ref<'a> = Length;
     type Borrowed<'a> = Uppers<&'a [u64]>;
     #[inline(always)] fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { Uppers { uppers: &self.uppers[..] } }
     #[inline(always)] fn reborrow<'b, 'a: 'b>(item: Self::Borrowed<'a>) -> Self::Borrowed<'b> where Self: 'a {
@@ -313,17 +323,17 @@ impl<CC, VC, NC: CopyAs<u64>, WC> Len for NeverEmpty<CC, VC, NC, WC> {
 }
 
 impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexAs<u64>> Index for NeverEmpty<CC, VC, NC, WC> {
-    type Ref = u64;
+    type Ref = Length;
     /// The length of list `index`.
     #[inline(always)]
     fn get(&self, index: usize) -> Self::Ref {
         let (lower, upper) = self.bounds(index);
-        upper - lower
+        Length(upper - lower)
     }
 }
 
-impl<'a> Push<&'a u64> for NeverEmpty {
-    #[inline(always)] fn push(&mut self, item: &'a u64) { self.push(*item) }
+impl<'a> Push<&'a Length> for NeverEmpty {
+    #[inline(always)] fn push(&mut self, item: &'a Length) { self.push(*item) }
 }
 
 impl Clear for NeverEmpty {
@@ -335,7 +345,7 @@ impl Clear for NeverEmpty {
 }
 
 impl Borrow for NeverEmpty {
-    type Ref<'a> = u64;
+    type Ref<'a> = Length;
     type Borrowed<'a> = NeverEmpty<&'a [u64], &'a [u64], &'a u64, &'a [u64]>;
     #[inline(always)]
     fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -464,12 +474,12 @@ impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexA
     }
 }
 
-impl Push<u64> for NeverEmpty {
+impl Push<Length> for NeverEmpty {
     /// Pushes a list of length `item`, which must be non-zero.
     #[inline]
-    fn push(&mut self, item: u64) {
-        debug_assert!(item > 0, "NeverEmpty requires non-empty lists; use MaybeEmpty for possibly-empty lists");
-        let mut zeros = item.saturating_sub(1) as usize;
+    fn push(&mut self, item: Length) {
+        debug_assert!(item.0 > 0, "NeverEmpty requires non-empty lists; use MaybeEmpty for possibly-empty lists");
+        let mut zeros = item.0.saturating_sub(1) as usize;
         while zeros >= 64 {
             self.bits.push_bits(0, 64);
             zeros -= 64;
@@ -513,17 +523,17 @@ impl<CC, VC, NC: CopyAs<u64>, WC> Len for MaybeEmpty<CC, VC, NC, WC> {
 }
 
 impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexAs<u64>> Index for MaybeEmpty<CC, VC, NC, WC> {
-    type Ref = u64;
+    type Ref = Length;
     /// The length of list `index`.
     #[inline(always)]
     fn get(&self, index: usize) -> Self::Ref {
         let (lower, upper) = self.bounds(index);
-        upper - lower
+        Length(upper - lower)
     }
 }
 
-impl<'a> Push<&'a u64> for MaybeEmpty {
-    #[inline(always)] fn push(&mut self, item: &'a u64) { self.push(*item) }
+impl<'a> Push<&'a Length> for MaybeEmpty {
+    #[inline(always)] fn push(&mut self, item: &'a Length) { self.push(*item) }
 }
 
 impl Clear for MaybeEmpty {
@@ -535,7 +545,7 @@ impl Clear for MaybeEmpty {
 }
 
 impl Borrow for MaybeEmpty {
-    type Ref<'a> = u64;
+    type Ref<'a> = Length;
     type Borrowed<'a> = MaybeEmpty<&'a [u64], &'a [u64], &'a u64, &'a [u64]>;
     #[inline(always)]
     fn borrow<'a>(&'a self) -> Self::Borrowed<'a> {
@@ -672,11 +682,11 @@ impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexA
     }
 }
 
-impl Push<u64> for MaybeEmpty {
+impl Push<Length> for MaybeEmpty {
     /// Pushes a list of length `item`.
     #[inline]
-    fn push(&mut self, item: u64) {
-        let mut zeros = item as usize;
+    fn push(&mut self, item: Length) {
+        let mut zeros = item.0 as usize;
         while zeros >= 64 {
             self.bits.push_bits(0, 64);
             zeros -= 64;
@@ -769,19 +779,19 @@ mod test {
     use alloc::vec;
     use alloc::vec::Vec;
     use crate::{Borrow, Container, Index, Len, Push};
-    use super::{Lengths, Uppers};
+    use super::{Length, Lengths, Uppers};
 
     #[test]
     fn uppers_lengths_and_bounds() {
         let mut uppers = Uppers::default();
         for length in [3u64, 0, 2, 0, 0, 5] {
-            uppers.push(length);
+            uppers.push(Length(length));
         }
         assert_eq!(uppers.uppers, vec![3, 3, 5, 5, 5, 10]);
         assert_eq!(uppers.len(), 6);
         assert_eq!(uppers.total(), 10);
         // `get` reports lengths; `bounds` reports extents.
-        assert_eq!((0..6).map(|i| uppers.get(i)).collect::<Vec<_>>(), vec![3, 0, 2, 0, 0, 5]);
+        assert_eq!((0..6).map(|i| uppers.get(i).0).collect::<Vec<_>>(), vec![3, 0, 2, 0, 0, 5]);
         assert_eq!(uppers.bounds(0), (0, 3));
         assert_eq!(uppers.bounds(2), (3, 5));
         assert_eq!(uppers.bounds(5), (5, 10));
@@ -799,10 +809,10 @@ mod test {
     fn uppers_extend_rebases() {
         let mut source = Uppers::default();
         for length in [1u64, 2, 3, 4] {
-            source.push(length);
+            source.push(Length(length));
         }
         let mut target = Uppers::default();
-        target.push(5u64);
+        target.push(Length(5));
         // Lists 1..3 of `source` (lengths 2, 3) appended after a list of length 5.
         target.extend_from_self(source.borrow(), 1..3);
         assert_eq!(target.uppers, vec![5, 7, 10]);
@@ -853,7 +863,7 @@ mod test {
         for (index, list) in lists.iter().enumerate() {
             let got: Vec<u32> = cols.borrow().get(index).into_iter().copied().collect();
             assert_eq!(&got, list);
-            assert_eq!(cols.bounds.get(index), list.len() as u64);
+            assert_eq!(cols.bounds.get(index), Length(list.len() as u64));
             for _ in list.iter() {
                 assert_eq!(cols.bounds.rank(position), index);
                 position += 1;
@@ -878,7 +888,7 @@ mod test {
         for (index, list) in lists.iter().enumerate() {
             let got: Vec<u32> = cols.borrow().get(index).into_iter().copied().collect();
             assert_eq!(&got, list);
-            assert_eq!(cols.bounds.get(index), list.len() as u64);
+            assert_eq!(cols.bounds.get(index), Length(list.len() as u64));
             for _ in list.iter() {
                 assert_eq!(cols.bounds.rank(position), index);
                 position += 1;
@@ -898,30 +908,30 @@ mod test {
         let cases = [(0usize, 0usize, 500usize), (3, 2, 400), (1, 17, 18), (5, 499, 500), (2, 100, 100), (4, 0, 500)];
 
         let mut source = MaybeEmpty::default();
-        for &length in lengths.iter() { source.push(length); }
+        for &length in lengths.iter() { source.push(Length(length)); }
         for (prefix, start, end) in cases {
             let mut extended = MaybeEmpty::default();
             let mut pushed = MaybeEmpty::default();
             for i in 0..prefix {
-                extended.push((i % 4) as u64);
-                pushed.push((i % 4) as u64);
+                extended.push(Length((i % 4) as u64));
+                pushed.push(Length((i % 4) as u64));
             }
             extended.extend_from_self(source.borrow(), start..end);
-            for i in start..end { pushed.push(lengths[i]); }
+            for i in start..end { pushed.push(Length(lengths[i])); }
             assert_eq!(extended, pushed, "MaybeEmpty prefix {prefix} range {start}..{end}");
         }
 
         let mut source = NeverEmpty::default();
-        for &length in lengths.iter() { source.push(length + 1); }
+        for &length in lengths.iter() { source.push(Length(length + 1)); }
         for (prefix, start, end) in cases {
             let mut extended = NeverEmpty::default();
             let mut pushed = NeverEmpty::default();
             for i in 0..prefix {
-                extended.push((i % 4) as u64 + 1);
-                pushed.push((i % 4) as u64 + 1);
+                extended.push(Length((i % 4) as u64 + 1));
+                pushed.push(Length((i % 4) as u64 + 1));
             }
             extended.extend_from_self(source.borrow(), start..end);
-            for i in start..end { pushed.push(lengths[i] + 1); }
+            for i in start..end { pushed.push(Length(lengths[i] + 1)); }
             assert_eq!(extended, pushed, "NeverEmpty prefix {prefix} range {start}..{end}");
         }
     }
@@ -933,8 +943,8 @@ mod test {
         let mut maybe = MaybeEmpty::default();
         let mut never = NeverEmpty::default();
         for &length in lengths.iter() {
-            maybe.push(length);
-            never.push(length + 1);
+            maybe.push(Length(length));
+            never.push(Length(length + 1));
         }
         for gap in [1usize, 2, 3, 7, 64, 500] {
             let mut maybe_cursor = maybe.cursor();
@@ -969,7 +979,7 @@ mod test {
         use crate::{AsBytes, FromBytes};
         use super::MaybeEmpty;
         let mut maybe_empty = MaybeEmpty::default();
-        for length in [3u64, 0, 2, 64, 0, 130] { maybe_empty.push(length); }
+        for length in [3u64, 0, 2, 64, 0, 130] { maybe_empty.push(Length(length)); }
         let borrowed = maybe_empty.borrow();
         let slices: Vec<(u64, &[u8])> = borrowed.as_bytes().collect();
         let mut iter = slices.iter().map(|(_, bytes)| *bytes);
@@ -998,11 +1008,11 @@ mod test {
         let mut strides = Strides::<Uppers>::default();
         let mut strided: Strides = Strides::default();
         for &length in lengths.iter() {
-            uppers.push(length);
-            maybe.push(length);
-            never.push(length + 1);
-            strides.push(length);
-            strided.push(7);
+            uppers.push(Length(length));
+            maybe.push(Length(length));
+            never.push(Length(length + 1));
+            strides.push(Length(length));
+            strided.push(Length(7));
         }
         check(&uppers);
         check(&uppers.uppers);
@@ -1039,11 +1049,11 @@ mod test {
         let mut strides = Strides::<NeverEmpty>::default();
         let mut strided: Strides = Strides::default();
         for &length in lengths.iter() {
-            uppers.push(length);
-            maybe.push(length);
-            never.push(length + 1);
-            strides.push(length + 1);
-            strided.push(7);
+            uppers.push(Length(length));
+            maybe.push(Length(length));
+            never.push(Length(length + 1));
+            strides.push(Length(length + 1));
+            strided.push(Length(7));
         }
         check(&uppers);
         check(&maybe);

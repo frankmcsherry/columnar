@@ -5,7 +5,7 @@
 //! which `Strides` absorbs entirely into its head).
 
 use bencher::{benchmark_group, benchmark_main, black_box, Bencher};
-use columnar::LengthsContainer;
+use columnar::{Length, LengthsContainer};
 use columnar::{NeverEmpty, MaybeEmpty, Uppers};
 use columnar::primitive::offsets::Strides;
 
@@ -17,7 +17,7 @@ fn lengths_strided() -> Vec<u64> { vec![8u64; LISTS] }
 fn build<BC: LengthsContainer>(lengths: &[u64]) -> BC {
     let mut bounds = BC::default();
     for length in lengths.iter() {
-        bounds.push(length);
+        bounds.push(&Length(*length));
     }
     bounds
 }
@@ -28,7 +28,7 @@ fn _push<BC: LengthsContainer>(bencher: &mut Bencher, lengths: Vec<u64>) {
     bencher.iter(|| {
         bounds.clear();
         for length in lengths.iter() {
-            bounds.push(length);
+            bounds.push(&Length(*length));
         }
     });
 }
@@ -67,7 +67,7 @@ fn _extend<BC: LengthsContainer>(bencher: &mut Bencher, lengths: Vec<u64>) {
     let mut target = BC::default();
     bencher.iter(|| {
         target.clear();
-        target.push(&3u64);
+        target.push(&Length(3));
         target.extend_from_self(source.borrow(), 1..lengths.len());
     });
 }
