@@ -47,7 +47,7 @@ impl<TC: Default> Default for Trees<TC> {
 
 /// A reference to a single node within a `Trees` container.
 ///
-/// Holds a copy of the borrowed values and bounds containers,
+/// Holds a copy of the borrowed values and lengths containers,
 /// plus the node's index and child range. Navigation to children
 /// constructs new `TreesRef` values.
 pub struct TreesRef<V, B> {

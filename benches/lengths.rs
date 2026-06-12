@@ -1,11 +1,11 @@
-//! Benchmarks comparing the bounds containers: `Uppers`, `Strides`, `NeverEmpty`, `MaybeEmpty`.
+//! Benchmarks comparing the lengths containers: `Uppers`, `Strides`, `NeverEmpty`, `MaybeEmpty`.
 //!
 //! Each operation runs over two length distributions: `varied` (lengths 1..=16,
 //! which spills `Strides` almost immediately) and `strided` (uniform length 8,
 //! which `Strides` absorbs entirely into its head).
 
 use bencher::{benchmark_group, benchmark_main, black_box, Bencher};
-use columnar::BoundsContainer;
+use columnar::LengthsContainer;
 use columnar::{NeverEmpty, MaybeEmpty, Uppers};
 use columnar::primitive::offsets::Strides;
 
@@ -14,7 +14,7 @@ const LISTS: usize = 4096;
 fn lengths_varied() -> Vec<u64> { (0..LISTS).map(|i| ((i * i) % 16 + 1) as u64).collect() }
 fn lengths_strided() -> Vec<u64> { vec![8u64; LISTS] }
 
-fn build<BC: BoundsContainer>(lengths: &[u64]) -> BC {
+fn build<BC: LengthsContainer>(lengths: &[u64]) -> BC {
     let mut bounds = BC::default();
     for length in lengths.iter() {
         bounds.push(length);
@@ -23,7 +23,7 @@ fn build<BC: BoundsContainer>(lengths: &[u64]) -> BC {
 }
 
 /// Pushes all lengths, from clear.
-fn _push<BC: BoundsContainer>(bencher: &mut Bencher, lengths: Vec<u64>) {
+fn _push<BC: LengthsContainer>(bencher: &mut Bencher, lengths: Vec<u64>) {
     let mut bounds = BC::default();
     bencher.iter(|| {
         bounds.clear();
@@ -34,7 +34,7 @@ fn _push<BC: BoundsContainer>(bencher: &mut Bencher, lengths: Vec<u64>) {
 }
 
 /// Reads `bounds(index)` for every list, in order.
-fn _bounds<BC: BoundsContainer>(bencher: &mut Bencher, lengths: Vec<u64>) {
+fn _bounds<BC: LengthsContainer>(bencher: &mut Bencher, lengths: Vec<u64>) {
     let bounds: BC = build(&lengths);
     bencher.iter(|| {
         let mut sum = 0u64;
@@ -47,7 +47,7 @@ fn _bounds<BC: BoundsContainer>(bencher: &mut Bencher, lengths: Vec<u64>) {
 }
 
 /// Queries `rank` at offsets stepping through the values.
-fn _rank<BC: BoundsContainer>(bencher: &mut Bencher, lengths: Vec<u64>) {
+fn _rank<BC: LengthsContainer>(bencher: &mut Bencher, lengths: Vec<u64>) {
     let bounds: BC = build(&lengths);
     let total = bounds.total();
     bencher.iter(|| {
@@ -62,7 +62,7 @@ fn _rank<BC: BoundsContainer>(bencher: &mut Bencher, lengths: Vec<u64>) {
 }
 
 /// Extends from a misaligned range of a built source, from clear.
-fn _extend<BC: BoundsContainer>(bencher: &mut Bencher, lengths: Vec<u64>) {
+fn _extend<BC: LengthsContainer>(bencher: &mut Bencher, lengths: Vec<u64>) {
     let source: BC = build(&lengths);
     let mut target = BC::default();
     bencher.iter(|| {
@@ -137,7 +137,7 @@ const SEEK_LISTS: usize = 1 << 16;
 fn lengths_seek() -> Vec<u64> { (0..SEEK_LISTS).map(|i| ((i * i) % 16 + 1) as u64).collect() }
 
 /// From-scratch `bounds(index)` at every `gap`-th list.
-fn _seek_scratch<BC: BoundsContainer>(bencher: &mut Bencher, gap: usize) {
+fn _seek_scratch<BC: LengthsContainer>(bencher: &mut Bencher, gap: usize) {
     let bounds: BC = build(&lengths_seek());
     bencher.iter(|| {
         let mut sum = 0u64;

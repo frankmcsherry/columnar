@@ -1,9 +1,9 @@
-//! Bounds of contiguously stored lists, and containers thereof.
+//! Lengths of contiguously stored lists, and containers thereof.
 //!
-//! A bounds container describes how a sequence of values is partitioned into
+//! A lengths container describes how a sequence of values is partitioned into
 //! lists: list `i` occupies value positions `bounds(i).0 .. bounds(i).1`, and
 //! the lists tile the values: the first list starts at zero, and each list
-//! starts where its predecessor ends. The [`Bounds`] trait provides the read
+//! starts where its predecessor ends. The [`Lengths`] trait provides the read
 //! side: the extent of each list ("select"), and the list containing each
 //! value position ("rank").
 //!
@@ -25,7 +25,7 @@ use crate::common::index::CopyAs;
 ///
 /// List `i` occupies value positions `bounds(i).0 .. bounds(i).1`, where
 /// `bounds(0).0 == 0` and `bounds(i+1).0 == bounds(i).1`.
-pub trait Bounds: Len {
+pub trait Lengths: Len {
     /// The half-open extent `[lower, upper)` of list `index`.
     fn bounds(&self, index: usize) -> (u64, u64);
     /// The index of the list containing value position `offset`.
@@ -74,7 +74,7 @@ pub trait Bounds: Len {
     }
 }
 
-impl<'b, B: Bounds + ?Sized> Bounds for &'b B {
+impl<'b, B: Lengths + ?Sized> Lengths for &'b B {
     #[inline(always)] fn bounds(&self, index: usize) -> (u64, u64) { B::bounds(*self, index) }
     #[inline(always)] fn rank(&self, offset: u64) -> usize { B::rank(*self, offset) }
     #[inline(always)] fn extent(&self, range: core::ops::Range<usize>) -> (u64, u64) { B::extent(*self, range) }
@@ -85,11 +85,11 @@ impl<'b, B: Bounds + ?Sized> Bounds for &'b B {
 /// Sorted `u64` sequences read as cumulative upper bounds.
 ///
 /// These implementations support read paths over raw offset arrays, including
-/// types from before the [`Bounds`] trait existed. They are read-only as
+/// types from before the [`Lengths`] trait existed. They are read-only as
 /// bounds: `Vec<u64>`'s `Push` and `Container` implementations mean literal
 /// elements rather than list lengths, so `Vec<u64>` is deliberately *not* a
-/// [`BoundsContainer`]. Use [`Uppers`] when building.
-impl Bounds for [u64] {
+/// [`LengthsContainer`]. Use [`Uppers`] when building.
+impl Lengths for [u64] {
     #[inline(always)]
     fn bounds(&self, index: usize) -> (u64, u64) {
         let lower = if index == 0 { 0 } else { self[index - 1] };
@@ -107,18 +107,18 @@ impl Bounds for [u64] {
     #[inline(always)]
     fn total(&self) -> u64 { self.last().copied().unwrap_or(0) }
 }
-impl Bounds for Vec<u64> {
+impl Lengths for Vec<u64> {
     #[inline(always)] fn bounds(&self, index: usize) -> (u64, u64) { self[..].bounds(index) }
     #[inline(always)] fn rank(&self, offset: u64) -> usize { self[..].rank(offset) }
     #[inline(always)] fn extent(&self, range: core::ops::Range<usize>) -> (u64, u64) { self[..].extent(range) }
     #[inline(always)] fn total(&self) -> u64 { self[..].total() }
 }
 
-/// A composite trait for types whose borrowed form answers [`Bounds`] queries.
-pub trait BoundsBorrow: for<'a> Borrow<Borrowed<'a>: Bounds> {}
-impl<C: for<'a> Borrow<Borrowed<'a>: Bounds>> BoundsBorrow for C {}
+/// A composite trait for types whose borrowed form answers [`Lengths`] queries.
+pub trait LengthsBorrow: for<'a> Borrow<Borrowed<'a>: Lengths> {}
+impl<C: for<'a> Borrow<Borrowed<'a>: Lengths>> LengthsBorrow for C {}
 
-/// A container of list lengths that supports [`Bounds`] queries: what `Vecs`
+/// A container of list lengths that supports [`Lengths`] queries: what `Vecs`
 /// and `Strings` require of their bounds.
 ///
 /// This trait is an explicit opt-in rather than a blanket implementation,
@@ -126,7 +126,7 @@ impl<C: for<'a> Borrow<Borrowed<'a>: Bounds>> BoundsBorrow for C {}
 /// container's `Push`/`Index`/`extend_from_self` traffic in list *lengths*.
 /// `Vec<u64>` satisfies every supertrait, but its pushes mean literal
 /// elements, so it must not implement this trait.
-pub trait BoundsContainer: Bounds + BoundsBorrow + Container + for<'a> Push<&'a u64> {
+pub trait LengthsContainer: Lengths + LengthsBorrow + Container + for<'a> Push<&'a u64> {
     /// Concludes the current list at absolute position `upper`, which must be
     /// at least `self.total()`.
     ///
@@ -153,11 +153,11 @@ pub trait BoundsContainer: Bounds + BoundsBorrow + Container + for<'a> Push<&'a 
     }
 }
 
-/// Cumulative upper bounds in a `u64` array: the default bounds container.
+/// Cumulative upper bounds in a `u64` array: the default lengths container.
 ///
 /// Stores the upper bound of each list; each lower bound is the preceding
 /// upper bound (zero for the first list). As a container it presents list
-/// lengths, per the [`Bounds`] contract; the cumulative form is its storage
+/// lengths, per the [`Lengths`] contract; the cumulative form is its storage
 /// strategy, and matches the serialized layout of a bare `u64` array.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
@@ -170,7 +170,7 @@ impl<BC: Len> Len for Uppers<BC> {
     #[inline(always)] fn len(&self) -> usize { self.uppers.len() }
 }
 
-impl<BC: Len + IndexAs<u64>> Bounds for Uppers<BC> {
+impl<BC: Len + IndexAs<u64>> Lengths for Uppers<BC> {
     #[inline(always)]
     fn bounds(&self, index: usize) -> (u64, u64) {
         let lower = if index == 0 { 0 } else { self.uppers.index_as(index - 1) };
@@ -244,7 +244,7 @@ impl Container for Uppers {
     }
 }
 
-impl BoundsContainer for Uppers {
+impl LengthsContainer for Uppers {
     #[inline(always)]
     fn seal(&mut self, upper: u64) {
         debug_assert!(upper >= self.total());
@@ -292,7 +292,7 @@ impl<'a> crate::FromBytes<'a> for Uppers<&'a [u64]> {
 }
 
 
-/// Bounds for non-empty lists: one bit per value, set at each list's last value.
+/// Lengths for non-empty lists: one bit per value, set at each list's last value.
 ///
 /// The `i`-th set bit marks the last value of list `i`, so `upper(i)` is
 /// `select(i) + 1`, and the list containing value position `offset` is
@@ -349,7 +349,7 @@ impl Borrow for NeverEmpty {
     fn reborrow_ref<'b, 'a: 'b>(item: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { item }
 }
 
-impl BoundsContainer for NeverEmpty {
+impl LengthsContainer for NeverEmpty {
     #[inline]
     fn extend_with_extent(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>, extent: (u64, u64)) {
         if !range.is_empty() {
@@ -398,7 +398,7 @@ impl<'a> crate::FromBytes<'a> for NeverEmpty<&'a [u64], &'a [u64], &'a u64, &'a 
     }
 }
 
-impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexAs<u64>> Bounds for NeverEmpty<CC, VC, NC, WC> {
+impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexAs<u64>> Lengths for NeverEmpty<CC, VC, NC, WC> {
     #[inline]
     fn bounds(&self, index: usize) -> (u64, u64) {
         // One select for the preceding end; the list's own end is the next
@@ -492,7 +492,7 @@ impl Container for NeverEmpty {
     }
 }
 
-/// Bounds for possibly-empty lists, in unary: each list contributes one zero
+/// Lengths for possibly-empty lists, in unary: each list contributes one zero
 /// bit per value, then a one. Costs one bit per value plus one bit per list.
 ///
 /// The `i`-th set bit sits at position `upper(i) + i`, so `upper(i)` is
@@ -549,7 +549,7 @@ impl Borrow for MaybeEmpty {
     fn reborrow_ref<'b, 'a: 'b>(item: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { item }
 }
 
-impl BoundsContainer for MaybeEmpty {
+impl LengthsContainer for MaybeEmpty {
     #[inline]
     fn extend_with_extent(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>, extent: (u64, u64)) {
         if !range.is_empty() {
@@ -600,7 +600,7 @@ impl<'a> crate::FromBytes<'a> for MaybeEmpty<&'a [u64], &'a [u64], &'a u64, &'a 
     }
 }
 
-impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexAs<u64>> Bounds for MaybeEmpty<CC, VC, NC, WC> {
+impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexAs<u64>> Lengths for MaybeEmpty<CC, VC, NC, WC> {
     #[inline]
     fn bounds(&self, index: usize) -> (u64, u64) {
         // One select for the preceding end; the list's own end is the next
@@ -700,19 +700,19 @@ impl Container for MaybeEmpty {
 }
 
 impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexAs<u64>> NeverEmpty<CC, VC, NC, WC> {
-    /// A forward cursor over the list extents; see [`BoundsCursor`].
-    pub fn cursor(&self) -> BoundsCursor<'_, CC, VC, WC, false> {
-        BoundsCursor { cursor: self.bits.cursor(), next_index: 0, prev: (0, 0) }
+    /// A forward cursor over the list extents; see [`LengthsCursor`].
+    pub fn cursor(&self) -> LengthsCursor<'_, CC, VC, WC, false> {
+        LengthsCursor { cursor: self.bits.cursor(), next_index: 0, prev: (0, 0) }
     }
 }
 impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexAs<u64>> MaybeEmpty<CC, VC, NC, WC> {
-    /// A forward cursor over the list extents; see [`BoundsCursor`].
-    pub fn cursor(&self) -> BoundsCursor<'_, CC, VC, WC, true> {
-        BoundsCursor { cursor: self.bits.cursor(), next_index: 0, prev: (0, 0) }
+    /// A forward cursor over the list extents; see [`LengthsCursor`].
+    pub fn cursor(&self) -> LengthsCursor<'_, CC, VC, WC, true> {
+        LengthsCursor { cursor: self.bits.cursor(), next_index: 0, prev: (0, 0) }
     }
 }
 
-/// A cursor over the extents of a bitvector-backed bounds container.
+/// A cursor over the extents of a bitvector-backed lengths container.
 ///
 /// Random-access `bounds(index)` pays a `select` per call to re-find its
 /// position. A cursor instead remembers where the last query ended, so
@@ -725,7 +725,7 @@ impl<CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, NC: CopyAs<u64>, WC: IndexA
 /// [`NeverEmpty`] when `false`. Both encode lengths in unary; they differ in
 /// the terminator bit `MaybeEmpty` spends per list, which shifts the `i`-th
 /// set bit by `i` positions and is the only difference the cursor sees.
-pub struct BoundsCursor<'a, CC, VC, WC, const MAYBE_EMPTY: bool> {
+pub struct LengthsCursor<'a, CC, VC, WC, const MAYBE_EMPTY: bool> {
     cursor: crate::RankSelectCursor<'a, CC, VC, WC>,
     /// One past the most recently queried list index.
     next_index: u64,
@@ -733,7 +733,7 @@ pub struct BoundsCursor<'a, CC, VC, WC, const MAYBE_EMPTY: bool> {
     prev: (u64, u64),
 }
 
-impl<'a, CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, WC: IndexAs<u64>, const MAYBE_EMPTY: bool> BoundsCursor<'a, CC, VC, WC, MAYBE_EMPTY> {
+impl<'a, CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, WC: IndexAs<u64>, const MAYBE_EMPTY: bool> LengthsCursor<'a, CC, VC, WC, MAYBE_EMPTY> {
     /// The half-open extent `[lower, upper)` of list `index`, which must be
     /// in bounds, but may be in any order relative to earlier queries.
     #[inline(always)]
@@ -749,13 +749,13 @@ impl<'a, CC: Len + IndexAs<u64>, VC: Len + IndexAs<u64>, WC: IndexAs<u64>, const
         } else if index == self.next_index {
             self.prev.1
         } else if index > self.next_index {
-            let pos = self.cursor.seek_to_rank(index - 1).expect("BoundsCursor: list index out of bounds") as u64;
+            let pos = self.cursor.seek_to_rank(index - 1).expect("LengthsCursor: list index out of bounds") as u64;
             pos + 1 - if MAYBE_EMPTY { index } else { 0 }
         } else {
-            let pos = self.cursor.seek_to_rank_back(index - 1).expect("BoundsCursor: list index out of bounds") as u64;
+            let pos = self.cursor.seek_to_rank_back(index - 1).expect("LengthsCursor: list index out of bounds") as u64;
             pos + 1 - if MAYBE_EMPTY { index } else { 0 }
         };
-        let pos = self.cursor.next_one().expect("BoundsCursor: list index out of bounds") as u64;
+        let pos = self.cursor.next_one().expect("LengthsCursor: list index out of bounds") as u64;
         let upper = pos + 1 - if MAYBE_EMPTY { index + 1 } else { 0 };
         self.next_index = index + 1;
         self.prev = (lower, upper);
@@ -769,7 +769,7 @@ mod test {
     use alloc::vec;
     use alloc::vec::Vec;
     use crate::{Borrow, Container, Index, Len, Push};
-    use super::{Bounds, Uppers};
+    use super::{Lengths, Uppers};
 
     #[test]
     fn uppers_lengths_and_bounds() {
@@ -829,7 +829,7 @@ mod test {
     #[test]
     fn raw_vec_bounds_read_compat() {
         use crate::Vecs;
-        // The pre-`Bounds` data shape: raw cumulative uppers. Reading still works;
+        // The pre-`Lengths` data shape: raw cumulative uppers. Reading still works;
         // writing requires `Uppers`, which shares the serialized layout.
         let cols: Vecs<Vec<u8>, Vec<u64>> = Vecs { bounds: vec![3, 3, 5], values: vec![1, 2, 3, 4, 5] };
         assert_eq!(cols.len(), 3);
@@ -940,8 +940,8 @@ mod test {
             let mut maybe_cursor = maybe.cursor();
             let mut never_cursor = never.cursor();
             for index in (0..lengths.len()).step_by(gap) {
-                assert_eq!(maybe_cursor.seek(index), Bounds::bounds(&maybe, index), "MaybeEmpty gap {gap} index {index}");
-                assert_eq!(never_cursor.seek(index), Bounds::bounds(&never, index), "NeverEmpty gap {gap} index {index}");
+                assert_eq!(maybe_cursor.seek(index), Lengths::bounds(&maybe, index), "MaybeEmpty gap {gap} index {index}");
+                assert_eq!(never_cursor.seek(index), Lengths::bounds(&never, index), "NeverEmpty gap {gap} index {index}");
             }
         }
         // Arbitrary-order queries: a deterministic scramble with repeats,
@@ -959,8 +959,8 @@ mod test {
                 3 => 0,                                         // restart
                 _ => (index + 1 + rng() % 8) % lengths.len(),   // mostly forward
             };
-            assert_eq!(maybe_cursor.seek(index), Bounds::bounds(&maybe, index), "MaybeEmpty scrambled index {index}");
-            assert_eq!(never_cursor.seek(index), Bounds::bounds(&never, index), "NeverEmpty scrambled index {index}");
+            assert_eq!(maybe_cursor.seek(index), Lengths::bounds(&maybe, index), "MaybeEmpty scrambled index {index}");
+            assert_eq!(never_cursor.seek(index), Lengths::bounds(&never, index), "NeverEmpty scrambled index {index}");
         }
     }
 
@@ -976,7 +976,7 @@ mod test {
         let decoded = <MaybeEmpty<&[u64], &[u64], &u64, &[u64]> as FromBytes>::from_bytes(&mut iter);
         assert_eq!(decoded.len(), maybe_empty.len());
         for index in 0..maybe_empty.len() {
-            assert_eq!(Bounds::bounds(&decoded, index), Bounds::bounds(&maybe_empty, index));
+            assert_eq!(Lengths::bounds(&decoded, index), Lengths::bounds(&maybe_empty, index));
         }
     }
 
@@ -984,7 +984,7 @@ mod test {
     fn extent_matches_bounds() {
         use super::{MaybeEmpty, NeverEmpty};
         use crate::primitive::offsets::Strides;
-        fn check<B: Bounds>(bounds: &B) {
+        fn check<B: Lengths>(bounds: &B) {
             for start in 0..bounds.len() {
                 for end in start + 1 ..= bounds.len() {
                     assert_eq!(bounds.extent(start..end), (bounds.bounds(start).0, bounds.bounds(end - 1).1));
@@ -1017,7 +1017,7 @@ mod test {
     fn extents_matches_extent() {
         use super::{MaybeEmpty, NeverEmpty};
         use crate::primitive::offsets::Strides;
-        fn check<B: Bounds>(bounds: &B) {
+        fn check<B: Lengths>(bounds: &B) {
             // Ascending, disjoint ranges with adjacency, gaps, and exact repeats.
             let mut ranges = Vec::new();
             let mut index = 0usize;
@@ -1055,7 +1055,7 @@ mod test {
 
     #[test]
     fn raw_u64_read_side() {
-        // `Vec<u64>` and `&[u64]` answer Bounds queries as cumulative uppers.
+        // `Vec<u64>` and `&[u64]` answer Lengths queries as cumulative uppers.
         let uppers: Vec<u64> = vec![3, 3, 5, 10];
         assert_eq!(uppers.bounds(1), (3, 3));
         assert_eq!(uppers.total(), 10);

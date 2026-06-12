@@ -2,7 +2,7 @@
 //! `bounds(i)`, cursor `seek(i)`, and cursor stepping via `next_one` alone.
 
 use std::time::Instant;
-use columnar::{Bounds, NeverEmpty, Push};
+use columnar::{Lengths, NeverEmpty, Push};
 
 const LISTS: usize = 1 << 16;
 const REPS: usize = 50;

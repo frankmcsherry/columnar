@@ -479,10 +479,10 @@ mod larges {
 
 /// Columnar stores for list bounds, stored in various ways.
 ///
-/// These types implement [`Bounds`](crate::bounds::Bounds) and its container
+/// These types implement [`Lengths`](crate::lengths::Lengths) and its container
 /// contract: as containers they present list *lengths*, while answering extent
 /// ("select") and containment ("rank") queries about the cumulative offsets.
-/// The general-purpose store is [`Uppers`](crate::bounds::Uppers); the types
+/// The general-purpose store is [`Uppers`](crate::lengths::Uppers); the types
 /// here exploit patterns in the offsets, such as constant inter-offset spacing.
 pub mod offsets {
 
@@ -500,7 +500,7 @@ pub mod offsets {
 
         use alloc::{vec::Vec, string::String};
         use crate::{Container, Borrow, Index, Len, Push};
-        use crate::bounds::{Bounds, BoundsContainer};
+        use crate::lengths::{Lengths, LengthsContainer};
         use crate::common::index::CopyAs;
 
         /// An offset container that encodes a constant `K` spacing.
@@ -545,7 +545,7 @@ pub mod offsets {
             fn get(&self, _index: usize) -> Self::Ref { K }
         }
 
-        impl<const K: u64, CC: CopyAs<u64>> Bounds for Fixeds<K, CC> {
+        impl<const K: u64, CC: CopyAs<u64>> Lengths for Fixeds<K, CC> {
             #[inline(always)]
             fn bounds(&self, index: usize) -> (u64, u64) {
                 let index = index as u64;
@@ -569,7 +569,7 @@ pub mod offsets {
             fn total(&self) -> u64 { self.count.copy_as() * K }
         }
 
-        impl<const K: u64> BoundsContainer for Fixeds<K> {}
+        impl<const K: u64> LengthsContainer for Fixeds<K> {}
 
         impl<'a, const K: u64, T> Push<T> for Fixeds<K> {
             // TODO: check for overflow?
@@ -646,13 +646,13 @@ pub mod offsets {
 
         use alloc::{vec::Vec, string::String};
         use crate::{Container, Borrow, Index, IndexAs, Len, Push, Clear, AsBytes, FromBytes};
-        use crate::bounds::{Bounds, BoundsBorrow, BoundsContainer, Uppers};
+        use crate::lengths::{Lengths, LengthsBorrow, LengthsContainer, Uppers};
 
         /// Columnar store for list bounds with stride optimization.
         ///
         /// `head` holds `[stride, length]`: while the first `length` lists all
         /// have length `stride`, their bounds are stored implicitly. Subsequent
-        /// lists spill into `bounds`, any other bounds container, whose extents
+        /// lists spill into `bounds`, any other lengths container, whose extents
         /// are relative to the end of the strided prefix. In the owned form
         /// `head` is `[u64; 2]`; in the borrowed form it is `&[u64]` of length 2.
         #[derive(Copy, Clone, Debug, Default)]
@@ -661,7 +661,7 @@ pub mod offsets {
             pub bounds: BC,
         }
 
-        impl<BC: BoundsBorrow> Borrow for Strides<BC> {
+        impl<BC: LengthsBorrow> Borrow for Strides<BC> {
             type Ref<'a> = u64;
             type Borrowed<'a> = Strides<BC::Borrowed<'a>, &'a [u64]> where BC: 'a;
 
@@ -672,7 +672,7 @@ pub mod offsets {
             #[inline(always)] fn reborrow_ref<'b, 'a: 'b>(item: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { item }
         }
 
-        impl<BC: BoundsContainer> Container for Strides<BC> {
+        impl<BC: LengthsContainer> Container for Strides<BC> {
             #[inline]
             fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
                 if !range.is_empty() {
@@ -685,16 +685,16 @@ pub mod offsets {
             }
         }
 
-        impl<'a, BC: BoundsContainer> Push<&'a u64> for Strides<BC> { #[inline(always)] fn push(&mut self, item: &'a u64) { self.push(*item) } }
-        impl<BC: BoundsContainer> Push<u64> for Strides<BC> { #[inline(always)] fn push(&mut self, item: u64) { self.push(item) } }
-        impl<BC: BoundsContainer> Clear for Strides<BC> { #[inline(always)] fn clear(&mut self) { self.clear() } }
+        impl<'a, BC: LengthsContainer> Push<&'a u64> for Strides<BC> { #[inline(always)] fn push(&mut self, item: &'a u64) { self.push(*item) } }
+        impl<BC: LengthsContainer> Push<u64> for Strides<BC> { #[inline(always)] fn push(&mut self, item: u64) { self.push(item) } }
+        impl<BC: LengthsContainer> Clear for Strides<BC> { #[inline(always)] fn clear(&mut self) { self.clear() } }
 
         impl<BC: Len, HC: IndexAs<u64>> Len for Strides<BC, HC> {
             #[inline(always)]
             fn len(&self) -> usize { self.head.index_as(1) as usize + self.bounds.len() }
         }
 
-        impl<BC: Bounds, HC: IndexAs<u64>> Index for Strides<BC, HC> {
+        impl<BC: Lengths, HC: IndexAs<u64>> Index for Strides<BC, HC> {
             type Ref = u64;
             /// The length of list `index`.
             #[inline(always)]
@@ -709,7 +709,7 @@ pub mod offsets {
             }
         }
 
-        impl<BC: Bounds, HC: IndexAs<u64>> Bounds for Strides<BC, HC> {
+        impl<BC: Lengths, HC: IndexAs<u64>> Lengths for Strides<BC, HC> {
             #[inline(always)]
             fn bounds(&self, index: usize) -> (u64, u64) {
                 let length = self.head.index_as(1);
@@ -779,7 +779,7 @@ pub mod offsets {
             }
         }
 
-        impl<BC: BoundsContainer> BoundsContainer for Strides<BC> {
+        impl<BC: LengthsContainer> LengthsContainer for Strides<BC> {
             fn extend_with_extent(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>, extent: (u64, u64)) {
                 if range.is_empty() { return; }
                 debug_assert_eq!(extent, other.extent(range.clone()));
@@ -859,7 +859,7 @@ pub mod offsets {
             }
         }
 
-        impl<BC: BoundsContainer> Strides<BC> {
+        impl<BC: LengthsContainer> Strides<BC> {
             pub fn new(stride: u64, length: u64) -> Self {
                 Self { head: [stride, length], bounds: BC::default() }
             }
@@ -934,7 +934,7 @@ pub mod offsets {
             }
 
             let mut cols = Vecs {
-                bounds: Strides::<crate::bounds::Uppers>::new(3, cols.bounds.count),
+                bounds: Strides::<crate::lengths::Uppers>::new(3, cols.bounds.count),
                 values: cols.values
             };
 
@@ -945,7 +945,7 @@ pub mod offsets {
         #[test]
         fn stride_bounds_and_rank() {
             use alloc::vec;
-            use crate::bounds::Bounds;
+            use crate::lengths::Lengths;
             use crate::common::Len;
             use crate::primitive::offsets::Strides;
 
@@ -958,10 +958,10 @@ pub mod offsets {
             // The spill holds the post-stride lists, relative to the prefix.
             assert_eq!(strides.bounds.uppers, vec![2, 2, 6]);
             assert_eq!(strides.total(), 15);
-            assert_eq!(Bounds::bounds(&strides, 0), (0, 3));
-            assert_eq!(Bounds::bounds(&strides, 3), (9, 11));
-            assert_eq!(Bounds::bounds(&strides, 4), (11, 11));
-            assert_eq!(Bounds::bounds(&strides, 5), (11, 15));
+            assert_eq!(Lengths::bounds(&strides, 0), (0, 3));
+            assert_eq!(Lengths::bounds(&strides, 3), (9, 11));
+            assert_eq!(Lengths::bounds(&strides, 4), (11, 11));
+            assert_eq!(Lengths::bounds(&strides, 5), (11, 15));
             // Strided ranks divide; spilled ranks search; empty lists are skipped.
             for offset in 0..9 {
                 assert_eq!(strides.rank(offset), (offset / 3) as usize);
@@ -975,7 +975,7 @@ pub mod offsets {
 
         #[test]
         fn strides_generic_spill() {
-            use crate::bounds::{Bounds, MaybeEmpty};
+            use crate::lengths::{Lengths, MaybeEmpty};
             use crate::common::Len;
             use crate::{Borrow, Container};
             use crate::primitive::offsets::Strides;
@@ -989,7 +989,7 @@ pub mod offsets {
             assert_eq!(strides.len(), lengths.len());
             let mut lower = 0;
             for (index, &length) in lengths.iter().enumerate() {
-                assert_eq!(Bounds::bounds(&strides, index), (lower, lower + length));
+                assert_eq!(Lengths::bounds(&strides, index), (lower, lower + length));
                 for offset in lower .. lower + length {
                     assert_eq!(strides.rank(offset), index);
                 }
@@ -1004,7 +1004,7 @@ pub mod offsets {
             assert_eq!(target.len(), lengths.len() - 1);
             let mut lower = 0;
             for (index, &length) in lengths[1..].iter().enumerate() {
-                assert_eq!(Bounds::bounds(&target, index), (lower, lower + length));
+                assert_eq!(Lengths::bounds(&target, index), (lower, lower + length));
                 lower += length;
             }
             assert_eq!(target.total(), lower);

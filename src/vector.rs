@@ -1,6 +1,6 @@
 use alloc::{vec::Vec, string::String};
 use super::{Clear, Columnar, Container, Len, IndexMut, Index, Push, Slice, Borrow};
-use crate::bounds::{Bounds, BoundsBorrow, BoundsContainer, Uppers};
+use crate::lengths::{Lengths, LengthsBorrow, LengthsContainer, Uppers};
 
 /// A stand-in for `Vec<Vec<T>>` for complex `T`.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -66,7 +66,7 @@ impl<T: Columnar, const N: usize> Columnar for smallvec::SmallVec<[T; N]> {
     type Container = Vecs<T::Container>;
 }
 
-impl<BC: BoundsBorrow, TC: Container> Borrow for Vecs<TC, BC> {
+impl<BC: LengthsBorrow, TC: Container> Borrow for Vecs<TC, BC> {
     type Ref<'a> = Slice<TC::Borrowed<'a>> where TC: 'a;
     type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>> where BC: 'a, TC: 'a;
     #[inline(always)]
@@ -89,7 +89,7 @@ impl<BC: BoundsBorrow, TC: Container> Borrow for Vecs<TC, BC> {
     }
 }
 
-impl<BC: BoundsContainer, TC: Container> Container for Vecs<TC, BC> {
+impl<BC: LengthsContainer, TC: Container> Container for Vecs<TC, BC> {
     #[inline(always)]
     fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
         if !range.is_empty() {
@@ -146,7 +146,7 @@ impl<TC, BC: Len> Len for Vecs<TC, BC> {
     #[inline(always)] fn len(&self) -> usize { self.bounds.len() }
 }
 
-impl<TC: Copy, BC: Bounds> Index for Vecs<TC, BC> {
+impl<TC: Copy, BC: Lengths> Index for Vecs<TC, BC> {
     type Ref = Slice<TC>;
     #[inline(always)]
     fn get(&self, index: usize) -> Self::Ref {
@@ -154,7 +154,7 @@ impl<TC: Copy, BC: Bounds> Index for Vecs<TC, BC> {
         Slice::new(lower, upper, self.values)
     }
 }
-impl<'a, TC, BC: Bounds> Index for &'a Vecs<TC, BC> {
+impl<'a, TC, BC: Lengths> Index for &'a Vecs<TC, BC> {
     type Ref = Slice<&'a TC>;
     #[inline(always)]
     fn get(&self, index: usize) -> Self::Ref {
@@ -162,7 +162,7 @@ impl<'a, TC, BC: Bounds> Index for &'a Vecs<TC, BC> {
         Slice::new(lower, upper, &self.values)
     }
 }
-impl<TC, BC: Bounds> IndexMut for Vecs<TC, BC> {
+impl<TC, BC: Lengths> IndexMut for Vecs<TC, BC> {
     type IndexMut<'a> = Slice<&'a mut TC> where TC: 'a, BC: 'a;
 
     #[inline(always)]
@@ -172,7 +172,7 @@ impl<TC, BC: Bounds> IndexMut for Vecs<TC, BC> {
     }
 }
 
-impl<'a, TC: Container, BC: BoundsContainer> Push<Slice<TC::Borrowed<'a>>> for Vecs<TC, BC> {
+impl<'a, TC: Container, BC: LengthsContainer> Push<Slice<TC::Borrowed<'a>>> for Vecs<TC, BC> {
     #[inline]
     fn push(&mut self, item: Slice<TC::Borrowed<'a>>) {
         debug_assert_eq!(self.bounds.total(), self.values.len() as u64);
@@ -181,7 +181,7 @@ impl<'a, TC: Container, BC: BoundsContainer> Push<Slice<TC::Borrowed<'a>>> for V
     }
 }
 
-impl<I: IntoIterator, TC: Push<I::Item> + Len, BC: BoundsContainer> Push<I> for Vecs<TC, BC> {
+impl<I: IntoIterator, TC: Push<I::Item> + Len, BC: LengthsContainer> Push<I> for Vecs<TC, BC> {
     #[inline]
     fn push(&mut self, item: I) {
         debug_assert_eq!(self.bounds.total(), self.values.len() as u64);
