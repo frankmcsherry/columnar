@@ -488,14 +488,16 @@ pub mod offsets {
 
 
     pub use array::Fixeds;
-    pub use stride::Strides;
+    pub use stride::Strided;
+    #[allow(deprecated)]
+    pub use strides::Strides;
 
     /// An offset container that encodes a constant spacing in its type.
     ///
     /// Any attempt to push any value will result in pushing the next value
     /// at the specified spacing. This type is only appropriate in certain
     /// contexts, for example when storing `[T; K]` array types, or having
-    /// introspected a `Strides` and found it to be only one constant stride.
+    /// introspected a `Strided` and found it to be only one constant stride.
     mod array {
 
         use alloc::{vec::Vec, string::String};
@@ -618,18 +620,18 @@ pub mod offsets {
             }
         }
 
-        use super::Strides;
+        use super::Strided;
         // Success requires `strided()`, which requires an empty spill, so the
         // conversion is available from any spill type.
-        impl<const K: u64, BC: Len> core::convert::TryFrom<Strides<BC>> for Fixeds<K> {
-            type Error = Strides<BC>;
-            fn try_from(item: Strides<BC>) -> Result<Self, Self::Error> {
+        impl<const K: u64, BC: Len> core::convert::TryFrom<Strided<BC>> for Fixeds<K> {
+            type Error = Strided<BC>;
+            fn try_from(item: Strided<BC>) -> Result<Self, Self::Error> {
                 if item.strided() == Some(K) { Ok( Self { count: item.head[1] } ) } else { Err(item) }
             }
         }
-        impl<'a, const K: u64, BC: Len> core::convert::TryFrom<Strides<BC, &'a [u64]>> for Fixeds<K, &'a u64> {
-            type Error = Strides<BC, &'a [u64]>;
-            fn try_from(item: Strides<BC, &'a [u64]>) -> Result<Self, Self::Error> {
+        impl<'a, const K: u64, BC: Len> core::convert::TryFrom<Strided<BC, &'a [u64]>> for Fixeds<K, &'a u64> {
+            type Error = Strided<BC, &'a [u64]>;
+            fn try_from(item: Strided<BC, &'a [u64]>) -> Result<Self, Self::Error> {
                 if item.strided() == Some(K) { Ok( Self { count: &item.head[1] } ) } else { Err(item) }
             }
         }
@@ -656,23 +658,23 @@ pub mod offsets {
         /// are relative to the end of the strided prefix. In the owned form
         /// `head` is `[u64; 2]`; in the borrowed form it is `&[u64]` of length 2.
         #[derive(Copy, Clone, Debug, Default)]
-        pub struct Strides<BC = Uppers, HC = [u64; 2]> {
+        pub struct Strided<BC = Uppers, HC = [u64; 2]> {
             pub head: HC,
             pub bounds: BC,
         }
 
-        impl<BC: LengthsBorrow> Borrow for Strides<BC> {
+        impl<BC: LengthsBorrow> Borrow for Strided<BC> {
             type Ref<'a> = Length;
-            type Borrowed<'a> = Strides<BC::Borrowed<'a>, &'a [u64]> where BC: 'a;
+            type Borrowed<'a> = Strided<BC::Borrowed<'a>, &'a [u64]> where BC: 'a;
 
-            #[inline(always)] fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { Strides { head: &self.head, bounds: self.bounds.borrow() } }
+            #[inline(always)] fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { Strided { head: &self.head, bounds: self.bounds.borrow() } }
             #[inline(always)] fn reborrow<'b, 'a: 'b>(item: Self::Borrowed<'a>) -> Self::Borrowed<'b> where Self: 'a {
-                Strides { head: item.head, bounds: BC::reborrow(item.bounds) }
+                Strided { head: item.head, bounds: BC::reborrow(item.bounds) }
             }
             #[inline(always)] fn reborrow_ref<'b, 'a: 'b>(item: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { item }
         }
 
-        impl<BC: LengthsContainer> Container for Strides<BC> {
+        impl<BC: LengthsContainer> Container for Strided<BC> {
             #[inline]
             fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
                 if !range.is_empty() {
@@ -685,16 +687,16 @@ pub mod offsets {
             }
         }
 
-        impl<'a, BC: LengthsContainer> Push<&'a Length> for Strides<BC> { #[inline(always)] fn push(&mut self, item: &'a Length) { self.push(*item) } }
-        impl<BC: LengthsContainer> Push<Length> for Strides<BC> { #[inline(always)] fn push(&mut self, item: Length) { self.push(item) } }
-        impl<BC: LengthsContainer> Clear for Strides<BC> { #[inline(always)] fn clear(&mut self) { self.clear() } }
+        impl<'a, BC: LengthsContainer> Push<&'a Length> for Strided<BC> { #[inline(always)] fn push(&mut self, item: &'a Length) { self.push(*item) } }
+        impl<BC: LengthsContainer> Push<Length> for Strided<BC> { #[inline(always)] fn push(&mut self, item: Length) { self.push(item) } }
+        impl<BC: LengthsContainer> Clear for Strided<BC> { #[inline(always)] fn clear(&mut self) { self.clear() } }
 
-        impl<BC: Len, HC: IndexAs<u64>> Len for Strides<BC, HC> {
+        impl<BC: Len, HC: IndexAs<u64>> Len for Strided<BC, HC> {
             #[inline(always)]
             fn len(&self) -> usize { self.head.index_as(1) as usize + self.bounds.len() }
         }
 
-        impl<BC: Lengths, HC: IndexAs<u64>> Index for Strides<BC, HC> {
+        impl<BC: Lengths, HC: IndexAs<u64>> Index for Strided<BC, HC> {
             type Ref = Length;
             /// The length of list `index`.
             #[inline(always)]
@@ -709,7 +711,7 @@ pub mod offsets {
             }
         }
 
-        impl<BC: Lengths, HC: IndexAs<u64>> Lengths for Strides<BC, HC> {
+        impl<BC: Lengths, HC: IndexAs<u64>> Lengths for Strided<BC, HC> {
             #[inline(always)]
             fn bounds(&self, index: usize) -> (u64, u64) {
                 let length = self.head.index_as(1);
@@ -779,7 +781,7 @@ pub mod offsets {
             }
         }
 
-        impl<BC: LengthsContainer> LengthsContainer for Strides<BC> {
+        impl<BC: LengthsContainer> LengthsContainer for Strided<BC> {
             fn extend_with_extent(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>, extent: (u64, u64)) {
                 if range.is_empty() { return; }
                 debug_assert_eq!(extent, other.extent(range.clone()));
@@ -817,6 +819,153 @@ pub mod offsets {
                         self.bounds.extend_with_extent(other.bounds, index .. spill_end, (spill_lower, spill_upper));
                     }
                 }
+            }
+        }
+
+        impl<'a, BC: AsBytes<'a>> AsBytes<'a> for Strided<BC, &'a [u64]> {
+            const SLICE_COUNT: usize = 1 + BC::SLICE_COUNT;
+            #[inline]
+            fn get_byte_slice(&self, index: usize) -> (u64, &'a [u8]) {
+                debug_assert!(index < Self::SLICE_COUNT);
+                if index < 1 {
+                    (8u64, bytemuck::cast_slice(self.head))
+                } else {
+                    self.bounds.get_byte_slice(index - 1)
+                }
+            }
+        }
+        impl<'a, BC: FromBytes<'a>> FromBytes<'a> for Strided<BC, &'a [u64]> {
+            const SLICE_COUNT: usize = 1 + BC::SLICE_COUNT;
+            #[inline(always)]
+            fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self {
+                let head: &[u64] = bytemuck::try_cast_slice(bytes.next().expect("Iterator exhausted prematurely")).unwrap();
+                let bounds = BC::from_bytes(bytes);
+                Self { head, bounds }
+            }
+            #[inline(always)]
+            fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
+                let (head, _) = store.get(*offset); *offset += 1;
+                debug_assert!(head.len() >= 2, "Strided::from_store: head slice too short (len {})", head.len());
+                let bounds = BC::from_store(store, offset);
+                Self { head, bounds }
+            }
+            fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+                sizes.push(8); // head: [stride, length]
+                BC::element_sizes(sizes)
+            }
+            fn validate(slices: &[(&[u64], u8)]) -> Result<(), String> {
+                if slices.is_empty() || slices[0].0.len() < 2 {
+                    return Err("Strided: head slice must have at least 2 elements (stride, length)".into());
+                }
+                BC::validate(&slices[1..])
+            }
+        }
+
+        impl<BC: LengthsContainer> Strided<BC> {
+            pub fn new(stride: u64, length: u64) -> Self {
+                Self { head: [stride, length], bounds: BC::default() }
+            }
+            /// Pushes the length of the next list.
+            #[inline(always)]
+            pub fn push(&mut self, item: Length) {
+                if !self.bounds.is_empty() {
+                    self.bounds.push(&item);
+                }
+                else if self.head[1] == 0 {
+                    self.head = [item.0, 1];
+                }
+                else if item.0 == self.head[0] {
+                    self.head[1] += 1;
+                }
+                else {
+                    self.bounds.push(&item);
+                }
+            }
+            #[inline(always)]
+            pub fn clear(&mut self) {
+                self.head = [0, 0];
+                self.bounds.clear();
+            }
+        }
+
+        impl Strided {
+            /// Removes the last element, if non-empty.
+            ///
+            /// If empty, will trip a debug assert, but wrap in release.
+            #[inline(always)]
+            pub fn pop(&mut self) {
+                debug_assert!(self.len() > 0);
+                if self.bounds.is_empty() { self.head[1] -= 1; }
+                else { self.bounds.pop(); }
+            }
+        }
+
+        impl<BC: Len, HC: IndexAs<u64>> Strided<BC, HC> {
+            #[inline(always)] pub fn strided(&self) -> Option<u64> {
+                if self.bounds.is_empty() {
+                    Some(self.head.index_as(0))
+                }
+                else { None }
+            }
+        }
+    }
+
+    /// The deprecated absolute-uppers predecessor of [`Strided`].
+    #[allow(deprecated)]
+    mod strides {
+
+        use alloc::{vec::Vec, string::String};
+        use core::ops::Deref;
+        use crate::{Container, Borrow, Index, IndexAs, Len, Push, Clear, AsBytes, FromBytes};
+
+        /// Columnar store for non-decreasing `u64` offsets with stride optimization.
+        ///
+        /// `head` holds `[stride, length]`: when the first `length` offsets follow a
+        /// regular stride pattern (`(i+1) * stride`), they are stored implicitly.
+        /// Remaining offsets go into `bounds`. In the owned form `head` is `[u64; 2]`;
+        /// in the borrowed form it is `&[u64]` of length 2.
+        #[derive(Copy, Clone, Debug, Default)]
+        #[deprecated(note = "renamed to `Strided`, whose container contract is list lengths \
+            rather than absolute upper bounds; reads of `Strides` remain available, writes \
+            must migrate (see the CHANGELOG)")]
+        pub struct Strides<BC = Vec<u64>, HC = [u64; 2]> {
+            pub head: HC,
+            pub bounds: BC,
+        }
+
+        impl Borrow for Strides {
+            type Ref<'a> = u64;
+            type Borrowed<'a> = Strides<&'a [u64], &'a [u64]>;
+
+            #[inline(always)] fn borrow<'a>(&'a self) -> Self::Borrowed<'a> { Strides { head: &self.head, bounds: &self.bounds[..] } }
+            #[inline(always)] fn reborrow<'b, 'a: 'b>(item: Self::Borrowed<'a>) -> Self::Borrowed<'b> where Self: 'a {
+                Strides { head: item.head, bounds: item.bounds }
+            }
+            #[inline(always)] fn reborrow_ref<'b, 'a: 'b>(item: Self::Ref<'a>) -> Self::Ref<'b> where Self: 'a { item }
+        }
+
+        impl Container for Strides {
+            fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
+                self.bounds.reserve_for(selves.map(|x| x.bounds))
+            }
+        }
+
+        impl<'a> Push<&'a u64> for Strides { #[inline(always)] fn push(&mut self, item: &'a u64) { self.push(*item) } }
+        impl Push<u64> for Strides { #[inline(always)] fn push(&mut self, item: u64) { self.push(item) } }
+        impl Clear for Strides { #[inline(always)] fn clear(&mut self) { self.clear() } }
+
+        impl<BC: Len, HC: IndexAs<u64>> Len for Strides<BC, HC> {
+            #[inline(always)]
+            fn len(&self) -> usize { self.head.index_as(1) as usize + self.bounds.len() }
+        }
+        impl<BC: IndexAs<u64>, HC: IndexAs<u64>> Index for Strides<BC, HC> {
+            type Ref = u64;
+            #[inline(always)]
+            fn get(&self, index: usize) -> Self::Ref {
+                let index = index as u64;
+                let length = self.head.index_as(1);
+                let stride = self.head.index_as(0);
+                if index < length { (index+1) * stride } else { self.bounds.index_as((index - length) as usize) }
             }
         }
 
@@ -859,34 +1008,26 @@ pub mod offsets {
             }
         }
 
-        impl<BC: LengthsContainer> Strides<BC> {
+        impl Strides {
             pub fn new(stride: u64, length: u64) -> Self {
-                Self { head: [stride, length], bounds: BC::default() }
+                Self { head: [stride, length], bounds: Vec::default() }
             }
-            /// Pushes the length of the next list.
             #[inline(always)]
-            pub fn push(&mut self, item: Length) {
-                if !self.bounds.is_empty() {
-                    self.bounds.push(&item);
+            pub fn push(&mut self, item: u64) {
+                if self.head[1] == 0 {
+                    self.head[0] = item;
+                    self.head[1] = 1;
                 }
-                else if self.head[1] == 0 {
-                    self.head = [item.0, 1];
+                else if !self.bounds.is_empty() {
+                    self.bounds.push(item);
                 }
-                else if item.0 == self.head[0] {
+                else if item == self.head[0] * (self.head[1] + 1) {
                     self.head[1] += 1;
                 }
                 else {
-                    self.bounds.push(&item);
+                    self.bounds.push(item);
                 }
             }
-            #[inline(always)]
-            pub fn clear(&mut self) {
-                self.head = [0, 0];
-                self.bounds.clear();
-            }
-        }
-
-        impl Strides {
             /// Removes the last element, if non-empty.
             ///
             /// If empty, will trip a debug assert, but wrap in release.
@@ -895,6 +1036,60 @@ pub mod offsets {
                 debug_assert!(self.len() > 0);
                 if self.bounds.is_empty() { self.head[1] -= 1; }
                 else { self.bounds.pop(); }
+            }
+            #[inline(always)]
+            pub fn clear(&mut self) {
+                self.head = [0, 0];
+                self.bounds.clear();
+            }
+        }
+
+        impl<BC: Deref<Target=[u64]>, HC: IndexAs<u64>> Strides<BC, HC> {
+            #[inline(always)]
+            pub fn bounds(&self, index: usize) -> (usize, usize) {
+                let stride = self.head.index_as(0);
+                let length = self.head.index_as(1);
+                let index = index as u64;
+                let lower = if index == 0 { 0 } else {
+                    let index = index - 1;
+                    if index < length { (index+1) * stride } else { self.bounds[(index - length) as usize] }
+                } as usize;
+                let upper = if index < length { (index+1) * stride } else { self.bounds[(index - length) as usize] } as usize;
+                (lower, upper)
+            }
+        }
+        impl<BC: Len + IndexAs<u64>, HC: IndexAs<u64>> crate::Lengths for Strides<BC, HC> {
+            #[inline(always)]
+            fn bounds(&self, index: usize) -> (u64, u64) {
+                let length = self.head.index_as(1);
+                let stride = self.head.index_as(0);
+                let upper = |index: u64| {
+                    if index < length { (index + 1) * stride } else { self.bounds.index_as((index - length) as usize) }
+                };
+                let lower = if index == 0 { 0 } else { upper(index as u64 - 1) };
+                (lower, upper(index as u64))
+            }
+            #[inline(always)]
+            fn total(&self) -> u64 {
+                if self.bounds.is_empty() {
+                    self.head.index_as(0) * self.head.index_as(1)
+                } else {
+                    self.bounds.index_as(self.bounds.len() - 1)
+                }
+            }
+        }
+
+        use super::Fixeds;
+        impl<const K: u64> core::convert::TryFrom<Strides> for Fixeds<K> {
+            type Error = Strides;
+            fn try_from(item: Strides) -> Result<Self, Self::Error> {
+                if item.strided() == Some(K) { Ok( Self { count: item.head[1] } ) } else { Err(item) }
+            }
+        }
+        impl<'a, const K: u64> core::convert::TryFrom<Strides<&'a [u64], &'a [u64]>> for Fixeds<K, &'a u64> {
+            type Error = Strides<&'a [u64], &'a [u64]>;
+            fn try_from(item: Strides<&'a [u64], &'a [u64]>) -> Result<Self, Self::Error> {
+                if item.strided() == Some(K) { Ok( Self { count: &item.head[1] } ) } else { Err(item) }
             }
         }
 
@@ -908,6 +1103,7 @@ pub mod offsets {
         }
     }
 
+
     #[cfg(test)]
     mod test {
         use alloc::vec::Vec;
@@ -916,9 +1112,9 @@ pub mod offsets {
 
             use crate::common::{Index, Push, Len};
             use crate::{Borrow, Vecs};
-            use crate::primitive::offsets::{Strides, Fixeds};
+            use crate::primitive::offsets::{Strided, Fixeds};
 
-            let mut cols = Vecs::<Vec::<i32>, Strides>::default();
+            let mut cols = Vecs::<Vec::<i32>, Strided>::default();
             for i in 0 .. 100 {
                 cols.push(&[1i32, 2, i]);
             }
@@ -934,7 +1130,7 @@ pub mod offsets {
             }
 
             let mut cols = Vecs {
-                bounds: Strides::<crate::lengths::Uppers>::new(3, cols.bounds.count),
+                bounds: Strided::<crate::lengths::Uppers>::new(3, cols.bounds.count),
                 values: cols.values
             };
 
@@ -943,14 +1139,34 @@ pub mod offsets {
         }
 
         #[test]
+        #[allow(deprecated)]
+        fn strides_deprecated_reads() {
+            use crate::common::{Index, Len};
+            use crate::{Lengths, Vecs};
+            use crate::primitive::offsets::Strides;
+            // The deprecated type keeps its absolute-uppers meaning: pushes
+            // record uppers, and reads (directly or through Vecs) still work.
+            let mut strides = Strides::default();
+            for upper in [3u64, 6, 9, 11, 11, 15] {
+                strides.push(upper);
+            }
+            assert_eq!(strides.len(), 6);
+            assert_eq!(Lengths::bounds(&strides, 3), (9, 11));
+            assert_eq!(strides.total(), 15);
+            let cols = Vecs { bounds: strides, values: (0..15u8).collect::<Vec<_>>() };
+            let list: Vec<u8> = (&cols).get(5).into_iter().copied().collect();
+            assert_eq!(list, vec![11, 12, 13, 14]);
+        }
+
+        #[test]
         fn stride_bounds_and_rank() {
             use alloc::vec;
             use crate::lengths::Lengths;
             use crate::common::Len;
-            use crate::primitive::offsets::Strides;
+            use crate::primitive::offsets::Strided;
             use crate::lengths::Length;
 
-            let mut strides: Strides = Strides::default();
+            let mut strides: Strided = Strided::default();
             for length in [3u64, 3, 3, 2, 0, 4] {
                 strides.push(Length(length));
             }
@@ -979,11 +1195,11 @@ pub mod offsets {
             use crate::lengths::{Lengths, MaybeEmpty};
             use crate::common::Len;
             use crate::{Borrow, Container};
-            use crate::primitive::offsets::Strides;
+            use crate::primitive::offsets::Strided;
             use crate::lengths::Length;
 
             let lengths = [5u64, 5, 5, 5, 0, 3, 0, 7, 5];
-            let mut strides = Strides::<MaybeEmpty>::default();
+            let mut strides = Strided::<MaybeEmpty>::default();
             for &length in lengths.iter() {
                 strides.push(Length(length));
             }
@@ -1001,7 +1217,7 @@ pub mod offsets {
 
             // Extending exercises head bulk-extension, head absorption of
             // conforming spilled lengths, and spill-to-spill delegation.
-            let mut target = Strides::<MaybeEmpty>::default();
+            let mut target = Strided::<MaybeEmpty>::default();
             target.extend_from_self(strides.borrow(), 1 .. lengths.len());
             assert_eq!(target.len(), lengths.len() - 1);
             let mut lower = 0;
@@ -1017,13 +1233,13 @@ pub mod offsets {
             use alloc::vec::Vec;
             use crate::common::{Index, Push, Len};
             use crate::{Borrow, Container, Vecs};
-            use crate::primitive::offsets::Strides;
+            use crate::primitive::offsets::Strided;
 
-            let mut source = Vecs::<Vec<i32>, Strides>::default();
+            let mut source = Vecs::<Vec<i32>, Strided>::default();
             for i in 0..10 {
                 source.push([i, i+1, i+2]);
             }
-            let mut target = Vecs::<Vec<i32>, Strides>::default();
+            let mut target = Vecs::<Vec<i32>, Strided>::default();
             target.push([42]);
             target.extend_from_self(source.borrow(), 2..5);
             assert_eq!(target.len(), 4);

@@ -1,13 +1,13 @@
-//! Benchmarks comparing the lengths containers: `Uppers`, `Strides`, `NeverEmpty`, `MaybeEmpty`.
+//! Benchmarks comparing the lengths containers: `Uppers`, `Strided`, `NeverEmpty`, `MaybeEmpty`.
 //!
 //! Each operation runs over two length distributions: `varied` (lengths 1..=16,
-//! which spills `Strides` almost immediately) and `strided` (uniform length 8,
-//! which `Strides` absorbs entirely into its head).
+//! which spills `Strided` almost immediately) and `strided` (uniform length 8,
+//! which `Strided` absorbs entirely into its head).
 
 use bencher::{benchmark_group, benchmark_main, black_box, Bencher};
 use columnar::{Length, LengthsContainer};
 use columnar::{NeverEmpty, MaybeEmpty, Uppers};
-use columnar::primitive::offsets::Strides;
+use columnar::primitive::offsets::Strided;
 
 const LISTS: usize = 4096;
 
@@ -73,38 +73,38 @@ fn _extend<BC: LengthsContainer>(bencher: &mut Bencher, lengths: Vec<u64>) {
 }
 
 fn uppers_push_varied(b: &mut Bencher) { _push::<Uppers>(b, lengths_varied()); }
-fn strides_push_varied(b: &mut Bencher) { _push::<Strides>(b, lengths_varied()); }
+fn strides_push_varied(b: &mut Bencher) { _push::<Strided>(b, lengths_varied()); }
 fn never_empty_push_varied(b: &mut Bencher) { _push::<NeverEmpty>(b, lengths_varied()); }
 fn maybe_empty_push_varied(b: &mut Bencher) { _push::<MaybeEmpty>(b, lengths_varied()); }
 fn uppers_push_strided(b: &mut Bencher) { _push::<Uppers>(b, lengths_strided()); }
-fn strides_push_strided(b: &mut Bencher) { _push::<Strides>(b, lengths_strided()); }
+fn strides_push_strided(b: &mut Bencher) { _push::<Strided>(b, lengths_strided()); }
 fn never_empty_push_strided(b: &mut Bencher) { _push::<NeverEmpty>(b, lengths_strided()); }
 fn maybe_empty_push_strided(b: &mut Bencher) { _push::<MaybeEmpty>(b, lengths_strided()); }
 
 fn uppers_bounds_varied(b: &mut Bencher) { _bounds::<Uppers>(b, lengths_varied()); }
-fn strides_bounds_varied(b: &mut Bencher) { _bounds::<Strides>(b, lengths_varied()); }
+fn strides_bounds_varied(b: &mut Bencher) { _bounds::<Strided>(b, lengths_varied()); }
 fn never_empty_bounds_varied(b: &mut Bencher) { _bounds::<NeverEmpty>(b, lengths_varied()); }
 fn maybe_empty_bounds_varied(b: &mut Bencher) { _bounds::<MaybeEmpty>(b, lengths_varied()); }
 fn uppers_bounds_strided(b: &mut Bencher) { _bounds::<Uppers>(b, lengths_strided()); }
-fn strides_bounds_strided(b: &mut Bencher) { _bounds::<Strides>(b, lengths_strided()); }
+fn strides_bounds_strided(b: &mut Bencher) { _bounds::<Strided>(b, lengths_strided()); }
 fn never_empty_bounds_strided(b: &mut Bencher) { _bounds::<NeverEmpty>(b, lengths_strided()); }
 fn maybe_empty_bounds_strided(b: &mut Bencher) { _bounds::<MaybeEmpty>(b, lengths_strided()); }
 
 fn uppers_rank_varied(b: &mut Bencher) { _rank::<Uppers>(b, lengths_varied()); }
-fn strides_rank_varied(b: &mut Bencher) { _rank::<Strides>(b, lengths_varied()); }
+fn strides_rank_varied(b: &mut Bencher) { _rank::<Strided>(b, lengths_varied()); }
 fn never_empty_rank_varied(b: &mut Bencher) { _rank::<NeverEmpty>(b, lengths_varied()); }
 fn maybe_empty_rank_varied(b: &mut Bencher) { _rank::<MaybeEmpty>(b, lengths_varied()); }
 fn uppers_rank_strided(b: &mut Bencher) { _rank::<Uppers>(b, lengths_strided()); }
-fn strides_rank_strided(b: &mut Bencher) { _rank::<Strides>(b, lengths_strided()); }
+fn strides_rank_strided(b: &mut Bencher) { _rank::<Strided>(b, lengths_strided()); }
 fn never_empty_rank_strided(b: &mut Bencher) { _rank::<NeverEmpty>(b, lengths_strided()); }
 fn maybe_empty_rank_strided(b: &mut Bencher) { _rank::<MaybeEmpty>(b, lengths_strided()); }
 
 fn uppers_extend_varied(b: &mut Bencher) { _extend::<Uppers>(b, lengths_varied()); }
-fn strides_extend_varied(b: &mut Bencher) { _extend::<Strides>(b, lengths_varied()); }
+fn strides_extend_varied(b: &mut Bencher) { _extend::<Strided>(b, lengths_varied()); }
 fn never_empty_extend_varied(b: &mut Bencher) { _extend::<NeverEmpty>(b, lengths_varied()); }
 fn maybe_empty_extend_varied(b: &mut Bencher) { _extend::<MaybeEmpty>(b, lengths_varied()); }
 fn uppers_extend_strided(b: &mut Bencher) { _extend::<Uppers>(b, lengths_strided()); }
-fn strides_extend_strided(b: &mut Bencher) { _extend::<Strides>(b, lengths_strided()); }
+fn strides_extend_strided(b: &mut Bencher) { _extend::<Strided>(b, lengths_strided()); }
 fn never_empty_extend_strided(b: &mut Bencher) { _extend::<NeverEmpty>(b, lengths_strided()); }
 fn maybe_empty_extend_strided(b: &mut Bencher) { _extend::<MaybeEmpty>(b, lengths_strided()); }
 

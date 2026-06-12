@@ -993,7 +993,7 @@ mod test {
     #[test]
     fn extent_matches_bounds() {
         use super::{MaybeEmpty, NeverEmpty};
-        use crate::primitive::offsets::Strides;
+        use crate::primitive::offsets::Strided;
         fn check<B: Lengths>(bounds: &B) {
             for start in 0..bounds.len() {
                 for end in start + 1 ..= bounds.len() {
@@ -1005,8 +1005,8 @@ mod test {
         let mut uppers = Uppers::default();
         let mut maybe = MaybeEmpty::default();
         let mut never = NeverEmpty::default();
-        let mut strides = Strides::<Uppers>::default();
-        let mut strided: Strides = Strides::default();
+        let mut strides = Strided::<Uppers>::default();
+        let mut strided: Strided = Strided::default();
         for &length in lengths.iter() {
             uppers.push(Length(length));
             maybe.push(Length(length));
@@ -1026,7 +1026,7 @@ mod test {
     #[test]
     fn extents_matches_extent() {
         use super::{MaybeEmpty, NeverEmpty};
-        use crate::primitive::offsets::Strides;
+        use crate::primitive::offsets::Strided;
         fn check<B: Lengths>(bounds: &B) {
             // Ascending, disjoint ranges with adjacency, gaps, and exact repeats.
             let mut ranges = Vec::new();
@@ -1046,8 +1046,8 @@ mod test {
         let mut uppers = Uppers::default();
         let mut maybe = MaybeEmpty::default();
         let mut never = NeverEmpty::default();
-        let mut strides = Strides::<NeverEmpty>::default();
-        let mut strided: Strides = Strides::default();
+        let mut strides = Strided::<NeverEmpty>::default();
+        let mut strided: Strided = Strided::default();
         for &length in lengths.iter() {
             uppers.push(Length(length));
             maybe.push(Length(length));
