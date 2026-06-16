@@ -8,6 +8,43 @@
 extern crate alloc;
 use alloc::vec;
 
+/// Derived types live in their own module that deliberately imports nothing
+/// from `alloc`. The `Columnar` derive must emit fully-qualified paths for
+/// every type it references (`Vec`, `String`, `Range`, ...); if it emits a
+/// bare name, name resolution fails here because the name is not in scope.
+mod derives {
+    use columnar::Columnar;
+
+    /// Derived struct with named fields.
+    #[derive(Columnar)]
+    pub struct DerivedStruct {
+        a: u64,
+        b: u8,
+    }
+
+    /// Derived tuple struct.
+    #[derive(Columnar)]
+    pub struct DerivedTuple(u64, u8);
+
+    /// Mixed enum: unit, tuple, and named variants. Exercises the enum
+    /// container whose default type parameters are `Vec<u8>`/`Vec<u64>`.
+    #[derive(Columnar)]
+    pub enum DerivedEnum {
+        Unit,
+        Tuple(u64),
+        Named { x: u8 },
+    }
+
+    /// All-unit enum, which uses the separate `derive_tags` code path with a
+    /// `Vec<u8>` default type parameter.
+    #[derive(Columnar, Copy, Clone)]
+    pub enum DerivedUnitEnum {
+        A,
+        B,
+        C,
+    }
+}
+
 /// Exercise core columnar types without `std`.
 pub fn smoke_test() {
     use columnar::{Push, Len, Index, Borrow};

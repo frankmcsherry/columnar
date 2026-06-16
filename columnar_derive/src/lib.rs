@@ -332,7 +332,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
                 fn from_store(store: &::columnar::bytes::indexed::DecodedStore<'columnar>, offset: &mut usize) -> Self {
                     Self { #(#names: ::columnar::FromBytes::from_store(store, offset),)* }
                 }
-                fn element_sizes(sizes: &mut Vec<usize>) -> ::core::result::Result<(), String> {
+                fn element_sizes(sizes: &mut ::columnar::_derive::Vec<usize>) -> ::core::result::Result<(), ::columnar::_derive::String> {
                     #(<#container_types>::element_sizes(sizes)?;)*
                     Ok(())
                 }
@@ -401,7 +401,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
 
             impl < #( #container_types: ::columnar::Container ),* > ::columnar::Container for #c_ident < #( #container_types ),* > {
                 #[inline(always)]
-                fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+                fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: ::core::ops::Range<usize>) {
                     #( self.#names.extend_from_self(other.#names, range.clone()); )*
                 }
 
@@ -527,7 +527,7 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
                 *offset += 1;
                 Self { count: w.first().unwrap_or(&0) }
             }
-            fn element_sizes(sizes: &mut Vec<usize>) -> ::core::result::Result<(), String> {
+            fn element_sizes(sizes: &mut ::columnar::_derive::Vec<usize>) -> ::core::result::Result<(), ::columnar::_derive::String> {
                 sizes.push(8);
                 Ok(())
             }
@@ -558,7 +558,7 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
 
         impl ::columnar::Container for #c_ident {
             #[inline(always)]
-            fn extend_from_self(&mut self, _other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+            fn extend_from_self(&mut self, _other: Self::Borrowed<'_>, range: ::core::ops::Range<usize>) {
                 self.count += range.len() as u64;
             }
 
@@ -615,7 +615,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
             /// Derived columnar container for an enum.
             #derive
             #[allow(non_snake_case)]
-            #vis struct #c_ident < #(#container_types,)* CVar = Vec<u8>, COff = Vec<u64>, >{
+            #vis struct #c_ident < #(#container_types,)* CVar = ::columnar::_derive::Vec<u8>, COff = ::columnar::_derive::Vec<u64>, >{
                 #(
                     /// Container for #names.
                     pub #names : #container_types,
@@ -938,7 +938,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                         indexes: ::columnar::FromBytes::from_store(store, offset),
                     }
                 }
-                fn element_sizes(sizes: &mut Vec<usize>) -> ::core::result::Result<(), String> {
+                fn element_sizes(sizes: &mut ::columnar::_derive::Vec<usize>) -> ::core::result::Result<(), ::columnar::_derive::String> {
                     #(<#container_types>::element_sizes(sizes)?;)*
                     <::columnar::Discriminant<CVar, COff>>::element_sizes(sizes)?;
                     Ok(())
@@ -1097,7 +1097,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
             impl < #(#container_names : ::columnar::Container + ::columnar::Len),* > ::columnar::Container for #c_ident < #(#container_names),* > {
                 #[inline(always)]
-                fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+                fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: ::core::ops::Range<usize>) {
                     if !range.is_empty() {
                         #( let #len_idents = ::columnar::Len::len(&self.#names); )*
                         #( let mut #count_idents = 0usize; )*
@@ -1206,7 +1206,7 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
     quote! {
         /// Derived columnar container for all-unit enum.
         #derive
-        #vis struct #c_ident <CVar = Vec<u8>> {
+        #vis struct #c_ident <CVar = ::columnar::_derive::Vec<u8>> {
             /// Container for variant.
             pub variant: CVar,
         }
@@ -1284,7 +1284,7 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
             fn from_store(store: &::columnar::bytes::indexed::DecodedStore<'columnar>, offset: &mut usize) -> Self {
                 Self { variant: ::columnar::FromBytes::from_store(store, offset) }
             }
-            fn element_sizes(sizes: &mut Vec<usize>) -> ::core::result::Result<(), String> {
+            fn element_sizes(sizes: &mut ::columnar::_derive::Vec<usize>) -> ::core::result::Result<(), ::columnar::_derive::String> {
                 CVar::element_sizes(sizes)
             }
         }
@@ -1318,7 +1318,7 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
 
         impl<CV: ::columnar::common::PushIndexAs<u8>> ::columnar::Container for #c_ident <CV> {
             #[inline(always)]
-            fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: std::ops::Range<usize>) {
+            fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: ::core::ops::Range<usize>) {
                 self.variant.extend_from_self(other.variant, range);
             }
 
