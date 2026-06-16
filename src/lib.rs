@@ -31,6 +31,15 @@ mod rc;
 
 pub use bytemuck;
 
+/// Re-exports used by the `Columnar` derive macro so that generated code is
+/// `no_std`-compatible without requiring the deriving crate to `extern crate
+/// alloc`. Not public API.
+#[doc(hidden)]
+pub mod _derive {
+    pub use alloc::string::String;
+    pub use alloc::vec::Vec;
+}
+
 pub use vector::Vecs;
 pub use string::Strings;
 pub use sums::{rank_select::{RankSelect, Cursor as RankSelectCursor}, result::Results, option::Options, discriminant::Discriminant};

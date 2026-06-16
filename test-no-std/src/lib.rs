@@ -8,6 +8,28 @@
 extern crate alloc;
 use alloc::vec;
 
+use columnar::Columnar;
+
+/// Derived struct with named fields, to check the derive macro emits `no_std`
+/// generated code.
+#[derive(Columnar)]
+pub struct DerivedStruct {
+    a: u64,
+    b: u8,
+}
+
+/// Derived tuple struct.
+#[derive(Columnar)]
+pub struct DerivedTuple(u64, u8);
+
+/// Derived enum, to check the enum code path of the derive macro.
+#[derive(Columnar)]
+pub enum DerivedEnum {
+    Unit,
+    Tuple(u64),
+    Named { x: u8 },
+}
+
 /// Exercise core columnar types without `std`.
 pub fn smoke_test() {
     use columnar::{Push, Len, Index, Borrow};
