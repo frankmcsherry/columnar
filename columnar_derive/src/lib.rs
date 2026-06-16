@@ -615,7 +615,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
             /// Derived columnar container for an enum.
             #derive
             #[allow(non_snake_case)]
-            #vis struct #c_ident < #(#container_types,)* CVar = Vec<u8>, COff = Vec<u64>, >{
+            #vis struct #c_ident < #(#container_types,)* CVar = ::columnar::_derive::Vec<u8>, COff = ::columnar::_derive::Vec<u64>, >{
                 #(
                     /// Container for #names.
                     pub #names : #container_types,
@@ -1206,7 +1206,7 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
     quote! {
         /// Derived columnar container for all-unit enum.
         #derive
-        #vis struct #c_ident <CVar = Vec<u8>> {
+        #vis struct #c_ident <CVar = ::columnar::_derive::Vec<u8>> {
             /// Container for variant.
             pub variant: CVar,
         }
