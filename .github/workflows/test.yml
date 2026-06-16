@@ -26,10 +26,10 @@ jobs:
       - name: Cargo check
         run: cargo check
       - name: Cargo check (all features)
-        run: cargo check --workspace --all-targets --all-features
+        run: cargo check --workspace --all-targets --all-features --exclude test-no-std
       - name: Cargo test
         run: cargo test --workspace --all-targets
       - name: Cargo test (all features)
-        run: cargo test --workspace --all-targets --all-features
+        run: cargo test --workspace --all-targets --all-features --exclude test-no-std
       - name: Verify no_std support
         run: cargo check -p test-no-std
