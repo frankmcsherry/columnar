@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1](https://github.com/frankmcsherry/columnar/compare/columnar-v0.13.0...columnar-v0.13.1) - 2026-06-16
+
+### Other
+
+- Make Columnar derive output no_std compatible ([#113](https://github.com/frankmcsherry/columnar/pull/113))
+- Correct Debug implementation for no_std
+- Weaken Stash Debug constraints to only C: Debug
+- Implement Debug for Stash
+- Add Container impl for Stash ([#110](https://github.com/frankmcsherry/columnar/pull/110))
+
 ## [0.13.0](https://github.com/frankmcsherry/columnar/compare/columnar-v0.12.1...columnar-v0.13.0) - 2026-05-23
 
 ### Added
