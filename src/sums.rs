@@ -163,14 +163,113 @@ pub mod rank_select {
             let shift = select_in_word(masked, k);
             if shift >= last_bits as u32 { None } else { Some(64 * block + shift as usize) }
         }
+        /// The position of the first set bit at position `pos` or later, whose
+        /// rank must be `rank` (i.e., exactly `rank` set bits precede `pos`).
+        ///
+        /// Equivalent to `select(rank)`, but optimized for a nearby answer: it
+        /// scans words from `pos`, falling back to `select(rank)` only if the
+        /// scan leaves `pos`'s chunk. A typical call (the next set bit within a
+        /// word or two) costs a word read, and the worst case is bounded by a
+        /// chunk scan plus a `select`.
+        #[inline]
+        pub fn select_from(&self, pos: usize, rank: u64) -> Option<usize> {
+            debug_assert_eq!(self.rank(pos), rank as usize);
+            let vlen = self.values.values.len();
+            let total_words = vlen + 1; // Trailing valid bits live in the tail.
+            let mut block = pos / 64;
+            if block > vlen { return None; }
+            // Scan at most through the end of `pos`'s chunk; the binary search
+            // in `select` can only be worth it beyond that.
+            let scan_limit = core::cmp::min(WORDS_PER_CHUNK * (block / WORDS_PER_CHUNK + 1), total_words);
+            let word_at = |block: usize| -> u64 {
+                if block < vlen { self.values.values.index_as(block) }
+                else {
+                    let bits = self.values.tail.index_as(1);
+                    let mask = if bits >= 64 { !0u64 } else { (1u64 << bits) - 1 };
+                    self.values.tail.index_as(0) & mask
+                }
+            };
+            let mut word = word_at(block) & (!0u64 << (pos % 64));
+            loop {
+                if word != 0 {
+                    return Some(64 * block + word.trailing_zeros() as usize);
+                }
+                block += 1;
+                if block >= total_words { return None; }
+                if block >= scan_limit { return self.select(rank); }
+                word = word_at(block);
+            }
+        }
+
+        /// The position of the `rank`-th *unset* bit (0-indexed), if it exists.
+        ///
+        /// Mirrors [`Self::select`], using the complemented counts: the number
+        /// of zeros before the end of chunk `c` is `BITS_PER_CHUNK * (c + 1) - counts[c]`,
+        /// which is monotone in `c` and so supports the same binary search.
+        #[inline]
+        pub fn select_zero(&self, rank: u64) -> Option<usize> {
+            // Step one: find the BITS_PER_CHUNK-bit chunk containing the rank-th zero.
+            let chunk = {
+                let mut lo = 0;
+                let mut hi = self.counts.len();
+                while lo < hi {
+                    let mid = lo + (hi - lo) / 2;
+                    let zeros = (BITS_PER_CHUNK as u64) * (mid as u64 + 1) - self.counts.index_as(mid);
+                    if zeros <= rank { lo = mid + 1; } else { hi = mid; }
+                }
+                lo
+            };
+            // Number of zeros strictly before `chunk`'s BITS_PER_CHUNK bits.
+            let mut count = if chunk > 0 { (BITS_PER_CHUNK as u64) * (chunk as u64) - self.counts.index_as(chunk - 1) } else { 0 };
+
+            // Step two: find the 64-bit word within `chunk` containing the rank-th zero.
+            let mut block = WORDS_PER_CHUNK * chunk;
+            while block < self.values.values.len() {
+                let zeros = 64 - self.values.values.index_as(block).count_ones() as u64;
+                if count + zeros > rank { break; }
+                count += zeros;
+                block += 1;
+            }
+
+            // Step three: locate the zero within the chosen word's complement,
+            // or return `None` if `rank` is past the total zero count.
+            let (last_word, last_bits) = if block == self.values.values.len() {
+                (self.values.tail.index_as(0), self.values.tail.index_as(1) as usize)
+            } else {
+                (self.values.values.index_as(block), 64)
+            };
+            // Complement, and mask off any padding past the last valid bit.
+            let masked = if last_bits == 64 { !last_word } else { !last_word & ((1u64 << last_bits) - 1) };
+            let k = (rank - count) as u32;
+            let shift = select_in_word(masked, k);
+            if shift >= last_bits as u32 { None } else { Some(64 * block + shift as usize) }
+        }
+    }
+
+    /// Position of the `k`-th set bit of `w` (0-indexed; it must exist), and `w` with
+    /// all bits at or below that position cleared.
+    #[inline(always)]
+    fn consume_through(w: u64, k: u32) -> (u32, u64) {
+        debug_assert!(k < w.count_ones());
+        let bit = select_in_word(w, k);
+        let w = w & (!0u64 << bit);
+        (bit, w & w.wrapping_sub(1))
     }
 
     /// Position of the `k`-th set bit (0-indexed) within a 64-bit word. Returns 64 if
-    /// the word has fewer than `k + 1` set bits. Portable, ~6 conditional shifts based
-    /// on byte/half popcounts — independent of bit density, unlike a linear scan.
+    /// the word has fewer than `k + 1` set bits.
+    ///
+    /// Small `k` skips set bits one at a time — a clear-lowest-set-bit per skipped
+    /// bit, then a `trailing_zeros` — which beats the fixed chain below until around
+    /// eight skipped bits. Beyond that, ~6 conditional shifts based on byte/half
+    /// popcounts — independent of bit density, unlike a linear scan.
     #[inline]
     fn select_in_word(mut w: u64, mut k: u32) -> u32 {
         if k >= w.count_ones() { return 64; }
+        if k < 8 {
+            for _ in 0..k { w &= w.wrapping_sub(1); }
+            return w.trailing_zeros();
+        }
         let mut pos = 0u32;
         // Halve the search range repeatedly. At each step, popcount of the low half
         // tells us whether the k-th bit is in the low half (recurse) or the high half
@@ -285,6 +384,7 @@ pub mod rank_select {
         /// is recovering monotone Vecs bounds from an RS-encoded unary bitvector:
         /// each call returns the next bound's bit position, no per-call re-probing
         /// of `counts`. Returns `None` once all set bits have been emitted.
+        #[inline(always)]
         pub fn next_one(&mut self) -> Option<usize> {
             loop {
                 if self.word_remaining != 0 {
@@ -309,6 +409,7 @@ pub mod rank_select {
         /// Common pattern: the lookup-walk loop in a hash table that probes consecutive
         /// slots, deciding what to do based on whether each slot is occupied. Each
         /// call is a single bit-test + an occasional word-boundary crossing.
+        #[inline]
         pub fn step(&mut self) -> Option<bool> {
             if self.bit_pos >= self.total_bits { return None; }
             let bit_in_word = self.bit_pos & 63;
@@ -343,6 +444,7 @@ pub mod rank_select {
         ///
         /// `target` must be `>= self.pos()` (forward-only; debug-asserts otherwise).
         /// Returns `false` if `target` is past the end of the bitvector.
+        #[inline]
         pub fn seek_to_pos(&mut self, target: usize) -> bool {
             debug_assert!(target >= self.bit_pos, "seek_to_pos is forward-only");
             if target >= self.total_bits {
@@ -376,6 +478,64 @@ pub mod rank_select {
             true
         }
 
+        /// Reposition the cursor to bit 0, as freshly created.
+        #[inline]
+        pub fn rewind(&mut self) {
+            let rs = self.rs;
+            *self = rs.cursor();
+        }
+
+        /// The position of the `target`-th set bit (0-indexed), for a `target`
+        /// *behind* the cursor: `target < self.rank()` (debug-asserted).
+        ///
+        /// The bits the cursor has consumed are recoverable from the underlying
+        /// storage, so this re-derives the state: a backward word walk to the
+        /// chunk boundary for nearby targets, and a full [`RankSelect::select`]
+        /// beyond it. After return the cursor state is exactly as if it had
+        /// arrived at the target moving forward.
+        pub fn seek_to_rank_back(&mut self, target: u64) -> Option<usize> {
+            debug_assert!(target < self.rank, "seek_to_rank_back is backward-only");
+            let vlen = self.rs.values.values.len();
+            let word_at = |block: usize| -> u64 {
+                if block < vlen { self.rs.values.values.index_as(block) }
+                else if block == vlen {
+                    let bits = self.rs.values.tail.index_as(1);
+                    let mask = if bits >= 64 { !0u64 } else { (1u64 << bits) - 1 };
+                    self.rs.values.tail.index_as(0) & mask
+                }
+                else { 0 }
+            };
+            // Ones strictly before the cursor's current word. The cursor can sit
+            // just past its word (bit 64), so compute the offset relative to it.
+            let bit = self.bit_pos - self.word_idx * 64;
+            let mask = if bit >= 64 { !0u64 } else if bit == 0 { 0 } else { (1u64 << bit) - 1 };
+            let mut before = self.rank - (word_at(self.word_idx) & mask).count_ones() as u64;
+            // Walk backward to the chunk boundary; the binary search in `select`
+            // can only be worth it beyond that.
+            let mut block = self.word_idx;
+            let chunk_floor = (self.word_idx / WORDS_PER_CHUNK) * WORDS_PER_CHUNK;
+            while before > target && block > chunk_floor {
+                block -= 1;
+                before -= word_at(block).count_ones() as u64;
+            }
+            let pos = if before <= target {
+                debug_assert!(before + word_at(block).count_ones() as u64 > target);
+                let (bit, rest) = consume_through(word_at(block), (target - before) as u32);
+                self.word_remaining = rest;
+                block * 64 + bit as usize
+            } else {
+                let pos = self.rs.select(target)?;
+                block = pos / 64;
+                let bit = (pos % 64) as u32;
+                self.word_remaining = word_at(block) & (!0u64 << bit) & !(1u64 << bit);
+                pos
+            };
+            self.word_idx = block;
+            self.rank = target + 1;
+            self.bit_pos = pos + 1;
+            Some(pos)
+        }
+
         /// Jump forward to the `target`-th set bit (0-indexed) and return its
         /// position. Equivalent to [`RankSelect::select`] for the cursor's
         /// current state.
@@ -393,41 +553,70 @@ pub mod rank_select {
         ///
         /// `target` must be `>= self.rank()` (forward-only; debug-asserts otherwise).
         /// Returns `None` if there are fewer than `target + 1` set bits in total.
+        #[inline(always)]
         pub fn seek_to_rank(&mut self, target: u64) -> Option<usize> {
             debug_assert!(target >= self.rank, "seek_to_rank is forward-only");
             // Cheap path: target is within the current word's remaining 1-bits.
             let here_pop = self.word_remaining.count_ones() as u64;
             if target < self.rank + here_pop {
                 let k = (target - self.rank) as u32;
-                let bit_in_word = select_in_word(self.word_remaining, k) as usize;
-                let pos = self.word_idx * 64 + bit_in_word;
-                // Consume up to and including the target bit: clear the lowest k+1 set bits.
-                let mut w = self.word_remaining;
-                for _ in 0..=k { w &= w.wrapping_sub(1); }
-                self.word_remaining = w;
+                let (bit_in_word, rest) = consume_through(self.word_remaining, k);
+                let pos = self.word_idx * 64 + bit_in_word as usize;
+                self.word_remaining = rest;
                 self.rank = target + 1;
                 self.bit_pos = pos + 1;
                 return Some(pos);
             }
-            // Otherwise: jump via chunk binary search, mirroring `select`.
-            let counts = &self.rs.counts;
-            let chunk = {
-                let mut lo = 0;
-                let mut hi = counts.len();
-                while lo < hi {
-                    let mid = lo + (hi - lo) / 2;
-                    if counts.index_as(mid) <= target { lo = mid + 1; } else { hi = mid; }
-                }
-                lo
-            };
-            let mut count = if chunk > 0 { counts.index_as(chunk - 1) } else { 0 };
+            // Middle path: scan words forward to the end of the current chunk,
+            // so that nearby targets cost word reads rather than the binary
+            // search below (which can only pay off past the chunk boundary).
             let vlen = self.rs.values.values.len();
-            let mut block = WORDS_PER_CHUNK * chunk;
-            while block < vlen {
-                let pop = self.rs.values.values.index_as(block).count_ones() as u64;
-                if count + pop > target { break; }
+            let word_at = |block: usize| -> u64 {
+                if block < vlen { self.rs.values.values.index_as(block) }
+                else {
+                    let bits = self.rs.values.tail.index_as(1);
+                    let mask = if bits >= 64 { !0u64 } else { (1u64 << bits) - 1 };
+                    self.rs.values.tail.index_as(0) & mask
+                }
+            };
+            let mut count = self.rank + here_pop;
+            let mut block = self.word_idx + 1;
+            let scan_limit = core::cmp::min(WORDS_PER_CHUNK * (self.word_idx / WORDS_PER_CHUNK + 1), vlen + 1);
+            let mut found = false;
+            while block < scan_limit {
+                let pop = word_at(block).count_ones() as u64;
+                if count + pop > target { found = true; break; }
                 count += pop;
                 block += 1;
+            }
+            if !found {
+                if scan_limit == vlen + 1 {
+                    // Exhausted: every remaining word has been scanned.
+                    self.bit_pos = self.total_bits;
+                    self.word_remaining = 0;
+                    return None;
+                }
+                // Slow path: chunk binary search, mirroring `select`. Chunks at
+                // or before the cursor's own hold at most `target` set bits, so
+                // the search can begin from the cursor's chunk.
+                let counts = &self.rs.counts;
+                let chunk = {
+                    let mut lo = self.word_idx / WORDS_PER_CHUNK;
+                    let mut hi = counts.len();
+                    while lo < hi {
+                        let mid = lo + (hi - lo) / 2;
+                        if counts.index_as(mid) <= target { lo = mid + 1; } else { hi = mid; }
+                    }
+                    lo
+                };
+                count = if chunk > 0 { counts.index_as(chunk - 1) } else { 0 };
+                block = WORDS_PER_CHUNK * chunk;
+                while block < vlen {
+                    let pop = self.rs.values.values.index_as(block).count_ones() as u64;
+                    if count + pop > target { break; }
+                    count += pop;
+                    block += 1;
+                }
             }
             self.word_idx = block;
             self.load_word();
@@ -440,11 +629,9 @@ pub mod rank_select {
                 return None;
             }
             let k = (target - count) as u32;
-            let bit_in_word = select_in_word(self.word_remaining, k) as usize;
-            let pos = self.word_idx * 64 + bit_in_word;
-            let mut w = self.word_remaining;
-            for _ in 0..=k { w &= w.wrapping_sub(1); }
-            self.word_remaining = w;
+            let (bit_in_word, rest) = consume_through(self.word_remaining, k);
+            let pos = self.word_idx * 64 + bit_in_word as usize;
+            self.word_remaining = rest;
             self.rank = target + 1;
             self.bit_pos = pos + 1;
             Some(pos)
@@ -463,6 +650,25 @@ pub mod rank_select {
         #[inline]
         pub fn push(&mut self, bit: bool) {
             self.values.push(&bit);
+            self.flush_counts();
+        }
+        /// Appends the low `count` bits of `word` (at most 64; higher bits of
+        /// `word` must be zero), maintaining the count summaries.
+        #[inline]
+        pub(crate) fn push_bits(&mut self, word: u64, count: usize) {
+            self.values.push_bits(word, count);
+            self.flush_counts();
+        }
+        /// Appends bit positions `range` of `other`, splicing whole words
+        /// rather than re-pushing individual bits, then catching up the count
+        /// summaries by popcounting any newly completed chunks.
+        pub(crate) fn extend_from_bits<CC2, VC2: Len + IndexAs<u64>, WC2: IndexAs<u64>>(&mut self, other: &RankSelect<CC2, VC2, WC2>, range: core::ops::Range<usize>) {
+            self.values.extend_from_bits(&other.values, range);
+            self.flush_counts();
+        }
+        /// Extends `counts` with running set-bit totals for each complete chunk.
+        #[inline(always)]
+        fn flush_counts(&mut self) {
             while self.counts.len() < self.values.len() / BITS_PER_CHUNK {
                 let mut count = self.counts.last().unwrap_or(0);
                 let lower = WORDS_PER_CHUNK * self.counts.len();
@@ -662,6 +868,40 @@ pub mod rank_select {
             let rs = build(&bits);
             let mut cur = rs.cursor();
             assert_eq!(cur.seek_to_rank(10_000), None);
+        }
+
+        /// `select_zero(k)` finds the position of every unset bit, mirroring
+        /// the `select`/`rank` round trip for set bits.
+        fn check_select_zero(bits: &[bool]) {
+            let rs = build(bits);
+            let mut zeros = 0u64;
+            for (i, &b) in bits.iter().enumerate() {
+                if !b {
+                    let pos = rs.select_zero(zeros).unwrap_or_else(|| panic!("select_zero({}) returned None for unset bit at {}", zeros, i));
+                    assert_eq!(pos, i, "select_zero({}) on pattern of len {}", zeros, bits.len());
+                    zeros += 1;
+                }
+            }
+            assert!(rs.select_zero(zeros).is_none());
+        }
+
+        #[test]
+        fn select_zero_patterns() {
+            check_select_zero(&[false, true, false]);
+            check_select_zero(&vec![true; 2048]);
+            check_select_zero(&vec![false; 2048]);
+            let bits: Vec<bool> = (0..3000).map(|i| i % 7 != 0).collect();
+            check_select_zero(&bits);
+            // Sparse zeros: one unset bit per chunk, and at chunk boundaries.
+            let mut bits = vec![true; 6 * 1024];
+            for c in 0..6 { bits[1024 * c + 17] = false; }
+            bits[1023] = false;
+            bits[1024] = false;
+            check_select_zero(&bits);
+            // Zeros in the tail (incomplete final word).
+            let mut bits = vec![true; 1100];
+            bits[1099] = false;
+            check_select_zero(&bits);
         }
 
         #[test]

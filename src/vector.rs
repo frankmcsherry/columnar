@@ -1,10 +1,11 @@
 use alloc::{vec::Vec, string::String};
-use super::{Clear, Columnar, Container, Len, IndexMut, Index, IndexAs, Push, Slice, Borrow};
+use super::{Clear, Columnar, Container, Len, IndexMut, Index, Push, Slice, Borrow};
+use crate::lengths::{Lengths, LengthsBorrow, LengthsContainer, Uppers};
 
 /// A stand-in for `Vec<Vec<T>>` for complex `T`.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
-pub struct Vecs<TC, BC = Vec<u64>> {
+pub struct Vecs<TC, BC = Uppers> {
     pub bounds: BC,
     pub values: TC,
 }
@@ -65,7 +66,7 @@ impl<T: Columnar, const N: usize> Columnar for smallvec::SmallVec<[T; N]> {
     type Container = Vecs<T::Container>;
 }
 
-impl<BC: crate::common::BorrowIndexAs<u64>, TC: Container> Borrow for Vecs<TC, BC> {
+impl<BC: LengthsBorrow, TC: Container> Borrow for Vecs<TC, BC> {
     type Ref<'a> = Slice<TC::Borrowed<'a>> where TC: 'a;
     type Borrowed<'a> = Vecs<TC::Borrowed<'a>, BC::Borrowed<'a>> where BC: 'a, TC: 'a;
     #[inline(always)]
@@ -88,28 +89,15 @@ impl<BC: crate::common::BorrowIndexAs<u64>, TC: Container> Borrow for Vecs<TC, B
     }
 }
 
-impl<BC: crate::common::PushIndexAs<u64>, TC: Container> Container for Vecs<TC, BC> {
+impl<BC: LengthsContainer, TC: Container> Container for Vecs<TC, BC> {
     #[inline(always)]
     fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
         if !range.is_empty() {
-            // Imported bounds will be relative to this starting offset.
-            let values_len = self.values.len() as u64;
-
-            // Push all bytes that we can, all at once.
-            let other_lower = if range.start == 0 { 0 } else { other.bounds.index_as(range.start-1) };
-            let other_upper = other.bounds.index_as(range.end-1);
-            self.values.extend_from_self(other.values, other_lower as usize .. other_upper as usize);
-
-            // Each bound needs to be shifted by `values_len - other_lower`.
-            if values_len == other_lower {
-                self.bounds.extend_from_self(other.bounds, range);
-            }
-            else {
-                for index in range {
-                    let shifted = other.bounds.index_as(index) - other_lower + values_len;
-                    self.bounds.push(&shifted)
-                }
-            }
+            // Copy the value extent of the lists; the bounds rebase themselves,
+            // as they extend by list lengths rather than absolute offsets.
+            let (lower, upper) = other.bounds.extent(range.clone());
+            self.values.extend_from_self(other.values, lower as usize .. upper as usize);
+            self.bounds.extend_with_extent(other.bounds, range, (lower, upper));
         }
     }
 
@@ -154,60 +142,51 @@ impl<'a, TC: crate::FromBytes<'a>, BC: crate::FromBytes<'a>> crate::FromBytes<'a
     }
 }
 
-impl<TC: Len> Vecs<TC> {
-    #[inline]
-    pub fn push_iter<I>(&mut self, iter: I) where I: IntoIterator, TC: Push<I::Item> {
-        self.values.extend(iter);
-        self.bounds.push(self.values.len() as u64);
-    }
-}
-
 impl<TC, BC: Len> Len for Vecs<TC, BC> {
     #[inline(always)] fn len(&self) -> usize { self.bounds.len() }
 }
 
-impl<TC: Copy, BC: Len+IndexAs<u64>> Index for Vecs<TC, BC> {
+impl<TC: Copy, BC: Lengths> Index for Vecs<TC, BC> {
     type Ref = Slice<TC>;
     #[inline(always)]
     fn get(&self, index: usize) -> Self::Ref {
-        let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
-        let upper = self.bounds.index_as(index);
+        let (lower, upper) = self.bounds.bounds(index);
         Slice::new(lower, upper, self.values)
     }
 }
-impl<'a, TC, BC: Len+IndexAs<u64>> Index for &'a Vecs<TC, BC> {
+impl<'a, TC, BC: Lengths> Index for &'a Vecs<TC, BC> {
     type Ref = Slice<&'a TC>;
     #[inline(always)]
     fn get(&self, index: usize) -> Self::Ref {
-        let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
-        let upper = self.bounds.index_as(index);
+        let (lower, upper) = self.bounds.bounds(index);
         Slice::new(lower, upper, &self.values)
     }
 }
-impl<TC, BC: Len+IndexAs<u64>> IndexMut for Vecs<TC, BC> {
+impl<TC, BC: Lengths> IndexMut for Vecs<TC, BC> {
     type IndexMut<'a> = Slice<&'a mut TC> where TC: 'a, BC: 'a;
 
     #[inline(always)]
     fn get_mut(&mut self, index: usize) -> Self::IndexMut<'_> {
-        let lower = if index == 0 { 0 } else { self.bounds.index_as(index - 1) };
-        let upper = self.bounds.index_as(index);
+        let (lower, upper) = self.bounds.bounds(index);
         Slice::new(lower, upper, &mut self.values)
     }
 }
 
-impl<'a, TC: Container, BC: for<'b> Push<&'b u64>> Push<Slice<TC::Borrowed<'a>>> for Vecs<TC, BC> {
+impl<'a, TC: Container, BC: LengthsContainer> Push<Slice<TC::Borrowed<'a>>> for Vecs<TC, BC> {
     #[inline]
     fn push(&mut self, item: Slice<TC::Borrowed<'a>>) {
+        debug_assert_eq!(self.bounds.total(), self.values.len() as u64);
         self.values.extend_from_self(item.slice, item.lower .. item.upper);
-        self.bounds.push(&(self.values.len() as u64));
+        self.bounds.seal(self.values.len() as u64);
     }
 }
 
-impl<I: IntoIterator, TC: Push<I::Item> + Len, BC: for<'a> Push<&'a u64>> Push<I> for Vecs<TC, BC> {
+impl<I: IntoIterator, TC: Push<I::Item> + Len, BC: LengthsContainer> Push<I> for Vecs<TC, BC> {
     #[inline]
     fn push(&mut self, item: I) {
+        debug_assert_eq!(self.bounds.total(), self.values.len() as u64);
         self.values.extend(item);
-        self.bounds.push(&(self.values.len() as u64));
+        self.bounds.seal(self.values.len() as u64);
     }
 }
 

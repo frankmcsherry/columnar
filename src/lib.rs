@@ -19,6 +19,7 @@ pub use columnar_derive::Columnar;
 
 pub mod adts;
 pub mod boxed;
+pub mod lengths;
 pub mod bytes;
 pub mod lookback;
 pub mod primitive;
@@ -42,6 +43,7 @@ pub mod _derive {
 
 pub use vector::Vecs;
 pub use string::Strings;
+pub use lengths::{Length, Lengths, LengthsBorrow, LengthsContainer, LengthsCursor, Uppers, NeverEmpty, MaybeEmpty};
 pub use sums::{rank_select::{RankSelect, Cursor as RankSelectCursor}, result::Results, option::Options, discriminant::Discriminant};
 pub use lookback::{Repeats, Lookbacks};
 
@@ -120,7 +122,7 @@ pub trait Borrow: Len + Clone + 'static {
     type Ref<'a> : Copy;
     /// The type of a borrowed container.
     ///
-    /// Corresponding to our example, `(&'a [A], Vecs<&'a [B], &'a [u64]>)`.
+    /// Corresponding to our example, `(&'a [A], Vecs<&'a [B], Uppers<&'a [u64]>>)`.
     type Borrowed<'a>: Copy + Len + Index<Ref = Self::Ref<'a>> where Self: 'a;
     /// Converts a reference to the type to a borrowed variant.
     ///

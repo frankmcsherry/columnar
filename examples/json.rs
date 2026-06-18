@@ -229,14 +229,14 @@ impl<'a> JsonQueues<'a> {
             while let Some(json) = self.arr_todo.front().cloned() {
                 Extend::extend(&mut temp, json.iter().map(|v| self.copy(v)));
                 self.arr_todo.pop_front();
-                self.store.arrays.push_iter(temp.drain(..));
+                self.store.arrays.push(temp.drain(..));
             }
             // Odd logic, but: need the queue to retain the element so that `self.copy` produces
             // the correct indexes for any nested objects.
             while let Some(pairs) = self.obj_todo.front().cloned() {
                 Extend::extend(&mut temp, pairs.iter().map(|(_,v)| self.copy(v)));
                 self.obj_todo.pop_front();
-                self.store.objects.push_iter(temp.drain(..).zip(pairs).map(|(v,(s,_))| (s.as_bytes(), v)));
+                self.store.objects.push(temp.drain(..).zip(pairs).map(|(v,(s,_))| (s.as_bytes(), v)));
             }
         }
     }
