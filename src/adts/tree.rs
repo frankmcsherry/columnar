@@ -63,6 +63,22 @@ impl<V: Copy, B: Copy> Clone for TreesRef<V, B> {
 }
 impl<V: Copy, B: Copy> Copy for TreesRef<V, B> {}
 
+impl<V, B> core::hash::Hash for TreesRef<V, B>
+where
+    V: Index + Copy,
+    B: IndexAs<u64> + Copy,
+    V::Ref: core::hash::Hash,
+{
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.value().hash(state);
+        let kids = self.kids();
+        kids.hash(state);
+        for i in 0..kids {
+            self.child(i).hash(state);
+        }
+    }
+}
+
 impl<V: Index, B: IndexAs<u64>> TreesRef<V, B> {
     /// The value at this node.
     #[inline(always)]

@@ -574,6 +574,9 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
 fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::DataEnum, vis: syn::Visibility, attr: Option<proc_macro2::TokenStream>) -> proc_macro::TokenStream {
 
     if data_enum.variants.iter().all(|variant| variant.fields.is_empty()) {
+        if attr.is_some() {
+            panic!("All-unit enums do not support attributes");
+        }
         return derive_tags(name, generics, data_enum, vis);
     }
 
