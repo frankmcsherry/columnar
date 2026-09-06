@@ -673,6 +673,7 @@ where
     for<'b> &'b TC: Index,
     for<'b> <&'b TC as Index>::Ref: PartialEq,
 {
+    #[inline]
     fn drop(&mut self) {
         if !self.live { return; }
         let somes = &mut self.repeats.inner.somes;
@@ -761,6 +762,7 @@ where
     for<'b> &'b TC: Index,
     for<'b> <&'b TC as Index>::Ref: PartialEq,
 {
+    #[inline]
     fn drop(&mut self) {
         if !self.live { return; }
         let inner = &mut self.lookbacks.inner;
