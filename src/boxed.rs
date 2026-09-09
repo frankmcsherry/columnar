@@ -6,6 +6,7 @@
 //! We need this wrapper to distinguish which [`Push`] implementation to use, otherwise
 //! the implementations would conflict.
 use alloc::boxed::Box;
+use alloc::{string::String, vec::Vec};
 
 use crate::{AsBytes, Borrow, Clear, Columnar, Container, FromBytes, Index, IndexMut, Len, Push, Ref};
 
@@ -64,6 +65,7 @@ impl<'a, C: FromBytes<'a>> FromBytes<'a> for Boxed<C> {
     const SLICE_COUNT: usize = C::SLICE_COUNT;
     #[inline(always)] fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self { Self(C::from_bytes(bytes)) }
     #[inline(always)] fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self { Self(C::from_store(store, offset)) }
+    fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> { C::element_sizes(sizes) }
 }
 impl<C: Index> Index for Boxed<C> {
     type Ref = Boxed<C::Ref>;

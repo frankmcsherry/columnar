@@ -84,6 +84,7 @@ pub use sizes::{Usizes, Isizes};
 /// Columnar stores for `usize` and `isize`, stored as 64 bits.
 mod sizes {
 
+    use alloc::string::String;
     use crate::*;
     use crate::common::{BorrowIndexAs, PushIndexAs};
 
@@ -160,6 +161,9 @@ mod sizes {
         #[inline(always)]
         fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
             Self { values: CV::from_store(store, offset) }
+        }
+        fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+            CV::element_sizes(sizes)
         }
     }
 
@@ -238,6 +242,9 @@ mod sizes {
         fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
             Self { values: CV::from_store(store, offset) }
         }
+        fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+            CV::element_sizes(sizes)
+        }
     }
 }
 
@@ -245,6 +252,7 @@ pub use chars::{Chars};
 /// Columnar store for `char`, stored as a `u32`.
 mod chars {
 
+    use alloc::string::String;
     use crate::*;
     use crate::common::{BorrowIndexAs, PushIndexAs};
 
@@ -320,6 +328,9 @@ mod chars {
         fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
             Self { values: CV::from_store(store, offset) }
         }
+        fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+            CV::element_sizes(sizes)
+        }
     }
 }
 
@@ -327,6 +338,7 @@ pub use larges::{U128s, I128s};
 /// Columnar stores for `u128` and `i128`, stored as [u8; 16] bits.
 mod larges {
 
+    use alloc::string::String;
     use crate::*;
     use crate::common::{BorrowIndexAs, PushIndexAs};
 
@@ -402,6 +414,9 @@ mod larges {
         fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
             Self { values: CV::from_store(store, offset) }
         }
+        fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+            CV::element_sizes(sizes)
+        }
     }
 
     #[derive(Copy, Clone, Default)]
@@ -473,6 +488,9 @@ mod larges {
         #[inline(always)]
         fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
             Self { values: CV::from_store(store, offset) }
+        }
+        fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+            CV::element_sizes(sizes)
         }
     }
 }
@@ -1075,7 +1093,7 @@ pub use duration::Durations;
 /// A columnar store for `core::time::Duration`.
 mod duration {
 
-    use alloc::vec::Vec;
+    use alloc::{vec::Vec, string::String};
     use core::time::Duration;
     use crate::{Container, Len, Index, IndexAs, Push, Clear, Borrow};
 
@@ -1154,6 +1172,10 @@ mod duration {
                 seconds: SC::from_store(store, offset),
                 nanoseconds: NC::from_store(store, offset),
             }
+        }
+        fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
+            SC::element_sizes(sizes)?;
+            NC::element_sizes(sizes)
         }
     }
 
