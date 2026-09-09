@@ -332,6 +332,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
                 fn from_store(store: &::columnar::bytes::indexed::DecodedStore<'columnar>, offset: &mut usize) -> Self {
                     Self { #(#names: ::columnar::FromBytes::from_store(store, offset),)* }
                 }
+                #[inline(always)]
                 fn element_sizes(sizes: &mut ::columnar::_derive::Vec<usize>) -> ::core::result::Result<(), ::columnar::_derive::String> {
                     #(<#container_types>::element_sizes(sizes)?;)*
                     Ok(())
@@ -527,6 +528,7 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
                 *offset += 1;
                 Self { count: w.first().unwrap_or(&0) }
             }
+            #[inline(always)]
             fn element_sizes(sizes: &mut ::columnar::_derive::Vec<usize>) -> ::core::result::Result<(), ::columnar::_derive::String> {
                 sizes.push(8);
                 Ok(())
@@ -938,6 +940,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
                         indexes: ::columnar::FromBytes::from_store(store, offset),
                     }
                 }
+                #[inline(always)]
                 fn element_sizes(sizes: &mut ::columnar::_derive::Vec<usize>) -> ::core::result::Result<(), ::columnar::_derive::String> {
                     #(<#container_types>::element_sizes(sizes)?;)*
                     <::columnar::Discriminant<CVar, COff>>::element_sizes(sizes)?;
@@ -1284,6 +1287,7 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
             fn from_store(store: &::columnar::bytes::indexed::DecodedStore<'columnar>, offset: &mut usize) -> Self {
                 Self { variant: ::columnar::FromBytes::from_store(store, offset) }
             }
+            #[inline(always)]
             fn element_sizes(sizes: &mut ::columnar::_derive::Vec<usize>) -> ::core::result::Result<(), ::columnar::_derive::String> {
                 CVar::element_sizes(sizes)
             }

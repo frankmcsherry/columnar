@@ -84,6 +84,7 @@ pub mod rank_select {
                 values: <crate::primitive::Bools<VC, &'a [u64]>>::from_store(store, offset),
             }
         }
+        #[inline(always)]
         fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
             CC::element_sizes(sizes)?;
             <crate::primitive::Bools<VC, &'a [u64]>>::element_sizes(sizes)?;
@@ -805,6 +806,7 @@ pub mod result {
                 errs: TC::from_store(store, offset),
             }
         }
+        #[inline(always)]
         fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
             <RankSelect<CC, VC, &'a [u64]>>::element_sizes(sizes)?;
             SC::element_sizes(sizes)?;
@@ -1069,6 +1071,7 @@ pub mod option {
                 somes: TC::from_store(store, offset),
             }
         }
+        #[inline(always)]
         fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
             <RankSelect<CC, VC, &'a [u64]>>::element_sizes(sizes)?;
             TC::element_sizes(sizes)?;
@@ -1372,6 +1375,7 @@ pub mod discriminant {
             let offset_field = crate::FromBytes::from_store(store, offset);
             Self { variant, offset: offset_field }
         }
+        #[inline(always)]
         fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
             <&[u8]>::element_sizes(sizes)?;
             <&[u64]>::element_sizes(sizes)?;

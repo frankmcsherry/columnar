@@ -37,6 +37,7 @@ macro_rules! implement_columnable {
                 debug_assert!(trim <= all.len(), "from_store: trim {trim} exceeds slice length {}", all.len());
                 all.get(..all.len().wrapping_sub(trim)).unwrap_or(&[])
             }
+            #[inline(always)]
             fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
                 sizes.push(core::mem::size_of::<$index_type>());
                 Ok(())
@@ -66,6 +67,7 @@ macro_rules! implement_columnable {
                 debug_assert!(trim <= all.len(), "from_store: trim {trim} exceeds slice length {}", all.len());
                 all.get(..all.len().wrapping_sub(trim)).unwrap_or(&[])
             }
+            #[inline(always)]
             fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
                 sizes.push(core::mem::size_of::<$index_type>() * N);
                 Ok(())
@@ -599,6 +601,7 @@ pub mod offsets {
                 debug_assert!(!w.is_empty(), "Fixeds::from_store: empty count slice");
                 Self { count: w.first().unwrap_or(&0) }
             }
+            #[inline(always)]
             fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
                 sizes.push(8);
                 Ok(())
@@ -714,6 +717,7 @@ pub mod offsets {
                 let bounds = BC::from_store(store, offset);
                 Self { head, bounds }
             }
+            #[inline(always)]
             fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
                 sizes.push(8); // head: [stride, length]
                 BC::element_sizes(sizes)
@@ -923,6 +927,7 @@ mod empty {
             debug_assert!(!w.is_empty(), "Empties::from_store: empty count slice");
             Self { count: w.first().unwrap_or(&0), empty: () }
         }
+        #[inline(always)]
         fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
             sizes.push(8);
             Ok(())
@@ -1021,6 +1026,7 @@ mod boolean {
             debug_assert!(tail.len() >= 2, "Bools::from_store: tail slice too short (len {})", tail.len());
             Self { values, tail }
         }
+        #[inline(always)]
         fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
             VC::element_sizes(sizes)?;
             sizes.push(8); // tail: [last_word, last_bits]
