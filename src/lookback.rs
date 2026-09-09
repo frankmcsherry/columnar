@@ -128,6 +128,7 @@ impl<'a, TC: crate::FromBytes<'a>, CC: crate::FromBytes<'a>, VC: crate::FromByte
     fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
         Self { inner: crate::FromBytes::from_store(store, offset) }
     }
+    #[inline(always)]
     fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
         <Options<TC, CC, VC, &'a [u64]>>::element_sizes(sizes)
     }
@@ -245,6 +246,7 @@ impl<'a, TC: crate::FromBytes<'a>, VC: crate::FromBytes<'a>, CC: crate::FromByte
     fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
         Self { inner: crate::FromBytes::from_store(store, offset) }
     }
+    #[inline(always)]
     fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
         <Results<TC, VC, CC, RC, &'a [u64]>>::element_sizes(sizes)
     }

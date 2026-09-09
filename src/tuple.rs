@@ -87,6 +87,7 @@ macro_rules! tuple_impl {
                 $(let $name = $name::from_store(store, offset);)*
                 ($($name,)*)
             }
+            #[inline(always)]
             fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
                 $($name::element_sizes(sizes)?;)*
                 Ok(())

@@ -708,7 +708,7 @@ pub mod common {
             if slices.len() < Self::SLICE_COUNT {
                 return Err(format!("expected {} slices but got {}", Self::SLICE_COUNT, slices.len()));
             }
-            let mut sizes = Vec::new();
+            let mut sizes = Vec::with_capacity(Self::SLICE_COUNT);
             Self::element_sizes(&mut sizes)?;
             for (i, elem_size) in sizes.iter().enumerate() {
                 let (words, tail) = &slices[i];

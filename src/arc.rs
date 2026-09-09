@@ -1,5 +1,6 @@
 //! Implementations of traits for `Arc<T>`
 use alloc::sync::Arc;
+use alloc::{string::String, vec::Vec};
 
 use crate::{Len, Borrow, AsBytes, FromBytes};
 
@@ -21,6 +22,7 @@ impl<'a, T: FromBytes<'a>> FromBytes<'a> for Arc<T> {
     const SLICE_COUNT: usize = T::SLICE_COUNT;
     #[inline(always)] fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self { Arc::new(T::from_bytes(bytes)) }
     #[inline(always)] fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self { Arc::new(T::from_store(store, offset)) }
+    #[inline(always)] fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> { T::element_sizes(sizes) }
 }
 
 #[cfg(test)]
@@ -48,6 +50,13 @@ mod tests {
         let bytes: Vec<_> = x.borrow().as_bytes().map(|(_, b)| b).collect();
         let y: Arc<&[u8]> = FromBytes::from_bytes(&mut bytes.into_iter());
         assert_eq!(*x, *y);
+    }
+
+    #[test]
+    fn test_element_sizes() {
+        let mut sizes = Vec::new();
+        <Arc<&[u32]> as FromBytes>::element_sizes(&mut sizes).unwrap();
+        assert_eq!(sizes, [4]);
     }
 
     #[test]

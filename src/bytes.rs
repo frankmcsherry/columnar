@@ -285,7 +285,8 @@ pub mod indexed {
     #[cfg(test)]
     mod test {
 
-        use alloc::{vec, vec::Vec, string::String};
+        use alloc::{boxed::Box, vec, vec::Vec, string::String};
+        use core::time::Duration;
         use crate::{Borrow, ContainerOf};
         use crate::common::Push;
         use crate::AsBytes;
@@ -339,6 +340,29 @@ pub mod indexed {
 
             type B<'a> = crate::BorrowedOf<'a, (u64, String, Vec<u32>)>;
             assert!(super::validate::<B>(&store).is_ok());
+        }
+
+        #[test]
+        fn validate_primitive_containers() {
+            /// Encodes a container holding the listed items and validates the store.
+            macro_rules! check {
+                ($type:ty, $($item:expr),* $(,)?) => {{
+                    let mut column: ContainerOf<$type> = Default::default();
+                    $(column.push(&$item);)*
+                    let mut store = Vec::new();
+                    encode(&mut store, &column.borrow());
+                    super::validate::<crate::BorrowedOf<'_, $type>>(&store)
+                        .expect(concat!(stringify!($type), " should validate"));
+                }};
+            }
+
+            check!(u128, 0, u128::MAX);
+            check!(i128, i128::MIN, 0, i128::MAX);
+            check!(usize, 0, usize::MAX);
+            check!(isize, isize::MIN, 0, isize::MAX);
+            check!(char, 'a', '\u{1f600}');
+            check!(Duration, Duration::new(0, 0), Duration::new(17, 42));
+            check!(Box<u64>, Box::new(0), Box::new(u64::MAX));
         }
 
     }
