@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.2](https://github.com/frankmcsherry/columnar/compare/columnar_derive-v0.13.1...columnar_derive-v0.13.2) - 2026-09-09
+
+### Other
+
+- Implement element_sizes for the remaining FromBytes impls ([#118](https://github.com/frankmcsherry/columnar/pull/118))
+
 ## [0.13.1](https://github.com/frankmcsherry/columnar/compare/columnar_derive-v0.13.0...columnar_derive-v0.13.1) - 2026-06-16
 
 ### Other
