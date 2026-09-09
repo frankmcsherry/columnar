@@ -481,6 +481,14 @@ pub mod rank_select {
             self.values.clear();
         }
     }
+    impl crate::Truncate for RankSelect {
+        #[inline]
+        fn truncate(&mut self, len: usize) {
+            self.values.truncate(len);
+            // `push` maintains one count per complete chunk of words.
+            self.counts.truncate(self.values.values.len() / WORDS_PER_CHUNK);
+        }
+    }
 
     #[cfg(test)]
     mod tests {
