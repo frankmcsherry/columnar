@@ -22,7 +22,7 @@ impl<'a, T: FromBytes<'a>> FromBytes<'a> for Rc<T> {
     const SLICE_COUNT: usize = T::SLICE_COUNT;
     #[inline(always)] fn from_bytes(bytes: &mut impl Iterator<Item=&'a [u8]>) -> Self { Rc::new(T::from_bytes(bytes)) }
     #[inline(always)] fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self { Rc::new(T::from_store(store, offset)) }
-    fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> { T::element_sizes(sizes) }
+    #[inline(always)] fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> { T::element_sizes(sizes) }
 }
 
 #[cfg(test)]

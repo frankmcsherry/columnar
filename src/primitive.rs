@@ -162,6 +162,7 @@ mod sizes {
         fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
             Self { values: CV::from_store(store, offset) }
         }
+        #[inline(always)]
         fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
             CV::element_sizes(sizes)
         }
@@ -242,6 +243,7 @@ mod sizes {
         fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
             Self { values: CV::from_store(store, offset) }
         }
+        #[inline(always)]
         fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
             CV::element_sizes(sizes)
         }
@@ -328,6 +330,7 @@ mod chars {
         fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
             Self { values: CV::from_store(store, offset) }
         }
+        #[inline(always)]
         fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
             CV::element_sizes(sizes)
         }
@@ -414,6 +417,7 @@ mod larges {
         fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
             Self { values: CV::from_store(store, offset) }
         }
+        #[inline(always)]
         fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
             CV::element_sizes(sizes)
         }
@@ -489,6 +493,7 @@ mod larges {
         fn from_store(store: &crate::bytes::indexed::DecodedStore<'a>, offset: &mut usize) -> Self {
             Self { values: CV::from_store(store, offset) }
         }
+        #[inline(always)]
         fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
             CV::element_sizes(sizes)
         }
@@ -1173,6 +1178,7 @@ mod duration {
                 nanoseconds: NC::from_store(store, offset),
             }
         }
+        #[inline(always)]
         fn element_sizes(sizes: &mut Vec<usize>) -> Result<(), String> {
             SC::element_sizes(sizes)?;
             NC::element_sizes(sizes)
