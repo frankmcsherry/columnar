@@ -991,10 +991,70 @@ mod boolean {
     }
 
     impl<VC: crate::common::PushIndexAs<u64>> Container for Bools<VC> {
-        // TODO: There is probably a smart way to implement `extend_from_slice`, but it isn't trivial due to alignment.
+        #[inline]
+        fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
+            self.extend_bits_from(&other, range)
+        }
 
         fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
             self.values.reserve_for(selves.map(|x| x.values))
+        }
+    }
+
+    impl<VC: Len + IndexAs<u64>, TC: IndexAs<u64>> Bools<VC, TC> {
+        /// The `block`-th word of bits, which is the tail word for `block == self.values.len()`.
+        #[inline(always)]
+        fn word(&self, block: usize) -> u64 {
+            debug_assert!(block <= self.values.len(), "Bools::word: block {block} beyond {} words", self.values.len());
+            if block < self.values.len() { self.values.index_as(block) } else { self.tail.index_as(0) }
+        }
+        /// Reads `count` bits (at most 64) starting at bit `pos`, into the low bits of the result.
+        ///
+        /// Bits at positions `count` and above in the result are zero.
+        #[inline]
+        pub fn bits_at(&self, pos: usize, count: usize) -> u64 {
+            debug_assert!(count <= 64, "Bools::bits_at: count {count} exceeds 64");
+            debug_assert!(pos + count <= self.len(), "Bools::bits_at: range {pos}..{} exceeds length {}", pos + count, self.len());
+            if count == 0 { return 0; }
+            let block = pos / 64;
+            let bit = pos % 64;
+            let mut word = self.word(block) >> bit;
+            if bit + count > 64 {
+                word |= self.word(block + 1) << (64 - bit);
+            }
+            if count < 64 { word &= (1u64 << count) - 1; }
+            word
+        }
+    }
+
+    impl<VC: for<'a> Push<&'a u64>> Bools<VC> {
+        /// Appends the low `count` bits of `bits`, for `count` at most 64.
+        ///
+        /// Bits at positions `count` and above in `bits` must be zero.
+        #[inline]
+        pub fn push_bits(&mut self, bits: u64, count: usize) {
+            debug_assert!(count <= 64, "Bools::push_bits: count {count} exceeds 64");
+            debug_assert!(count == 64 || bits >> count == 0, "Bools::push_bits: bits set beyond count {count}");
+            let valid = self.tail[1] as usize;
+            self.tail[0] |= bits << valid;
+            if valid + count >= 64 {
+                // The tail word is full; commit it and keep the bits that did not fit.
+                self.values.push(&self.tail[0]);
+                self.tail[0] = if valid == 0 { 0 } else { bits >> (64 - valid) };
+                self.tail[1] = (valid + count - 64) as u64;
+            } else {
+                self.tail[1] += count as u64;
+            }
+        }
+        /// Appends the bits of `other` in `range`, a word at a time.
+        pub fn extend_bits_from<VC2: Len + IndexAs<u64>, TC2: IndexAs<u64>>(&mut self, other: &Bools<VC2, TC2>, range: core::ops::Range<usize>) {
+            assert!(range.end <= other.len(), "Bools::extend_bits_from: range {range:?} exceeds length {}", other.len());
+            let mut pos = range.start;
+            while pos < range.end {
+                let count = core::cmp::min(64, range.end - pos);
+                self.push_bits(other.bits_at(pos, count), count);
+                pos += count;
+            }
         }
     }
 
@@ -1095,6 +1155,60 @@ mod boolean {
         fn clear(&mut self) {
             self.values.clear();
             self.tail = [0, 0];
+        }
+    }
+
+    #[cfg(test)]
+    mod test {
+        use alloc::vec::Vec;
+        use crate::{Borrow, Container, Index, Len, Push};
+        use super::Bools;
+
+        struct Lcg(u64);
+        impl Lcg {
+            fn next(&mut self) -> u64 {
+                self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                self.0 >> 11
+            }
+        }
+
+        fn random_bools(rng: &mut Lcg, len: usize) -> (Bools, Vec<bool>) {
+            let bits: Vec<bool> = (0..len).map(|_| rng.next() % 3 == 0).collect();
+            let mut bools: Bools = Bools::default();
+            for &bit in &bits { bools.push(bit); }
+            (bools, bits)
+        }
+
+        /// `extend_from_self` agrees with pushing one bit at a time, for random
+        /// sources, destinations, and ranges, including ones spanning word boundaries.
+        #[test]
+        fn extend_from_self_matches_push() {
+            let mut rng = Lcg(2026);
+            for _ in 0..500 {
+                let source_len = (rng.next() % 400) as usize;
+                let (source, source_bits) = random_bools(&mut rng, source_len);
+                let target_len = (rng.next() % 200) as usize;
+                let (mut target, mut expected) = random_bools(&mut rng, target_len);
+                let lower = if source_bits.is_empty() { 0 } else { (rng.next() as usize) % (source_bits.len() + 1) };
+                let upper = lower + (rng.next() as usize) % (source_bits.len() - lower + 1);
+                target.extend_from_self(source.borrow(), lower .. upper);
+                expected.extend_from_slice(&source_bits[lower .. upper]);
+                assert_eq!(target.len(), expected.len());
+                assert!(target.tail[1] < 64);
+                assert_eq!(target.values.len(), expected.len() / 64);
+                assert_eq!(target.tail[0] >> target.tail[1], 0, "stale bits above the tail count");
+                for (index, &bit) in expected.iter().enumerate() {
+                    assert_eq!(target.get(index), bit, "bit {index} of {}", expected.len());
+                }
+            }
+        }
+
+        #[test]
+        #[should_panic]
+        fn extend_from_self_out_of_range() {
+            let (source, _) = random_bools(&mut Lcg(1), 10);
+            let mut target: Bools = Bools::default();
+            target.extend_from_self(source.borrow(), 5 .. 11);
         }
     }
 

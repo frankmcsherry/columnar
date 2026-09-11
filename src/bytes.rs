@@ -464,11 +464,13 @@ pub mod stash {
                 Ok(Self::Bytes(bytes))
             }
             else {
-                // Re-locating bytes for alignment reasons.
-                let mut alloc: Vec<u64> = vec![0; bytes.len() / 8];
-                bytemuck::cast_slice_mut(&mut alloc[..]).copy_from_slice(&bytes[..]);
+                // Re-locating bytes for alignment reasons, in one pass directly into the shared allocation.
+                // (Collecting through a `Vec<u64>` and converting would copy the words a second time.)
+                // The cast to `[u8; 8]` cannot fail: the alignment is one and the length is a multiple of eight.
+                let chunks: &[[u8; 8]] = bytemuck::cast_slice(&bytes[..]);
+                let alloc: alloc::sync::Arc<[u64]> = chunks.iter().map(|chunk| u64::from_ne_bytes(*chunk)).collect();
                 validate::<<C as Borrow>::Borrowed<'_>>(&alloc)?;
-                Ok(Self::Align(alloc.into()))
+                Ok(Self::Align(alloc))
             }
         }
     }
@@ -698,6 +700,36 @@ mod test {
         match borrowed.get(1) {
             Err(n) => assert_eq!(*n, 99),
             Ok(_) => panic!("expected Err"),
+        }
+    }
+
+    /// Bytes that are not `u64`-aligned are relocated into the `Align` variant, and read back correctly.
+    #[test]
+    fn try_from_bytes_misaligned() {
+        use crate::common::{Push, Index, Len};
+        use crate::{Borrow, ContainerOf};
+        use crate::bytes::stash::Stash;
+
+        let mut c: ContainerOf<(u64, String)> = Default::default();
+        for i in 0..100u64 { c.push(&(i, format!("row {i}"))); }
+        let mut bytes: Vec<u8> = Vec::new();
+        crate::bytes::indexed::write(&mut bytes, &c.borrow()).unwrap();
+
+        // Place the encoding at an offset that is not a multiple of 8 within a larger buffer.
+        let mut buffer = vec![0u8; bytes.len() + 16];
+        let offset = if (buffer.as_ptr() as usize + 1) % 8 == 0 { 2 } else { 1 };
+        buffer[offset .. offset + bytes.len()].copy_from_slice(&bytes);
+        let misaligned: &[u8] = &buffer[offset .. offset + bytes.len()];
+        assert_ne!(misaligned.as_ptr() as usize % 8, 0);
+
+        let stash: Stash<ContainerOf<(u64, String)>, &[u8]> = Stash::try_from_bytes(misaligned).expect("misaligned bytes should relocate");
+        assert!(matches!(stash, Stash::Align(_)));
+        let borrowed = stash.borrow();
+        assert_eq!(borrowed.len(), 100);
+        for i in 0..100u64 {
+            let (n, s) = borrowed.get(i as usize);
+            assert_eq!(*n, i);
+            assert_eq!(s, format!("row {i}").as_bytes());
         }
     }
 
