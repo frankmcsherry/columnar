@@ -250,7 +250,24 @@ pub mod common {
         }
     }
     impl<'a, T: Clone> Push<&'a [T]> for Vec<T> {
-        #[inline(always)] fn push(&mut self, item: &'a [T]) { self.clone_from_slice(item) }
+        #[inline(always)] fn push(&mut self, item: &'a [T]) { self.extend_from_slice(item) }
+    }
+
+    #[cfg(test)]
+    mod test {
+        use alloc::vec::Vec;
+        use super::Push;
+
+        /// `Push<&[T]>` appends, regardless of the current length.
+        #[test]
+        fn push_slice_appends() {
+            let mut vec: Vec<u8> = Vec::new();
+            Push::push(&mut vec, &[1u8, 2][..]);
+            Push::push(&mut vec, &[3u8][..]);
+            Push::push(&mut vec, &[][..]);
+            Push::push(&mut vec, &[4u8, 5, 6][..]);
+            assert_eq!(vec, [1, 2, 3, 4, 5, 6]);
+        }
     }
 
 

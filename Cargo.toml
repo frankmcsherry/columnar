@@ -37,7 +37,7 @@ required-features = ["serde"]
 
 [profile.test]
 opt-level = 2
-overflow-checks = false
+overflow-checks = true
 incremental = false
 
 [profile.bench]
