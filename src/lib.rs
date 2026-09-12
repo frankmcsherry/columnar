@@ -41,7 +41,7 @@ pub mod _derive {
 }
 
 pub use vector::Vecs;
-pub use string::Strings;
+pub use string::{Strings, Bytes};
 pub use sums::{rank_select::{RankSelect, Cursor as RankSelectCursor}, result::Results, option::Options, discriminant::Discriminant};
 pub use lookback::{Repeats, Lookbacks};
 

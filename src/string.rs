@@ -43,6 +43,82 @@ impl Columnar for Box<str> {
     type Container = Strings;
 }
 
+/// A stand-in for `Vec<u8>` whose columnar container is [`Strings`].
+///
+/// The derive macro maps a `Vec<u8>` field to `Vecs<Vec<u8>>`, whose row reference is
+/// `Slice<&[u8]>`. That reference compares, orders and hashes one byte at a time. Using `Bytes`
+/// for byte payloads, either as a column element or as a struct field, routes them to `Strings`
+/// instead, whose reference is a native `&[u8]`, so comparison, ordering and hashing use the
+/// standard library's slice implementations. Unlike `String`, `Bytes` performs no UTF-8
+/// validation on any path.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Bytes(pub Vec<u8>);
+
+impl Columnar for Bytes {
+    #[inline(always)]
+    fn copy_from<'a>(&mut self, other: crate::Ref<'a, Self>) {
+        self.0.clear();
+        self.0.extend_from_slice(other);
+    }
+    #[inline(always)]
+    fn into_owned<'a>(other: crate::Ref<'a, Self>) -> Self {
+        Bytes(other.to_vec())
+    }
+    type Container = Strings;
+}
+
+impl core::ops::Deref for Bytes {
+    type Target = Vec<u8>;
+    #[inline(always)] fn deref(&self) -> &Self::Target { &self.0 }
+}
+impl core::ops::DerefMut for Bytes {
+    #[inline(always)] fn deref_mut(&mut self) -> &mut Self::Target { &mut self.0 }
+}
+impl core::borrow::Borrow<[u8]> for Bytes {
+    #[inline(always)] fn borrow(&self) -> &[u8] { &self.0 }
+}
+impl AsRef<[u8]> for Bytes {
+    #[inline(always)] fn as_ref(&self) -> &[u8] { &self.0 }
+}
+impl From<Vec<u8>> for Bytes {
+    #[inline(always)] fn from(bytes: Vec<u8>) -> Self { Bytes(bytes) }
+}
+impl From<&[u8]> for Bytes {
+    #[inline(always)] fn from(bytes: &[u8]) -> Self { Bytes(bytes.to_vec()) }
+}
+impl From<Bytes> for Vec<u8> {
+    #[inline(always)] fn from(bytes: Bytes) -> Self { bytes.0 }
+}
+
+// Cross-type equality with byte slices, so a `Bytes` reference (`&[u8]`) compares against an
+// owned `Bytes`, which the derived `Reference == Struct` comparison relies on.
+impl PartialEq<[u8]> for Bytes {
+    #[inline(always)] fn eq(&self, other: &[u8]) -> bool { self.0.as_slice() == other }
+}
+impl PartialEq<Bytes> for [u8] {
+    #[inline(always)] fn eq(&self, other: &Bytes) -> bool { self == other.0.as_slice() }
+}
+impl PartialEq<&[u8]> for Bytes {
+    #[inline(always)] fn eq(&self, other: &&[u8]) -> bool { self.0.as_slice() == *other }
+}
+impl PartialEq<Bytes> for &[u8] {
+    #[inline(always)] fn eq(&self, other: &Bytes) -> bool { *self == other.0.as_slice() }
+}
+
+impl<BC: for<'a> Push<&'a u64>> Push<Bytes> for Strings<BC> {
+    #[inline(always)] fn push(&mut self, item: Bytes) {
+        self.values.extend_from_slice(&item.0);
+        self.bounds.push(&(self.values.len() as u64));
+    }
+}
+impl<BC: for<'a> Push<&'a u64>> Push<&Bytes> for Strings<BC> {
+    #[inline(always)] fn push(&mut self, item: &Bytes) {
+        self.values.extend_from_slice(&item.0);
+        self.bounds.push(&(self.values.len() as u64));
+    }
+}
+
 impl<BC: crate::common::BorrowIndexAs<u64>> Borrow for Strings<BC, Vec<u8>> {
     type Ref<'a> = &'a [u8];
     type Borrowed<'a> = Strings<BC::Borrowed<'a>, &'a [u8]> where BC: 'a;
