@@ -2,6 +2,7 @@ extern crate proc_macro;
 
 use proc_macro::TokenStream;
 use quote::quote;
+use syn::spanned::Spanned;
 use syn::{parse_macro_input, Attribute, DeriveInput};
 
 #[proc_macro_derive(Columnar, attributes(columnar))]
@@ -20,6 +21,9 @@ pub fn derive(input: TokenStream) -> TokenStream {
             }
         }
         syn::Data::Enum(data_enum) => {
+            if let Err(err) = reject_enum_field_attrs(&data_enum) {
+                return err.to_compile_error().into();
+            }
             derive_enum(name, &ast.generics, data_enum, ast.vis, attr)
         }
         syn::Data::Union(_) => unimplemented!("Unions are unsupported by Columnar"),
@@ -33,6 +37,55 @@ fn extract_attr(attrs: &[Attribute]) -> Option<proc_macro2::TokenStream> {
         }
     }
     None
+}
+
+/// A single argument of a field-level `#[columnar(..)]` attribute.
+enum ColumnarFieldArg {
+    /// `as = <Type>`: store and reconstruct the field through `<Type>`'s columnar machinery.
+    As(Box<syn::Type>),
+}
+
+impl syn::parse::Parse for ColumnarFieldArg {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        // `as` is a keyword, so it cannot be parsed as a `Meta` path; match the token directly.
+        if input.peek(syn::Token![as]) {
+            input.parse::<syn::Token![as]>()?;
+            input.parse::<syn::Token![=]>()?;
+            Ok(ColumnarFieldArg::As(Box::new(input.parse()?)))
+        } else {
+            Err(input.error("unsupported `columnar` field attribute; expected `as = <Type>`"))
+        }
+    }
+}
+
+/// The wrapper type a field opted into with `#[columnar(as = <Type>)]`, if any. The field is stored
+/// and reconstructed through that type's columnar machinery. Returns a spanned error on a malformed
+/// attribute.
+fn field_as_type(field: &syn::Field) -> syn::Result<Option<syn::Type>> {
+    let mut as_type = None;
+    for attr in &field.attrs {
+        if attr.path().is_ident("columnar") {
+            let args = attr.parse_args_with(syn::punctuated::Punctuated::<ColumnarFieldArg, syn::Token![,]>::parse_terminated)?;
+            for arg in args {
+                match arg {
+                    ColumnarFieldArg::As(ty) => as_type = Some(*ty),
+                }
+            }
+        }
+    }
+    Ok(as_type)
+}
+
+/// Rejects `#[columnar(..)]` field attributes on enum variant fields, which are not supported.
+fn reject_enum_field_attrs(data_enum: &syn::DataEnum) -> syn::Result<()> {
+    for variant in &data_enum.variants {
+        for field in &variant.fields {
+            if field.attrs.iter().any(|attr| attr.path().is_ident("columnar")) {
+                return Err(syn::Error::new(field.span(), "`#[columnar(..)]` field attributes are not supported on enum variants"));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::DataStruct, vis: syn::Visibility, attr: Option<proc_macro2::TokenStream>) -> proc_macro::TokenStream {
@@ -60,6 +113,27 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         syn::Fields::Unnamed(fields) => fields.unnamed.iter().map(|field| &field.ty).collect(),
         _ => unimplemented!(),
     };
+
+    // The wrapper type each field opted into with `#[columnar(as = <Type>)]`, if any. A malformed
+    // attribute is reported as a spanned compile error rather than a panic.
+    let field_as_types: &Vec<Option<syn::Type>> = &match data_struct.fields.iter().map(field_as_type).collect::<syn::Result<Vec<_>>>() {
+        Ok(as_types) => as_types,
+        Err(err) => return err.to_compile_error().into(),
+    };
+
+    // The "columnar type" of each field: the wrapper for `as` fields, otherwise the field type.
+    // Storage, reconstruction and the `Columnar` bound all key off this rather than the field type.
+    let field_columnar_types: &Vec<proc_macro2::TokenStream> = &types.iter().zip(field_as_types).map(|(ty, as_ty)| {
+        match as_ty {
+            Some(as_ty) => quote! { #as_ty },
+            None => quote! { #ty },
+        }
+    }).collect();
+
+    // The concrete container type for each field, derived from its columnar type.
+    let field_container_types: &Vec<proc_macro2::TokenStream> = &field_columnar_types.iter().map(|columnar_ty| {
+        quote! { <#columnar_ty as ::columnar::Columnar>::Container }
+    }).collect();
 
     // Generic type parameters for the containers for the struct fields.
     let container_types = &names.iter().enumerate().map(|(index, name)| {
@@ -345,12 +419,14 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
 
         let (impl_gen, ty_gen, where_clause) = generics.split_for_impl();
 
+        // The `Columnar` bound applies to each field's columnar type, so a field's declared type
+        // need not itself be `Columnar` when it is stored through an `as` wrapper.
         let where_clause2 = if let Some(struct_where) = where_clause {
             let params = struct_where.predicates.iter();
-            quote! {  where #(#types : ::columnar::Columnar,)* #(#params),* }
+            quote! {  where #(#field_columnar_types : ::columnar::Columnar,)* #(#params),* }
         }
         else {
-            quote! { where #(#types : ::columnar::Columnar,)* }
+            quote! { where #(#field_columnar_types : ::columnar::Columnar,)* }
         };
 
         // Either use curly braces or parentheses to destructure the item.
@@ -358,23 +434,43 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         if named { quote! { let #name { #(#names),* } = self; } }
         else     { quote! { let #name ( #(#names),* ) = self; } };
 
-        // Either use curly braces or parentheses to destructure the item.
+        // Reconstruct each field from its reference. An `as = W` field is decoded through `W` and
+        // converted into the declared field type via `Into`.
+        let into_fields: Vec<proc_macro2::TokenStream> = names.iter().zip(field_as_types).map(|(field, as_ty)| {
+            match as_ty {
+                Some(w) => quote! { <#w as ::columnar::Columnar>::into_owned(other.#field).into() },
+                None => quote! { ::columnar::Columnar::into_owned(other.#field) },
+            }
+        }).collect();
         let into_self =
-        if named { quote! { #name { #(#names: ::columnar::Columnar::into_owned(other.#names)),* } } }
-        else     { quote! { #name ( #(::columnar::Columnar::into_owned(other.#names)),* ) } };
+        if named { quote! { #name { #(#names: #into_fields),* } } }
+        else     { quote! { #name ( #(#into_fields),* ) } };
+
+        // The in-place update for each field. An `as = W` field is moved into `W` (reusing its
+        // buffer), updated through `W::copy_from`, and moved back, so no per-row allocation occurs.
+        let copy_fields: Vec<proc_macro2::TokenStream> = names.iter().zip(field_as_types).map(|(field, as_ty)| {
+            match as_ty {
+                Some(w) => quote! {{
+                    let mut __columnar_as: #w = ::core::mem::take(#field).into();
+                    <#w as ::columnar::Columnar>::copy_from(&mut __columnar_as, other.#field);
+                    *#field = __columnar_as.into();
+                }},
+                None => quote! { ::columnar::Columnar::copy_from(#field, other.#field); },
+            }
+        }).collect();
 
         quote! {
             impl #impl_gen ::columnar::Columnar for #name #ty_gen #where_clause2 {
                 #[inline(always)]
                 fn copy_from<'a>(&mut self, other: ::columnar::Ref<'a, Self>) {
                     #destructure_self
-                    #( ::columnar::Columnar::copy_from(#names, other.#names); )*
+                    #( #copy_fields )*
                 }
                 #[inline(always)]
                 fn into_owned<'a>(other: ::columnar::Ref<'a, Self>) -> Self {
                     #into_self
                 }
-                type Container = #c_ident < #(<#types as ::columnar::Columnar>::Container ),* >;
+                type Container = #c_ident < #(#field_container_types),* >;
             }
 
             impl < #( #container_types: ::columnar::Borrow ),* > ::columnar::Borrow for #c_ident < #( #container_types ),* > {

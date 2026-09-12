@@ -119,6 +119,21 @@ impl<BC: for<'a> Push<&'a u64>> Push<&Bytes> for Strings<BC> {
     }
 }
 
+// `Vec<u8>` and `&Vec<u8>` pushes let the derive route a `Vec<u8>` field to `Strings`
+// through `#[columnar(bytes)]` without changing the field's declared type.
+impl<BC: for<'a> Push<&'a u64>> Push<Vec<u8>> for Strings<BC> {
+    #[inline(always)] fn push(&mut self, item: Vec<u8>) {
+        self.values.extend_from_slice(&item);
+        self.bounds.push(&(self.values.len() as u64));
+    }
+}
+impl<BC: for<'a> Push<&'a u64>> Push<&Vec<u8>> for Strings<BC> {
+    #[inline(always)] fn push(&mut self, item: &Vec<u8>) {
+        self.values.extend_from_slice(item);
+        self.bounds.push(&(self.values.len() as u64));
+    }
+}
+
 impl<BC: crate::common::BorrowIndexAs<u64>> Borrow for Strings<BC, Vec<u8>> {
     type Ref<'a> = &'a [u8];
     type Borrowed<'a> = Strings<BC::Borrowed<'a>, &'a [u8]> where BC: 'a;
