@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.3](https://github.com/frankmcsherry/columnar/compare/columnar-v0.13.2...columnar-v0.13.3) - 2026-09-14
+
+### Other
+
+- Copy bitmaps a word at a time, and relocate misaligned bytes in one pass ([#121](https://github.com/frankmcsherry/columnar/pull/121))
+- Fix Push<&[T]> for Vec<T> and validate_structure on zero headers ([#120](https://github.com/frankmcsherry/columnar/pull/120))
+
 ## [0.13.2](https://github.com/frankmcsherry/columnar/compare/columnar-v0.13.1...columnar-v0.13.2) - 2026-09-09
 
 ### Other
