@@ -221,8 +221,10 @@ pub mod indexed {
             return Err("store is empty".into());
         }
         let first = store[0] as usize;
-        if first % 8 != 0 {
-            return Err(format!("first offset {} is not a multiple of 8", first));
+        // The offset table holds at least one entry (its own end), so `first` is at least 8.
+        // A zero here would otherwise underflow the `- 1` below.
+        if first < 8 || first % 8 != 0 {
+            return Err(format!("first offset {} is not a positive multiple of 8", first));
         }
         let slices = first / 8 - 1;
         if slices + 1 > store.len() {
@@ -325,6 +327,22 @@ pub mod indexed {
 
             // Wrong slice count should fail structural validation.
             assert!(super::validate_structure(&store, 5).is_err());
+        }
+
+        /// Malformed headers are reported as errors rather than panics, including a zero
+        /// first word (which would otherwise underflow when computing the slice count).
+        #[test]
+        fn validate_malformed_header() {
+            assert!(super::validate_structure(&[], 0).is_err());
+            assert!(super::validate_structure(&[0], 0).is_err());
+            assert!(super::validate_structure(&[0, 0, 0], 2).is_err());
+            assert!(super::validate_structure(&[4], 0).is_err());
+            assert!(super::validate_structure(&[16], 1).is_err());
+            assert!(super::validate_structure(&[8], 0).is_ok());
+
+            use crate::bytes::stash::Stash;
+            let stash: Result<Stash<ContainerOf<(u64, String)>, Vec<u8>>, String> = Stash::try_from_bytes(vec![0u8; 16]);
+            assert!(stash.is_err());
         }
 
         #[test]
