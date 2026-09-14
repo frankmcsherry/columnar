@@ -464,6 +464,16 @@ pub mod rank_select {
         #[inline]
         pub fn push(&mut self, bit: bool) {
             self.values.push(&bit);
+            self.update_counts();
+        }
+        /// Appends the bits of `other` in `range`, a word at a time, maintaining the cumulative counts.
+        pub fn extend_from_self<CC2, VC2: Len + IndexAs<u64>, WC2: IndexAs<u64>>(&mut self, other: &RankSelect<CC2, VC2, WC2>, range: core::ops::Range<usize>) {
+            self.values.extend_bits_from(&other.values, range);
+            self.update_counts();
+        }
+        /// Extends `counts` to cover each newly completed chunk of `values`.
+        #[inline]
+        fn update_counts(&mut self) {
             while self.counts.len() < self.values.len() / BITS_PER_CHUNK {
                 let mut count = self.counts.last().unwrap_or(0);
                 let lower = WORDS_PER_CHUNK * self.counts.len();
@@ -473,6 +483,13 @@ pub mod rank_select {
                 }
                 self.counts.push(&count);
             }
+        }
+    }
+    impl RankSelect {
+        /// Reserves capacity for the counts and words of `selves`.
+        pub fn reserve_for<'a, I>(&mut self, selves: I) where I: Iterator<Item = RankSelect<&'a [u64], &'a [u64], &'a [u64]>> + Clone {
+            self.counts.reserve(selves.clone().map(|x| x.counts.len()).sum::<usize>());
+            self.values.values.reserve(selves.map(|x| x.values.values.len()).sum::<usize>());
         }
     }
     impl<CC: Clear, VC: Clear> Clear for RankSelect<CC, VC> {
@@ -665,6 +682,37 @@ pub mod rank_select {
             assert_eq!(cur.seek_to_rank(10_000), None);
         }
 
+        /// `extend_from_self` agrees with pushing one bit at a time, and the ranks and selects of
+        /// the result agree with a naive count, for random sources, targets and ranges.
+        #[test]
+        fn extend_from_self_matches_push() {
+            use crate::sums::test_util::Lcg;
+            let mut rng = Lcg(7);
+            for _ in 0..200 {
+                let source_bits: Vec<bool> = (0..(rng.next() % 5000)).map(|_| rng.next() % 4 == 0).collect();
+                let source = build(&source_bits);
+                let mut expected: Vec<bool> = (0..(rng.next() % 3000)).map(|_| rng.next() % 4 == 0).collect();
+                let mut target = build(&expected);
+                let lower = (rng.next() as usize) % (source_bits.len() + 1);
+                let upper = lower + (rng.next() as usize) % (source_bits.len() - lower + 1);
+                target.extend_from_self(&source, lower .. upper);
+                expected.extend_from_slice(&source_bits[lower .. upper]);
+                assert_eq!(target.len(), expected.len());
+                assert_eq!(target.counts.len(), expected.len() / super::BITS_PER_CHUNK);
+                let mut ones = 0u64;
+                for (i, &b) in expected.iter().enumerate() {
+                    assert_eq!(target.rank(i), ones as usize, "rank({i})");
+                    assert_eq!(target.get(i), b, "get({i})");
+                    if b {
+                        assert_eq!(target.select(ones), Some(i), "select({ones})");
+                        ones += 1;
+                    }
+                }
+                assert_eq!(target.rank(expected.len()), ones as usize);
+                assert_eq!(target.select(ones), None);
+            }
+        }
+
         #[test]
         fn select_in_word_basic() {
             use super::select_in_word;
@@ -747,27 +795,21 @@ pub mod result {
         #[inline(always)]
         fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
             if !range.is_empty() {
-                // Starting offsets of each variant in `other`.
+                // The `Ok` and `Err` variants in `range` each occupy a contiguous range of their container,
+                // located by the number of `Ok` variants before the start and end of `range`.
                 let oks_start = other.indexes.rank(range.start);
+                let oks_end = other.indexes.rank(range.end);
                 let errs_start = range.start - oks_start;
+                let errs_end = range.end - oks_end;
 
-                // Count the number of `Ok` and `Err` variants as we push, to determine the range.
-                // TODO: This could probably be `popcnt` somehow.
-                let mut oks = 0;
-                for index in range.clone() {
-                    let bit = other.indexes.get(index);
-                    self.indexes.push(bit);
-                    if bit { oks += 1; }
-                }
-                let errs = range.len() - oks;
-
-                self.oks.extend_from_self(other.oks, oks_start .. oks_start + oks);
-                self.errs.extend_from_self(other.errs, errs_start .. errs_start + errs);
+                self.indexes.extend_from_self(&other.indexes, range);
+                self.oks.extend_from_self(other.oks, oks_start .. oks_end);
+                self.errs.extend_from_self(other.errs, errs_start .. errs_end);
             }
         }
 
         fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
-            // TODO: reserve room in `self.indexes`.
+            self.indexes.reserve_for(selves.clone().map(|x| x.indexes));
             self.oks.reserve_for(selves.clone().map(|x| x.oks));
             self.errs.reserve_for(selves.map(|x| x.errs));
         }
@@ -961,6 +1003,31 @@ pub mod result {
                 assert_eq!(column.get(2*i+1), Err(i as u8));
             }
         }
+
+        /// `extend_from_self` agrees with pushing one element at a time, for random
+        /// sources, targets and ranges.
+        #[test]
+        fn extend_from_self_random() {
+            use alloc::vec::Vec;
+            use crate::common::{Index, Len};
+            use crate::{Borrow, Columnar, Container};
+            use crate::sums::test_util::Lcg;
+            let mut rng = Lcg(5);
+            for _ in 0..200 {
+                let source: Vec<Result<u32, u8>> = (0..(rng.next() % 3000)).map(|i| if rng.next() % 3 == 0 { Ok(i as u32) } else { Err(i as u8) }).collect();
+                let mut expected: Vec<Result<u32, u8>> = (0..(rng.next() % 1500)).map(|i| if rng.next() % 2 == 0 { Ok(100_000 + i as u32) } else { Err(!(i as u8)) }).collect();
+                let source_column: crate::ContainerOf<Result<u32, u8>> = Columnar::into_columns(source.iter().copied());
+                let mut target: crate::ContainerOf<Result<u32, u8>> = Columnar::into_columns(expected.iter().copied());
+                let lower = (rng.next() as usize) % (source.len() + 1);
+                let upper = lower + (rng.next() as usize) % (source.len() - lower + 1);
+                target.extend_from_self(source_column.borrow(), lower .. upper);
+                expected.extend_from_slice(&source[lower .. upper]);
+                assert_eq!(target.len(), expected.len());
+                for (index, item) in expected.iter().enumerate() {
+                    assert_eq!(target.get(index), *item, "item {index} of {}", expected.len());
+                }
+            }
+        }
     }
 }
 
@@ -1019,24 +1086,18 @@ pub mod option {
         #[inline(always)]
         fn extend_from_self(&mut self, other: Self::Borrowed<'_>, range: core::ops::Range<usize>) {
             if !range.is_empty() {
-                // Starting offsets of `Some` variants in `other`.
+                // The `Some` variants in `range` occupy a contiguous range of `other.somes`,
+                // located by the number of `Some` variants before the start and end of `range`.
                 let somes_start = other.indexes.rank(range.start);
+                let somes_end = other.indexes.rank(range.end);
 
-                // Count the number of `Some` variants as we push, to determine the range.
-                // TODO: This could probably be `popcnt` somehow.
-                let mut somes = 0;
-                for index in range {
-                    let bit = other.indexes.get(index);
-                    self.indexes.push(bit);
-                    if bit { somes += 1; }
-                }
-
-                self.somes.extend_from_self(other.somes, somes_start .. somes_start + somes);
+                self.indexes.extend_from_self(&other.indexes, range);
+                self.somes.extend_from_self(other.somes, somes_start .. somes_end);
             }
         }
 
         fn reserve_for<'a, I>(&mut self, selves: I) where Self: 'a, I: Iterator<Item = Self::Borrowed<'a>> + Clone {
-            // TODO: reserve room in `self.indexes`.
+            self.indexes.reserve_for(selves.clone().map(|x| x.indexes));
             self.somes.reserve_for(selves.map(|x| x.somes));
         }
     }
@@ -1196,6 +1257,41 @@ pub mod option {
             let store: Options<Vec<i32>>  = Columnar::into_columns((0..100).map(|x| if x % 2 == 0 { Some(x) } else { None }));
             assert_eq!(store.len(), 100);
             assert!((&store).index_iter().zip(0..100).all(|(a, b)| a == if b % 2 == 0 { Some(&b) } else { None }));
+        }
+
+        /// `extend_from_self` agrees with pushing one element at a time, for random
+        /// sources, targets and ranges.
+        #[test]
+        fn extend_from_self_random() {
+            use crate::{Borrow, Container};
+            use crate::sums::test_util::Lcg;
+            let mut rng = Lcg(3);
+            for _ in 0..200 {
+                let source: Vec<Option<u32>> = (0..(rng.next() % 3000)).map(|i| if rng.next() % 3 == 0 { Some(i as u32) } else { None }).collect();
+                let mut expected: Vec<Option<u32>> = (0..(rng.next() % 1500)).map(|i| if rng.next() % 2 == 0 { Some(100_000 + i as u32) } else { None }).collect();
+                let source_column: Options<Vec<u32>> = Columnar::into_columns(source.iter().copied());
+                let mut target: Options<Vec<u32>> = Columnar::into_columns(expected.iter().copied());
+                let lower = (rng.next() as usize) % (source.len() + 1);
+                let upper = lower + (rng.next() as usize) % (source.len() - lower + 1);
+                target.extend_from_self(source_column.borrow(), lower .. upper);
+                expected.extend_from_slice(&source[lower .. upper]);
+                assert_eq!(target.len(), expected.len());
+                for (index, item) in expected.iter().enumerate() {
+                    assert_eq!(target.get(index), *item, "item {index} of {}", expected.len());
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_util {
+    /// A small deterministic generator for randomized tests.
+    pub struct Lcg(pub u64);
+    impl Lcg {
+        pub fn next(&mut self) -> u64 {
+            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            self.0 >> 11
         }
     }
 }
