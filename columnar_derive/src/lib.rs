@@ -414,6 +414,45 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
     };
 
 
+    // Implementations of `Append` and `Truncate`: a handle per field, truncation per field.
+    let append = {
+
+        let a_name = format!("{}Appender", name);
+        let a_ident = syn::Ident::new(&a_name, name.span());
+
+        quote! {
+            /// Derived appender for a struct, with a handle onto each field.
+            #vis struct #a_ident < 'columnar, #(#container_types: ::columnar::Append),* > where #(#container_types: 'columnar),* {
+                #(
+                    /// Handle for #names.
+                    pub #names : <#container_types as ::columnar::Append>::Appender<'columnar>,
+                )*
+            }
+
+            impl < 'columnar, #(#container_types: ::columnar::Append),* > ::columnar::Appender for #a_ident < 'columnar, #(#container_types),* > where #(#container_types: 'columnar),* {
+                #[inline]
+                fn abort(self) {
+                    #( ::columnar::Appender::abort(self.#names); )*
+                }
+            }
+
+            impl < #(#container_types: ::columnar::Append),* > ::columnar::Append for #c_ident < #(#container_types),* > {
+                type Appender<'columnar> = #a_ident < 'columnar, #(#container_types),* > where #(#container_types: 'columnar),*;
+                #[inline]
+                fn appender(&mut self) -> Self::Appender<'_> {
+                    #a_ident { #(#names: ::columnar::Append::appender(&mut self.#names),)* }
+                }
+            }
+
+            impl < #(#container_types: ::columnar::Truncate),* > ::columnar::Truncate for #c_ident < #(#container_types),* > {
+                #[inline]
+                fn truncate(&mut self, len: usize) {
+                    #( ::columnar::Truncate::truncate(&mut self.#names, len); )*
+                }
+            }
+        }
+    };
+
     quote! {
 
         #container_struct
@@ -434,6 +473,8 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         #from_bytes
 
         #columnar_impl
+
+        #append
 
     }.into()
 }
@@ -532,6 +573,21 @@ fn derive_unit_struct(name: &syn::Ident, _generics: &syn::Generics, vis: syn::Vi
             fn element_sizes(sizes: &mut ::columnar::_derive::Vec<usize>) -> ::core::result::Result<(), ::columnar::_derive::String> {
                 sizes.push(8);
                 Ok(())
+            }
+        }
+
+        impl ::columnar::Append for #c_ident {
+            type Appender<'columnar> = ::columnar::append::ValueAppender<'columnar, #name, Self>;
+            #[inline]
+            fn appender(&mut self) -> Self::Appender<'_> {
+                ::columnar::append::ValueAppender::new(self, #name)
+            }
+        }
+
+        impl ::columnar::Truncate for #c_ident {
+            #[inline(always)]
+            fn truncate(&mut self, len: usize) {
+                self.count = self.count.min(len as u64);
             }
         }
 
@@ -1134,6 +1190,83 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
         }
     };
 
+    // Implementations of `Append` and `Truncate`. The appender chooses a variant
+    // through a method named after it, which yields a handle onto that variant's
+    // container wrapped so that the discriminant is recorded on commit.
+    let append = {
+
+        let a_name = format!("{}Appender", name);
+        let a_ident = syn::Ident::new(&a_name, name.span());
+
+        let numbers = &(0 .. variants.len()).map(|i| i as u8).collect::<Vec<_>>();
+        let removed_idents = &names.iter().map(|n| syn::Ident::new(&format!("removed_{}", n.to_string().to_lowercase()), n.span())).collect::<Vec<_>>();
+
+        quote! {
+            /// Derived appender for an enum. Choose a variant to obtain a handle onto its fields.
+            ///
+            /// Dropping the appender without choosing a variant adds no element.
+            #vis struct #a_ident < 'columnar, #(#container_types),* > {
+                container: &'columnar mut #c_ident < #(#container_types),* >,
+            }
+
+            #[allow(non_snake_case)]
+            impl < 'columnar, #(#container_types: ::columnar::Append + ::columnar::Len),* > #a_ident < 'columnar, #(#container_types),* > {
+                #(
+                    /// Chooses variant #names and returns a handle onto its fields.
+                    #[inline]
+                    pub fn #names(self) -> ::columnar::append::DiscriminantAppender<'columnar, <#container_types as ::columnar::Append>::Appender<'columnar>> {
+                        let container = self.container;
+                        let offset = ::columnar::Len::len(&container.#names) as u64;
+                        ::columnar::append::DiscriminantAppender::new(
+                            ::columnar::Append::appender(&mut container.#names),
+                            &mut container.indexes,
+                            #numbers,
+                            offset,
+                        )
+                    }
+                )*
+            }
+
+            impl < 'columnar, #(#container_types),* > ::columnar::Appender for #a_ident < 'columnar, #(#container_types),* > {
+                #[inline(always)]
+                fn abort(self) { }
+            }
+
+            impl < #(#container_types: ::columnar::Append + ::columnar::Len),* > ::columnar::Append for #c_ident < #(#container_types),* > {
+                type Appender<'columnar> = #a_ident < 'columnar, #(#container_types),* > where #(#container_types: 'columnar),*;
+                #[inline]
+                fn appender(&mut self) -> Self::Appender<'_> {
+                    #a_ident { container: self }
+                }
+            }
+
+            impl < #(#container_types: ::columnar::Truncate + ::columnar::Len),* > ::columnar::Truncate for #c_ident < #(#container_types),* > {
+                fn truncate(&mut self, len: usize) {
+                    let current = ::columnar::Len::len(&self.indexes);
+                    if len < current {
+                        if let Some(variant) = self.indexes.homogeneous() {
+                            match variant {
+                                #( #numbers => ::columnar::Truncate::truncate(&mut self.#names, len), )*
+                                x => panic!("Unacceptable discriminant found: {:?}", x),
+                            }
+                        } else {
+                            // Count removed elements per variant, then shorten each variant container.
+                            #( let mut #removed_idents = 0usize; )*
+                            for index in len .. current {
+                                match self.indexes.variant[index] {
+                                    #( #numbers => #removed_idents += 1, )*
+                                    x => panic!("Unacceptable discriminant found: {:?}", x),
+                                }
+                            }
+                            #( let keep = ::columnar::Len::len(&self.#names) - #removed_idents; ::columnar::Truncate::truncate(&mut self.#names, keep); )*
+                        }
+                        ::columnar::Truncate::truncate(&mut self.indexes, len);
+                    }
+                }
+            }
+        }
+    };
+
     let try_unwrap = {
         let impl_gen = quote! { < #(#container_types),* > };
         let ty_gen = quote! { < #(#container_types),* > };
@@ -1179,6 +1312,8 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
 
         #try_unwrap
 
+        #append
+
     }.into()
 }
 
@@ -1205,6 +1340,21 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
     let derive = quote! { #[derive(Copy, Clone, Debug, Default, serde::Serialize, serde::Deserialize)] };
     #[cfg(not(feature = "serde"))]
     let derive = quote! { #[derive(Copy, Clone, Debug, Default)] };
+
+    // Zero-variant enums have no value to start an appender from.
+    let append = if let Some(first) = names.first() {
+        quote! {
+            impl<CV: ::columnar::common::PushIndexAs<u8>> ::columnar::Append for #c_ident<CV> {
+                type Appender<'columnar> = ::columnar::append::ValueAppender<'columnar, #name, Self> where CV: 'columnar;
+                #[inline]
+                fn appender(&mut self) -> Self::Appender<'_> {
+                    ::columnar::append::ValueAppender::new(self, #name::#first)
+                }
+            }
+        }
+    } else {
+        quote! { }
+    };
 
     quote! {
         /// Derived columnar container for all-unit enum.
@@ -1299,6 +1449,15 @@ fn derive_tags(name: &syn::Ident, _generics: &syn:: Generics, data_enum: syn::Da
             #[inline(always)]
             fn into_owned<'a>(other: ::columnar::Ref<'a, Self>) -> Self { other }
             type Container = #c_ident;
+        }
+
+        #append
+
+        impl<CVar: ::columnar::Truncate> ::columnar::Truncate for #c_ident <CVar> {
+            #[inline(always)]
+            fn truncate(&mut self, len: usize) {
+                ::columnar::Truncate::truncate(&mut self.variant, len);
+            }
         }
 
         impl<CV: ::columnar::common::BorrowIndexAs<u8>> ::columnar::Borrow for #c_ident <CV> {

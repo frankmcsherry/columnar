@@ -289,4 +289,83 @@ mod test {
     struct BoxedStr {
         value: Box<str>,
     }
+
+    #[test]
+    fn derived_append() {
+        use std::fmt::Write;
+        use columnar::{Append, Appender, Index, Len, Truncate};
+
+        // Struct: a handle per field.
+        let mut events: columnar::ContainerOf<Test6> = Default::default();
+        *events.appender().bar = 3;
+        {
+            let mut a = events.appender();
+            *a.bar = 4;
+            a.abort();
+        }
+        assert_eq!(events.len(), 1);
+        assert_eq!((&events).get(0).bar, 3);
+        events.truncate(0);
+        assert_eq!(events.len(), 0);
+
+        // Enum with fields: choose a variant, then fill its fields.
+        let mut test7: columnar::ContainerOf<Test7> = Default::default();
+        {
+            let mut click = test7.appender().Click();
+            *click.0 = 1;
+            *click.1 = 2;
+        }
+        **test7.appender().Scroll() = -1;
+        test7.appender().Idle();
+        test7.appender();
+        {
+            let mut s = test7.appender().Scroll();
+            **s = -9;
+            s.abort();
+        }
+        assert_eq!(test7.len(), 3);
+        assert!(matches!((&test7).get(0), Test7Reference::Click((1, 2))));
+        assert!(matches!((&test7).get(1), Test7Reference::Scroll(-1)));
+        assert!(matches!((&test7).get(2), Test7Reference::Idle(_)));
+        test7.truncate(2);
+        assert_eq!(test7.len(), 2);
+        assert_eq!(test7.Idle.len(), 0);
+        assert_eq!(test7.Scroll.len(), 1);
+        test7.truncate(1);
+        assert_eq!(test7.Scroll.len(), 0);
+        assert_eq!(test7.Click.len(), 1);
+
+        // Enum with a `Vec` field: nested in-place construction.
+        let mut groups: columnar::ContainerOf<super::Group<String>> = Default::default();
+        {
+            let mut team = groups.appender().Team();
+            write!(team.appender(), "alice").unwrap();
+            write!(team.appender(), "bob").unwrap();
+        }
+        write!(groups.appender().Solo(), "carol").unwrap();
+        assert_eq!(groups.len(), 2);
+        assert!(matches!((&groups).get(0), super::GroupReference::Team(team) if team.len() == 2));
+        assert!(matches!((&groups).get(1), super::GroupReference::Solo(b"carol")));
+
+        // All-unit enum and unit struct.
+        let mut tags: columnar::ContainerOf<Test4> = Default::default();
+        *tags.appender() = Test4::Bar;
+        tags.appender();
+        assert!(matches!((&tags).get(0), Test4::Bar));
+        assert!(matches!((&tags).get(1), Test4::Foo));
+        tags.truncate(1);
+        assert_eq!(tags.len(), 1);
+
+        let mut units: columnar::ContainerOf<Test5> = Default::default();
+        units.appender();
+        units.appender().abort();
+        assert_eq!(units.len(), 1);
+        units.truncate(0);
+        assert_eq!(units.len(), 0);
+
+        // Variant names that shadow prelude items.
+        let mut strange: columnar::ContainerOf<Strange> = Default::default();
+        *strange.appender() = Strange::Some;
+        assert!(matches!((&strange).get(0), Strange::Some));
+    }
 }

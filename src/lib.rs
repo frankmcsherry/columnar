@@ -18,6 +18,7 @@ extern crate columnar_derive;
 pub use columnar_derive::Columnar;
 
 pub mod adts;
+pub mod append;
 pub mod boxed;
 pub mod bytes;
 pub mod lookback;
@@ -41,6 +42,7 @@ pub mod _derive {
 }
 
 pub use vector::Vecs;
+pub use append::{Append, Appender, Truncate};
 pub use string::Strings;
 pub use sums::{rank_select::{RankSelect, Cursor as RankSelectCursor}, result::Results, option::Options, discriminant::Discriminant};
 pub use lookback::{Repeats, Lookbacks};
