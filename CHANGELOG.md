@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.4](https://github.com/frankmcsherry/columnar/compare/columnar-v0.13.3...columnar-v0.13.4) - 2026-10-29
+
+### Other
+
+- Bump actions-rust-lang/setup-rust-toolchain from 1 to 2 ([#125](https://github.com/frankmcsherry/columnar/pull/125))
+
 ## [0.13.3](https://github.com/frankmcsherry/columnar/compare/columnar-v0.13.2...columnar-v0.13.3) - 2026-10-29
 
 ### Other
