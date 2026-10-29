@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.3](https://github.com/frankmcsherry/columnar/compare/columnar_derive-v0.13.2...columnar_derive-v0.13.3) - 2026-10-29
+
+### Other
+
+- drop generic parameter defaults from impl headers ([#126](https://github.com/frankmcsherry/columnar/pull/126))
+
 ## [0.13.2](https://github.com/frankmcsherry/columnar/compare/columnar_derive-v0.13.1...columnar_derive-v0.13.2) - 2026-09-09
 
 ### Other
