@@ -35,6 +35,19 @@ fn extract_attr(attrs: &[Attribute]) -> Option<proc_macro2::TokenStream> {
     None
 }
 
+/// The type's generic parameters as an `impl` header lists them: without defaults, which an
+/// `impl` may not carry (`impl<T, const N: usize = 1>` is rejected).
+fn impl_params(generics: &syn::Generics) -> Vec<syn::GenericParam> {
+    generics.params.iter().cloned().map(|mut param| {
+        match &mut param {
+            syn::GenericParam::Type(t) => { t.eq_token = None; t.default = None; }
+            syn::GenericParam::Const(c) => { c.eq_token = None; c.default = None; }
+            syn::GenericParam::Lifetime(_) => { }
+        }
+        param
+    }).collect()
+}
+
 fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::DataStruct, vis: syn::Visibility, attr: Option<proc_macro2::TokenStream>) -> proc_macro::TokenStream {
 
     let c_name = format!("{}Container", name);
@@ -123,7 +136,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
 
         let (_impl_gen, ty_gen, _where_clause) = generics.split_for_impl();
 
-        let struct_generics = generics.params.iter();
+        let struct_generics = impl_params(generics);
         let impl_gen = quote! { < #(#struct_generics,)* #(#reference_types),* > };
 
         let where_clause = quote! { where #(#reference_types: PartialEq<#types>),* };
@@ -149,7 +162,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         let (_impl_gen, ty_gen, _where_clause) = generics.split_for_impl();
         let push = names.iter().map(|name| { quote! { self.#name.push(#name); } });
 
-        let struct_generics = generics.params.iter();
+        let struct_generics = impl_params(generics);
         let impl_gen = quote! { < #(#struct_generics,)* #(#container_types),* > };
 
         let where_clause2 = quote! { where #(#container_types: ::columnar::Push<#types>),* };
@@ -174,7 +187,7 @@ fn derive_struct(name: &syn::Ident, generics: &syn::Generics, data_struct: syn::
         let (_impl_gen, ty_gen, _where_clause) = generics.split_for_impl();
         let push = names.iter().map(|name| { quote! { self.#name.push(#name); } });
 
-        let struct_generics = generics.params.iter();
+        let struct_generics = impl_params(generics);
         let impl_gen = quote! { < 'columnar, #(#struct_generics,)* #(#container_types),* > };
 
         let where_clause2 = quote! { where #(#container_types: ::columnar::Push<&'columnar #types>),* };
@@ -698,7 +711,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
             }
         });
 
-        let struct_generics = generics.params.iter();
+        let struct_generics = impl_params(generics);
         let impl_gen = quote! { < #(#struct_generics,)* #(#container_types),* > };
 
         let push_types = variants.iter().map(|(_, types)| quote! { (#(#types),*) });
@@ -758,7 +771,7 @@ fn derive_enum(name: &syn::Ident, generics: &syn:: Generics, data_enum: syn::Dat
             }
         });
 
-        let struct_generics = generics.params.iter();
+        let struct_generics = impl_params(generics);
         let impl_gen = quote! { < 'columnar, #(#struct_generics,)* #(#container_types),* > };
 
         let push_types = variants.iter().map(|(_, types)| quote! { (#(&'columnar #types),*) });

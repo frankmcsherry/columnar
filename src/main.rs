@@ -6,6 +6,12 @@ enum Group<T> {
     Team(Vec<T>),
 }
 
+/// Defaulted generic parameters, which the derived `impl`s must not repeat.
+#[derive(Columnar)]
+struct Window<T = u64, const N: usize = 2> {
+    items: [T; N],
+}
+
 fn main() {
 
     let mut roster = Vec::new();
@@ -16,6 +22,10 @@ fn main() {
         ("Bob".to_string(), 21),
         ("Carol".to_string(), 22),
     ]));
+
+    let mut windows = Columnar::as_columns([Window { items: [1u64, 2] }].iter());
+    windows.push(Window { items: [3, 4] });
+    assert_eq!(columnar::Len::len(&windows), 2);
 
     // An appendable replacement for `&[T]`: indexable, shareable.
     // Layout in memory is a small number of contiguous buffers,
